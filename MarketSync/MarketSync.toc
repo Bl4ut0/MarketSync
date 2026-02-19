@@ -1,0 +1,26 @@
+## Interface: 120001, 120000, 50503, 38000, 20505, 11508
+## Title: MarketSync
+## Notes: The Guild Auction DB - Sync prices, check history, and browse offline.
+## Author: Gemini
+## Version: 0.4.0-beta
+## SavedVariables: MarketSyncDB
+## Dependencies: Auctionator
+
+# Config: shared globals, DB init, helpers
+Config.lua
+
+# Sync: protocol, data merging, passive/bulk sync
+Sync.lua
+
+# Chat: event handler for addon messages and chat queries
+Chat.lua
+
+# UI Components: browse panel & history detail view
+UI_Browse.lua
+UI_History.lua
+
+# UI Main: frame shell, tabs, settings
+UI_Main.lua
+
+# Core: minimap, slash commands, ADDON_LOADED
+Core.lua
