@@ -119,17 +119,33 @@ local function CreateMainFrame()
     MainFrame.syncMonitor = syncMonitor
     
     function MarketSync.UpdateNetworkUI(txRate, rxRate, statusText)
-        if not MainFrame or not MainFrame.syncMonitor then return end
-        if statusText then
-            MainFrame.syncMonitor:SetText(statusText)
-        elseif txRate > 0 and rxRate > 0 then
-            MainFrame.syncMonitor:SetText(string.format("|cff00ff00Rx: %d/s|r   |cffff8800Tx: %d/s|r", rxRate, txRate))
-        elseif txRate > 0 then
-            MainFrame.syncMonitor:SetText(string.format("|cffff8800Sending: %d items/sec|r", txRate))
-        elseif rxRate > 0 then
-            MainFrame.syncMonitor:SetText(string.format("|cff00ff00Receiving: %d items/sec|r", rxRate))
-        else
-            MainFrame.syncMonitor:SetText("|cff888888Network: Idle|r")
+        if MainFrame and MainFrame.syncMonitor then
+            if statusText then
+                MainFrame.syncMonitor:SetText(statusText)
+            elseif txRate > 0 and rxRate > 0 then
+                MainFrame.syncMonitor:SetText(string.format("|cff00ff00Rx: %d/s|r   |cffff8800Tx: %d/s|r", rxRate, txRate))
+            elseif txRate > 0 then
+                MainFrame.syncMonitor:SetText(string.format("|cffff8800Sending: %d items/sec|r", txRate))
+            elseif rxRate > 0 then
+                MainFrame.syncMonitor:SetText(string.format("|cff00ff00Receiving: %d items/sec|r", rxRate))
+            else
+                MainFrame.syncMonitor:SetText("|cff888888Network: Idle|r")
+            end
+        end
+
+        if MarketSyncMonitorFrame and MarketSyncMonitorFrame:IsShown() then
+            MarketSyncMonitorFrame.txLabel:SetText(string.format("|cffff8800Tx: %d items/s|r", txRate))
+            MarketSyncMonitorFrame.rxLabel:SetText(string.format("|cff00ff00Rx: %d items/s|r", rxRate))
+            
+            if statusText then
+                MarketSyncMonitorFrame.queueLabel:SetText(statusText)
+            elseif txRate > 0 or rxRate > 0 then
+                MarketSyncMonitorFrame.queueLabel:SetText("|cff00ff00Sync Active|r")
+            elseif not IsInGuild() then
+                MarketSyncMonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Disabled (No Guild)|r")
+            else
+                MarketSyncMonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Idle|r")
+            end
         end
     end
 

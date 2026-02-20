@@ -187,25 +187,7 @@ function MarketSync.ToggleNetworkMonitor()
     end
 end
 
--- Hook into UpdateNetworkUI to update the Stats Panel
-local originalUpdateUI = MarketSync.UpdateNetworkUI
-function MarketSync.UpdateNetworkUI(txRate, rxRate, statusText)
-    if originalUpdateUI then originalUpdateUI(txRate, rxRate, statusText) end
-    if not MonitorFrame or not MonitorFrame:IsShown() then return end
-    
-    MonitorFrame.txLabel:SetText(string.format("|cffff8800Tx: %d msgs/s|r", txRate))
-    MonitorFrame.rxLabel:SetText(string.format("|cff00ff00Rx: %d msgs/s|r", rxRate))
-    
-    if statusText then
-        MonitorFrame.queueLabel:SetText(statusText)
-    elseif txRate > 0 or rxRate > 0 then
-        MonitorFrame.queueLabel:SetText("|cff00ff00Sync Active|r")
-    elseif not IsInGuild() then
-        MonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Disabled (No Guild)|r")
-    else
-        MonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Idle|r")
-    end
-end
+-- (Removed UpdateNetworkUI hook; now natively handled by UI_Main.lua)
 
 -- Function to add log entries
 function MarketSync.LogNetworkEvent(msg)
