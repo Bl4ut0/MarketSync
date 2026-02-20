@@ -47,7 +47,7 @@ local function GetItemHistory(dbKey)
     if not priceData or not priceData.h then return {} end
 
     local history = {}
-    local meta = MarketSyncDB and MarketSyncDB.ItemMetadata and MarketSyncDB.ItemMetadata[dbKey]
+    local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
 
     for dayStr, highPrice in pairs(priceData.h) do
         local day = tonumber(dayStr)
@@ -669,23 +669,21 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
         elseif self.sourceTab == "guild" then
             local latestUser, latestTime = nil, 0
             local syncedItems = 0
-            if MarketSyncDB and MarketSyncDB.SyncStats then
-                for user, stats in pairs(MarketSyncDB.SyncStats) do
+            if MarketSyncDB and MarketSync.GetRealmDB().SyncStats then
+                for user, stats in pairs(MarketSync.GetRealmDB().SyncStats) do
                     if stats.last and stats.last > latestTime then
                         latestTime = stats.last
                         latestUser = user
                     end
                 end
             end
-            if MarketSyncDB and MarketSyncDB.ItemMetadata then
-                for _ in pairs(MarketSyncDB.ItemMetadata) do syncedItems = syncedItems + 1 end
+            if MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
+                for _ in pairs(MarketSync.GetRealmDB().ItemMetadata) do syncedItems = syncedItems + 1 end
             end
             if latestUser then
-                local timeStr = date("%H:%M", latestTime)
-                local tzStr = date("%Z", latestTime) or ""
-                tzStr = tzStr:match("^%a+") or tzStr
+                local timeStr = MarketSync.FormatRealmTime(latestTime)
                 local shortName = latestUser:match("^([^%-]+)") or latestUser
-                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. tzStr .. " " .. shortName .. "|r")
+                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. shortName .. "|r")
                 self.syncLabel:SetText("|cff00ff00Last Guild Sync|r")
             else
                 self.statusText:SetText("|cffff8800No sync data yet|r")

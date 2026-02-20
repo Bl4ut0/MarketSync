@@ -78,13 +78,14 @@ end)
 -- LOCAL SCAN SNAPSHOT (Duplicating Personal Data)
 -- ================================================================
 function MarketSync.SnapshotPersonalScan()
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return end
-    if not MarketSyncDB.PersonalData then MarketSyncDB.PersonalData = {} end
+    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return 0, 0 end
+    if not MarketSync.GetRealmDB().PersonalData then MarketSync.GetRealmDB().PersonalData = {} end
     
-    wipe(MarketSyncDB.PersonalData)
+    wipe(MarketSync.GetRealmDB().PersonalData)
     
     local today = MarketSync.GetCurrentScanDay()
     local count = 0
+    local todayCount = 0
     
     for dbKey, data in pairs(Auctionator.Database.db) do
         -- Only copy price and day if the item was seen TODAY and it's not a fresh guild sync.
@@ -100,17 +101,22 @@ function MarketSync.SnapshotPersonalScan()
                 end
             end
             if data.m and data.m > 0 then
-                MarketSyncDB.PersonalData[dbKey] = { m = data.m, d = lastSeenDay }
+                MarketSync.GetRealmDB().PersonalData[dbKey] = { m = data.m, d = lastSeenDay }
                 count = count + 1
+                if lastSeenDay == today then
+                    todayCount = todayCount + 1
+                end
             end
         end
     end
     
-    Debug("SnapshotPersonalScan: Duplicated " .. count .. " items into Personal storage.")
+    Debug("SnapshotPersonalScan: Duplicated " .. count .. " items (" .. todayCount .. " from today) into Personal storage.")
     
-    if MarketSyncDB.DebugMode then
+    if MarketSyncDB and MarketSyncDB.DebugMode then
         print("|cFF00FF00[MarketSync]|r Duplicated " .. count .. " items into Personal cache.")
     end
+    
+    return count, todayCount
 end
 
 -- ================================================================
@@ -122,8 +128,8 @@ function MarketSync.GetMyLatestScanDay()
     local today = MarketSync.GetCurrentScanDay()
     
     -- If we have a cached day and it is "today", trust the cache
-    if MarketSyncDB and MarketSyncDB.CachedScanStats and MarketSyncDB.CachedScanStats.day == today then
-        return MarketSyncDB.CachedScanStats.day
+    if MarketSyncDB and MarketSync.GetRealmDB().CachedScanStats and MarketSync.GetRealmDB().CachedScanStats.day == today then
+        return MarketSync.GetRealmDB().CachedScanStats.day
     end
     
     local best = 0
@@ -144,8 +150,8 @@ function MarketSync.CountRecentItems(sinceDay)
     local today = MarketSync.GetCurrentScanDay()
     
     -- If we have cached stats for the requested day, trust the cache
-    if MarketSyncDB and MarketSyncDB.CachedScanStats and MarketSyncDB.CachedScanStats.day == sinceDay then
-        return MarketSyncDB.CachedScanStats.count
+    if MarketSyncDB and MarketSync.GetRealmDB().CachedScanStats and MarketSync.GetRealmDB().CachedScanStats.day == sinceDay then
+        return MarketSync.GetRealmDB().CachedScanStats.count
     end
     
     local count = 0
@@ -163,7 +169,7 @@ function MarketSync.CountRecentItems(sinceDay)
     
     -- Cache the result if we are checking "today" to save CPU on future ADVs
     if MarketSyncDB and sinceDay == today then
-        MarketSyncDB.CachedScanStats = { day = sinceDay, count = count }
+        MarketSync.GetRealmDB().CachedScanStats = { day = sinceDay, count = count }
     end
     
     return count
@@ -179,9 +185,13 @@ function MarketSync.SendAdvertisement()
     myRecentItemCount = MarketSync.CountRecentItems(myLatestScanDay)
     if myLatestScanDay > 0 and myRecentItemCount > 0 then
         local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or "0.0.0"
-        local payload = string.format("ADV;%s;%d;%d;%s", MarketSync.myRealm, myLatestScanDay, myRecentItemCount, localVersion)
+        local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalScanTime) or 0
+        local payload = string.format("ADV;%s;%d;%d;%s;%s", MarketSync.myRealm, myLatestScanDay, myRecentItemCount, localVersion, tostring(myScanTime))
         C_ChatInfo.SendAddonMessage(PREFIX, payload, "GUILD")
-        Debug("Sent ADV: realm=" .. MarketSync.myRealm .. " day=" .. myLatestScanDay .. " items=" .. myRecentItemCount .. " v=" .. localVersion)
+        if MarketSync.LogNetworkEvent then
+            MarketSync.LogNetworkEvent(string.format("Outgoing |cff00ffff[ADV]|r to Guild (Day %d, %d items, TSF: %d, v%s)", myLatestScanDay, myRecentItemCount, myScanTime, localVersion))
+        end
+        Debug("Sent ADV: realm=" .. MarketSync.myRealm .. " day=" .. myLatestScanDay .. " items=" .. myRecentItemCount .. " tsf=" .. myScanTime .. " v=" .. localVersion)
     end
 end
 
@@ -190,6 +200,9 @@ function MarketSync.SendPullRequest(sinceDay)
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
     local payload = string.format("PULL;%s;%d", MarketSync.myRealm, sinceDay)
     C_ChatInfo.SendAddonMessage(PREFIX, payload, "GUILD")
+    if MarketSync.LogNetworkEvent then
+        MarketSync.LogNetworkEvent(string.format("Outgoing |cffff8800[PULL]|r to Guild (Since Day %d)", sinceDay))
+    end
     Debug("Sent PULL: realm=" .. MarketSync.myRealm .. " sinceDay=" .. sinceDay)
 end
 
@@ -221,6 +234,9 @@ function MarketSync.SendPullAccept(sinceDay)
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
     local payload = string.format("ACCEPT;%s;%d", MarketSync.myRealm, sinceDay)
     C_ChatInfo.SendAddonMessage(PREFIX, payload, "GUILD")
+    if MarketSync.LogNetworkEvent then
+        MarketSync.LogNetworkEvent(string.format("Outgoing |cff00ff00[ACCEPT]|r to Guild (Claiming PULL for Day %d)", sinceDay))
+    end
 end
 
 function MarketSync.RegisterPullAccept(sinceDay, senderName)
@@ -488,13 +504,13 @@ function MarketSync.UpdateLocalDB(itemLink, price, day, quantity, sender)
 
         if sender and (historyUpdated or incomingScanDay >= maxDay) then
             TrackSync(sender, 1)
-            if not MarketSyncDB.ItemMetadata then MarketSyncDB.ItemMetadata = {} end
+            if not MarketSync.GetRealmDB().ItemMetadata then MarketSync.GetRealmDB().ItemMetadata = {} end
             
             -- Per-day attribution: each scan day credits the actual sender
-            local meta = MarketSyncDB.ItemMetadata[key]
+            local meta = MarketSync.GetRealmDB().ItemMetadata[key]
             if not meta then
                 meta = { days = {}, lastSource = sender, lastTime = time() }
-                MarketSyncDB.ItemMetadata[key] = meta
+                MarketSync.GetRealmDB().ItemMetadata[key] = meta
             end
             if not meta.days then meta.days = {} end
             
@@ -514,9 +530,9 @@ function MarketSync.UpdateLocalDB(itemLink, price, day, quantity, sender)
         end
 
         -- Log to History
-        if not MarketSyncDB.HistoryLog then MarketSyncDB.HistoryLog = {} end
-        table.insert(MarketSyncDB.HistoryLog, 1, { link = itemLink, price = price, sender = sender or "Self", time = time() })
-        if #MarketSyncDB.HistoryLog > 100 then table.remove(MarketSyncDB.HistoryLog) end
+        if not MarketSync.GetRealmDB().HistoryLog then MarketSync.GetRealmDB().HistoryLog = {} end
+        table.insert(MarketSync.GetRealmDB().HistoryLog, 1, { link = itemLink, price = price, sender = sender or "Self", time = time() })
+        if #MarketSync.GetRealmDB().HistoryLog > 100 then table.remove(MarketSync.GetRealmDB().HistoryLog) end
     end)
 end
 

@@ -300,14 +300,14 @@ local function CreateMainFrame()
         
         local list = {}
         if leaderboardMode == "alltime" then
-            if MarketSyncDB and MarketSyncDB.SyncStats then
-                for u, s in pairs(MarketSyncDB.SyncStats) do
+            if MarketSyncDB and MarketSync.GetRealmDB().SyncStats then
+                for u, s in pairs(MarketSync.GetRealmDB().SyncStats) do
                     table.insert(list, {name=u, count=s.count, last=s.last})
                 end
             end
         else
-            if MarketSyncDB and MarketSyncDB.WeeklySyncStats and MarketSyncDB.WeeklySyncStats.data then
-                for u, s in pairs(MarketSyncDB.WeeklySyncStats.data) do
+            if MarketSyncDB and MarketSync.GetRealmDB().WeeklySyncStats and MarketSync.GetRealmDB().WeeklySyncStats.data then
+                for u, s in pairs(MarketSync.GetRealmDB().WeeklySyncStats.data) do
                     table.insert(list, {name=u, count=s.count, last=s.last})
                 end
             end
@@ -533,7 +533,7 @@ local function CreateMainFrame()
     speedHeader:SetText("|cffffd700Cache Build Speed|r")
 
     local speedSlider = CreateFrame("Slider", nil, SettingsContent, "OptionsSliderTemplate")
-    speedSlider:SetPoint("TOPLEFT", speedHeader, "BOTTOMLEFT", 5, -14)
+    speedSlider:SetPoint("TOPLEFT", speedHeader, "BOTTOMLEFT", 10, -16)
     speedSlider:SetWidth(180)
     speedSlider:SetMinMaxValues(1, 4)
     speedSlider:SetValueStep(1)
@@ -541,19 +541,21 @@ local function CreateMainFrame()
     speedSlider.Low:SetText("1")
     speedSlider.High:SetText("4")
 
-    -- Make slider stand out with a backdrop
-    local sBack = CreateFrame("Frame", nil, speedSlider, "BackdropTemplate")
-    sBack:SetPoint("TOPLEFT", -10, 10)
-    sBack:SetPoint("BOTTOMRIGHT", 10, -10)
-    sBack:SetFrameLevel(math.max(0, speedSlider:GetFrameLevel() - 1))
-    sBack:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 }
+    -- Add a clean, thin track line behind the thumb so it feels anchored
+    local sliderTrack = speedSlider:CreateTexture(nil, "BACKGROUND")
+    sliderTrack:SetColorTexture(0.2, 0.2, 0.2, 0.8)
+    sliderTrack:SetHeight(4)
+    sliderTrack:SetPoint("LEFT", speedSlider, "LEFT", 4, 0)
+    sliderTrack:SetPoint("RIGHT", speedSlider, "RIGHT", -4, 0)
+
+    local sliderTrackBorder = CreateFrame("Frame", nil, speedSlider, "BackdropTemplate")
+    sliderTrackBorder:SetPoint("TOPLEFT", sliderTrack, "TOPLEFT", -1, 1)
+    sliderTrackBorder:SetPoint("BOTTOMRIGHT", sliderTrack, "BOTTOMRIGHT", 1, -1)
+    sliderTrackBorder:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
     })
-    sBack:SetBackdropColor(0.1, 0.1, 0.1, 0.6)
-    sBack:SetBackdropBorderColor(0.6, 0.6, 0.6, 0.6)
+    sliderTrackBorder:SetBackdropBorderColor(0, 0, 0, 1)
 
     local speedLabel = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     speedLabel:SetPoint("LEFT", speedSlider, "RIGHT", 18, 0)
@@ -561,8 +563,7 @@ local function CreateMainFrame()
     speedLabel:SetJustifyH("LEFT")
 
     local speedDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    -- Increased gap to -20 to avoid touching the slider numbers
-    speedDesc:SetPoint("TOPLEFT", speedSlider, "BOTTOMLEFT", -5, -20)
+    speedDesc:SetPoint("TOPLEFT", speedSlider, "BOTTOMLEFT", -10, -12)
     speedDesc:SetWidth(310)
     speedDesc:SetJustifyH("LEFT")
 
@@ -635,13 +636,13 @@ local function CreateMainFrame()
             button2 = "No",
             OnAccept = function()
                 if MarketSyncDB then
-                    if MarketSyncDB.PersonalData then wipe(MarketSyncDB.PersonalData) end
-                    if MarketSyncDB.ItemMetadata then wipe(MarketSyncDB.ItemMetadata) end
-                    if MarketSyncDB.HistoryLog then wipe(MarketSyncDB.HistoryLog) end
-                    if MarketSyncDB.SyncStats then wipe(MarketSyncDB.SyncStats) end
-                    if MarketSyncDB.WeeklySyncStats and MarketSyncDB.WeeklySyncStats.data then wipe(MarketSyncDB.WeeklySyncStats.data) end
-                    MarketSyncDB.PersonalScanTime = nil
-                    MarketSyncDB.CachedScanStats = nil
+                    if MarketSync.GetRealmDB().PersonalData then wipe(MarketSync.GetRealmDB().PersonalData) end
+                    if MarketSync.GetRealmDB().ItemMetadata then wipe(MarketSync.GetRealmDB().ItemMetadata) end
+                    if MarketSync.GetRealmDB().HistoryLog then wipe(MarketSync.GetRealmDB().HistoryLog) end
+                    if MarketSync.GetRealmDB().SyncStats then wipe(MarketSync.GetRealmDB().SyncStats) end
+                    if MarketSync.GetRealmDB().WeeklySyncStats and MarketSync.GetRealmDB().WeeklySyncStats.data then wipe(MarketSync.GetRealmDB().WeeklySyncStats.data) end
+                    MarketSync.GetRealmDB().PersonalScanTime = nil
+                    MarketSync.GetRealmDB().CachedScanStats = nil
                 end
                 
                 if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
@@ -751,7 +752,7 @@ local function CreateMainFrame()
         local count = 0
 
         local allUsers = {}
-        if MarketSyncDB and MarketSyncDB.SyncStats then for u,_ in pairs(MarketSyncDB.SyncStats) do allUsers[u]=true end end
+        if MarketSyncDB and MarketSync.GetRealmDB().SyncStats then for u,_ in pairs(MarketSync.GetRealmDB().SyncStats) do allUsers[u]=true end end
         if MarketSyncDB and MarketSyncDB.BlockedUsers then for u,_ in pairs(MarketSyncDB.BlockedUsers) do allUsers[u]=true end end
 
         local sortedUsers = {}
@@ -839,11 +840,11 @@ local function CreateMainFrame()
             for _ in pairs(Auctionator.Database.db) do totalItems = totalItems + 1 end
         end
         if MarketSyncDB then
-            if MarketSyncDB.ItemMetadata then
-                for _ in pairs(MarketSyncDB.ItemMetadata) do syncedItems = syncedItems + 1 end
+            if MarketSync.GetRealmDB().ItemMetadata then
+                for _ in pairs(MarketSync.GetRealmDB().ItemMetadata) do syncedItems = syncedItems + 1 end
             end
-            if MarketSyncDB.SyncStats then
-                for _ in pairs(MarketSyncDB.SyncStats) do uniqueSyncers = uniqueSyncers + 1 end
+            if MarketSync.GetRealmDB().SyncStats then
+                for _ in pairs(MarketSync.GetRealmDB().SyncStats) do uniqueSyncers = uniqueSyncers + 1 end
             end
         end
 

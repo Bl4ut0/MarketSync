@@ -151,8 +151,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- This guarantees new users don't see an empty "Personal Snapshot" screen if they've used Auctionator before.
         C_Timer.After(5, function()
             local pCount = 0
-            if MarketSyncDB and MarketSyncDB.PersonalData then
-                for _ in pairs(MarketSyncDB.PersonalData) do pCount = pCount + 1; break end
+            if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
+                for _ in pairs(MarketSync.GetRealmDB().PersonalData) do pCount = pCount + 1; break end
             end
             if pCount == 0 and MarketSync.SnapshotPersonalScan then
                 MarketSync.SnapshotPersonalScan()
@@ -190,15 +190,31 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         
     elseif event == "AUCTION_HOUSE_CLOSED" then
         if MarketSyncDB then
-            MarketSyncDB.PersonalScanTime = time()
-
+            local today = MarketSync.GetCurrentScanDay()
+            local myLatestScanDay = MarketSync.GetMyLatestScanDay()
+            
             -- Immediately snapshot the latest DB state exclusively to the PersonalData pool
             if MarketSync.SnapshotPersonalScan then
-                MarketSync.SnapshotPersonalScan()
+                local _, todayCount = MarketSync.SnapshotPersonalScan()
+                
+                if myLatestScanDay == today then
+                    local lastCountDay = MarketSync.GetRealmDB().LastCountDay or 0
+                    local lastCount = MarketSync.GetRealmDB().LastTodayCount or 0
+                    
+                    if lastCountDay ~= today then
+                        lastCount = 0
+                    end
+                    
+                    if not MarketSync.GetRealmDB().PersonalScanTime or (todayCount > lastCount) then
+                        MarketSync.GetRealmDB().PersonalScanTime = time()
+                        MarketSync.GetRealmDB().LastCountDay = today
+                    end
+                    MarketSync.GetRealmDB().LastTodayCount = todayCount
+                end
             end
 
-            if MarketSyncDB.CachedScanStats then
-                MarketSyncDB.CachedScanStats = nil
+            if MarketSync.GetRealmDB().CachedScanStats then
+                MarketSync.GetRealmDB().CachedScanStats = nil
                 if MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
                     -- Broadcast our new findings roughly 2 seconds after closing the AH
                     C_Timer.After(2, function() MarketSync.SendAdvertisement() end)

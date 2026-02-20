@@ -65,6 +65,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
         local senderName = sender and sender:match("^([^%-]+)") or sender
         if senderName == UnitName("player") then return end
 
+        -- Fast Guild Check: Ignore sync events if we aren't actually in a guild
+        if not IsInGuild() then
+            if MarketSync.UpdateNetworkUI then MarketSync.UpdateNetworkUI(0, 0, "|cffaaaaaaNetwork: Disabled (No Guild)|r") end
+            return
+        end
+
         -- Extract sender's realm from "Name-Realm" format
         local senderRealm = sender and sender:match("%-(.+)$")
         local msgType, p1, p2, p3, p4, p5 = strsplit(";", msg)
@@ -74,6 +80,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local advScanDay = tonumber(p2) or 0
             local advItemCount = tonumber(p3) or 0
             local advVersion = p4 or "0.4.0-beta"
+            local advScanTime = tonumber(p5) or 0
             
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
             if advRealm ~= MarketSync.myRealm then
@@ -118,11 +125,23 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if advScanDay == ourDay then
                 ourItemCount = MarketSync.CountRecentItems(ourDay)
             end
+            local ourScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalScanTime) or 0
             
-            if advScanDay > ourDay or (advScanDay == ourDay and advItemCount > ourItemCount) then
-                Debug("Their data is fresher (Day " .. advScanDay .. " vs " .. ourDay .. ", Items " .. advItemCount .. " vs " .. ourItemCount .. "), sending PULL")
+            local isFresher = false
+            if advScanDay > ourDay then
+                isFresher = true
+            elseif advScanDay == ourDay then
+                if advScanTime > 0 and advScanTime > ourScanTime then
+                    isFresher = true
+                elseif advScanTime == ourScanTime and advItemCount > ourItemCount then
+                    isFresher = true
+                end
+            end
+            
+            if isFresher then
+                Debug(string.format("Their data is fresher (Day %d vs %d, Time %d vs %d, Items %d vs %d), sending PULL", advScanDay, ourDay, advScanTime, ourScanTime, advItemCount, ourItemCount))
                 if MarketSync.LogNetworkEvent then
-                    MarketSync.LogNetworkEvent(string.format("Data is fresher. Sending |cffff8800[PULL]|r request to Guild...", senderName, advScanDay, advItemCount))
+                    MarketSync.LogNetworkEvent("Data is fresher. Sending |cffff8800[PULL]|r request to Guild...")
                 end
                 
                 -- We are going to receive data
@@ -230,7 +249,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     MarketSync.CommitGuildSync()
                 end
                 -- Invalidate scan cache because we just received new items!
-                if MarketSyncDB then MarketSyncDB.CachedScanStats = nil end
+                if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
             end)
 
         elseif msgType == "RES" then
@@ -259,7 +278,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                         MarketSync.CommitGuildSync()
                     end
                     -- Invalidate scan cache because we just received new items!
-                    if MarketSyncDB then MarketSyncDB.CachedScanStats = nil end
+                    if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
                 end)
             end
         elseif msgType == "ERR" then
@@ -286,6 +305,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     -- CHAT QUERIES ("? [Item Link]")
     -- ========================================
     local msg, sender, _, _, _, _, _, channelID = ...
+    
+    -- Guild Requirement: If we are not in a guild, ignore all public channels (except whispers)
+    if not IsInGuild() and event ~= "CHAT_MSG_WHISPER" then return end
     
     -- 1. Anti-Flood: Monitor for existing replies
     -- If we see "[Item Link]: 1g 20s" from someone else, cancel our pending reply for that item.
@@ -330,14 +352,37 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
                 -- Re-check price (just in case, though unlikely to change in 1s)
                 local age = MarketSync.GetAuctionAge(link)
-                local ageStr = FormatAge(age)
-                local metaStr = ""
+                local ageStr
 
-                -- We can try to get metadata, but AuctionatorDB is synchronous usually?
-                -- If DBKeyFromLink is async, this might be Tricky inside a Timer callback context? 
-                -- Actually GetAuctionPrice is direct. DBKeyFromLink uses a callback or returns keys?
-                -- Auctionator.Utilities.DBKeyFromLink(link, callback) ...
-                -- Let's keep it simple for now to ensure reliability inside the timer.
+                local itemID = tonumber(link:match("item:(%d+)"))
+                local exactTime = nil
+                local source = UnitName("player") -- Default to self
+                
+                if itemID and MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
+                    -- ItemMetadata might be stored under dbKey like "1234", "g:1234", or "p:1234"
+                    local meta = MarketSync.GetRealmDB().ItemMetadata[tostring(itemID)] or MarketSync.GetRealmDB().ItemMetadata["g:"..itemID] or MarketSync.GetRealmDB().ItemMetadata["p:"..itemID]
+                    if meta then
+                        exactTime = meta.lastTime or meta.time
+                        local contributor = meta.lastSource or meta.source
+                        if contributor and contributor ~= "Personal" then
+                            source = contributor
+                        end
+                    end
+                end
+
+                if age == 0 and not exactTime and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+                    exactTime = MarketSync.GetRealmDB().PersonalScanTime
+                end
+
+                if exactTime then
+                    ageStr = MarketSync.FormatRealmTime(exactTime, "%H:%M RT (") .. source .. ")"
+                elseif age == 0 then
+                    ageStr = "Today (" .. source .. ")"
+                elseif age then
+                    ageStr = age .. "d ago (" .. source .. ")"
+                else
+                    ageStr = "Unknown"
+                end
                 
                 local output = string.format("%s: %s (Age: %s)", link, FormatMoney(price), ageStr)
 

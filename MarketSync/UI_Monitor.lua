@@ -200,6 +200,8 @@ function MarketSync.UpdateNetworkUI(txRate, rxRate, statusText)
         MonitorFrame.queueLabel:SetText(statusText)
     elseif txRate > 0 or rxRate > 0 then
         MonitorFrame.queueLabel:SetText("|cff00ff00Sync Active|r")
+    elseif not IsInGuild() then
+        MonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Disabled (No Guild)|r")
     else
         MonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Idle|r")
     end
@@ -229,7 +231,8 @@ function MarketSync.UpdateSwarmUI(user, status)
     else
         -- Instead of deleting the user when they finish, drop them to Idle
         if MarketSync.SwarmPeers[user] then
-            MarketSync.SwarmPeers[user].status = "Idle"
+            local fallback = (user == UnitName("player") and not IsInGuild()) and "No Guild" or "Idle"
+            MarketSync.SwarmPeers[user].status = fallback
             MarketSync.SwarmPeers[user].time = time()
         end
     end
@@ -240,8 +243,12 @@ function MarketSync.UpdateSwarmUI(user, status)
     local now = time()
     
     local myName = UnitName("player")
+    local myDefaultStatus = IsInGuild() and "Idle" or "No Guild"
+    
     if myName and not MarketSync.SwarmPeers[myName] then
-        MarketSync.SwarmPeers[myName] = { status = "Idle", time = now }
+        MarketSync.SwarmPeers[myName] = { status = myDefaultStatus, time = now }
+    elseif myName and MarketSync.SwarmPeers[myName] and (MarketSync.SwarmPeers[myName].status == "Idle" or MarketSync.SwarmPeers[myName].status == "No Guild") then
+        MarketSync.SwarmPeers[myName].status = myDefaultStatus
     end
     
     local sortedPeers = {}
@@ -254,13 +261,14 @@ function MarketSync.UpdateSwarmUI(user, status)
         end
     end
     
-    -- Priority Weights: New Data (Ready) > Active (Sending/Receiving) > Waiting > Idle
+    -- Priority Weights: New Data (Ready) > Active (Sending/Receiving) > Waiting > Idle > No Guild
     local weights = {
         ["Ready"] = 5,
         ["Sending"] = 4,
         ["Receiving"] = 3,
         ["Waiting"] = 2,
-        ["Idle"] = 1
+        ["Idle"] = 1,
+        ["No Guild"] = 0
     }
     
     table.sort(sortedPeers, function(a, b)
@@ -278,7 +286,8 @@ function MarketSync.UpdateSwarmUI(user, status)
         if peerInfo.status == "Sending" then color = "|cff00ff00"
         elseif peerInfo.status == "Waiting" then color = "|cffff8800"
         elseif peerInfo.status == "Receiving" then color = "|cff00ffff"
-        elseif peerInfo.status == "Ready" then color = "|cffffffff" end
+        elseif peerInfo.status == "Ready" then color = "|cffffffff"
+        elseif peerInfo.status == "No Guild" then color = "|cff555555" end
         
         MonitorFrame.swarmText:AddMessage(peerInfo.name .. ": " .. color .. peerInfo.status .. "|r")
         count = count + 1

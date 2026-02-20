@@ -58,13 +58,46 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
-    if not MarketSyncDB.ItemMetadata then MarketSyncDB.ItemMetadata = {} end
-    if not MarketSyncDB.SyncStats then MarketSyncDB.SyncStats = {} end
-    if not MarketSyncDB.WeeklySyncStats then 
-        MarketSyncDB.WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} } 
-    end
     if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false } end
-    if not MarketSyncDB.PersonalData then MarketSyncDB.PersonalData = {} end
+    
+    if not MarketSyncDB.RealmData then MarketSyncDB.RealmData = {} end
+
+    -- MIGRATION: Move old global data to the current realm's partition on first load
+    local realm = GetNormalizedRealmName() or GetRealmName()
+    if realm and not MarketSyncDB.RealmData[realm] then
+        MarketSyncDB.RealmData[realm] = {
+            PersonalData = MarketSyncDB.PersonalData or {},
+            ItemMetadata = MarketSyncDB.ItemMetadata or {},
+            HistoryLog = MarketSyncDB.HistoryLog or {},
+            SyncStats = MarketSyncDB.SyncStats or {},
+            WeeklySyncStats = MarketSyncDB.WeeklySyncStats or { yearWeek = date("%Y-%W"), data = {} },
+            PersonalScanTime = MarketSyncDB.PersonalScanTime
+        }
+    end
+    
+    -- Cleanup old global data
+    MarketSyncDB.PersonalData = nil
+    MarketSyncDB.ItemMetadata = nil
+    MarketSyncDB.HistoryLog = nil
+    MarketSyncDB.SyncStats = nil
+    MarketSyncDB.WeeklySyncStats = nil
+    MarketSyncDB.PersonalScanTime = nil
+end
+
+-- Fast helper function to get the partitioned database for the current realm
+function MarketSync.GetRealmDB()
+    local realm = GetNormalizedRealmName() or GetRealmName()
+    if not realm then return {} end
+    if not MarketSyncDB.RealmData[realm] then
+        MarketSyncDB.RealmData[realm] = {
+            PersonalData = {},
+            ItemMetadata = {},
+            HistoryLog = {},
+            SyncStats = {},
+            WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} }
+        }
+    end
+    return MarketSyncDB.RealmData[realm]
 end
 
 -- ================================================================
@@ -99,29 +132,85 @@ end
 function MarketSync.TrackSync(sender, count)
     if sender and MarketSync.IsBlocked(sender) then return end
     
+    local realmDB = MarketSync.GetRealmDB()
+
     -- Track All-Time Stats
-    if not MarketSyncDB.SyncStats[sender] then
-        MarketSyncDB.SyncStats[sender] = { count = 0, last = 0 }
+    if not realmDB.SyncStats[sender] then
+        realmDB.SyncStats[sender] = { count = 0, last = 0 }
     end
-    MarketSyncDB.SyncStats[sender].count = MarketSyncDB.SyncStats[sender].count + count
-    MarketSyncDB.SyncStats[sender].last = time()
+    realmDB.SyncStats[sender].count = realmDB.SyncStats[sender].count + count
+    realmDB.SyncStats[sender].last = time()
     
     -- Track Weekly Stats
-    if not MarketSyncDB.WeeklySyncStats then
-        MarketSyncDB.WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} }
+    if not realmDB.WeeklySyncStats then
+        realmDB.WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} }
     end
     
     local currentWeek = date("%Y-%W")
-    if MarketSyncDB.WeeklySyncStats.yearWeek ~= currentWeek then
-        MarketSyncDB.WeeklySyncStats.yearWeek = currentWeek
-        MarketSyncDB.WeeklySyncStats.data = {} -- Wipe stats for the new week
+    if realmDB.WeeklySyncStats.yearWeek ~= currentWeek then
+        realmDB.WeeklySyncStats.yearWeek = currentWeek
+        realmDB.WeeklySyncStats.data = {} -- Wipe stats for the new week
     end
     
-    if not MarketSyncDB.WeeklySyncStats.data[sender] then
-        MarketSyncDB.WeeklySyncStats.data[sender] = { count = 0, last = 0 }
+    if not realmDB.WeeklySyncStats.data[sender] then
+        realmDB.WeeklySyncStats.data[sender] = { count = 0, last = 0 }
     end
-    MarketSyncDB.WeeklySyncStats.data[sender].count = MarketSyncDB.WeeklySyncStats.data[sender].count + count
-    MarketSyncDB.WeeklySyncStats.data[sender].last = time()
+    realmDB.WeeklySyncStats.data[sender].count = realmDB.WeeklySyncStats.data[sender].count + count
+    realmDB.WeeklySyncStats.data[sender].last = time()
+end
+
+-- ================================================================
+-- TIME FORMATTING HELPER
+-- ================================================================
+function MarketSync.FormatRealmTime(timestamp, formatStr)
+    if not timestamp then return "" end
+    formatStr = formatStr or "%H:%M RT"
+    
+    local sHour, sMinute = GetGameTime()
+    local lDate = date("*t")
+    
+    local sTotal = sHour * 60 + sMinute
+    local lTotal = lDate.hour * 60 + lDate.min
+    
+    local diffMins = sTotal - lTotal
+    
+    -- Handle day wrapping across time zones
+    if diffMins > 12 * 60 then
+        diffMins = diffMins - 24 * 60
+    elseif diffMins < -12 * 60 then
+        diffMins = diffMins + 24 * 60
+    end
+    
+    local adjustedTime = timestamp + (diffMins * 60)
+    return date(formatStr, adjustedTime)
+end
+
+function MarketSync.FormatRealmDateString(timestamp)
+    if not timestamp then return "Unknown" end
+    
+    local sHour, sMinute = GetGameTime()
+    local lDate = date("*t")
+    local diffMins = (sHour * 60 + sMinute) - (lDate.hour * 60 + lDate.min)
+    if diffMins > 12 * 60 then diffMins = diffMins - 24 * 60
+    elseif diffMins < -12 * 60 then diffMins = diffMins + 24 * 60 end
+    
+    local adjustedTime = timestamp + (diffMins * 60)
+    local adjustedNow = time() + (diffMins * 60)
+    
+    local d1 = date("*t", adjustedTime)
+    local d2 = date("*t", adjustedNow)
+    
+    if d1.year == d2.year and d1.month == d2.month and d1.day == d2.day then
+        return date("Today at %H:%M RT", adjustedTime)
+    end
+    
+    local yesterday = adjustedNow - 86400
+    local dy = date("*t", yesterday)
+    if d1.year == dy.year and d1.month == dy.month and d1.day == dy.day then
+        return date("Yesterday at %H:%M RT", adjustedTime)
+    end
+    
+    return date("%b %d at %H:%M RT", adjustedTime)
 end
 
 -- ================================================================

@@ -137,7 +137,7 @@ local function BuildIndexEntry(dbKey, itemID, data, forcePersonal)
     end
     
     local age = nil
-    local meta = MarketSyncDB and MarketSyncDB.ItemMetadata and MarketSyncDB.ItemMetadata[dbKey]
+    local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
     local source = "Personal"
     local exactTime = nil
 
@@ -145,7 +145,7 @@ local function BuildIndexEntry(dbKey, itemID, data, forcePersonal)
         -- Offline mirrored personal data { m, d }
         local currentDay = MarketSync.GetCurrentScanDay()
         age = math.max(0, currentDay - dbDay)
-        exactTime = MarketSyncDB and MarketSyncDB.PersonalScanTime
+        exactTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime
     else
         -- Active Auctionator database (Live)
         age = Auctionator and Auctionator.Database and Auctionator.Database.GetPriceAge and Auctionator.Database:GetPriceAge(dbKey) or nil
@@ -159,8 +159,8 @@ local function BuildIndexEntry(dbKey, itemID, data, forcePersonal)
 
         if source ~= "Personal" and meta and (meta.lastTime or meta.time) then
             exactTime = meta.lastTime or meta.time
-        elseif source == "Personal" and age == 0 and MarketSyncDB and MarketSyncDB.PersonalScanTime then
-            exactTime = MarketSyncDB.PersonalScanTime
+        elseif source == "Personal" and age == 0 and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+            exactTime = MarketSync.GetRealmDB().PersonalScanTime
         end
     end
 
@@ -248,8 +248,8 @@ local function BuildSearchIndex(callback)
         end
         
         -- 1. BUILD PERSONAL CACHE (from Mirrored Memory Pool)
-        if MarketSyncDB and MarketSyncDB.PersonalData then
-            for dbKey, data in pairs(MarketSyncDB.PersonalData) do
+        if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
+            for dbKey, data in pairs(MarketSync.GetRealmDB().PersonalData) do
                 local itemID = ParseItemID(dbKey)
                 if itemID then
                     PersonalTotal = PersonalTotal + 1
@@ -279,7 +279,7 @@ local function BuildSearchIndex(callback)
 
         -- 2. BUILD GUILD SYNC CACHE (from Live AH Engine filtering Meta)
         for dbKey, data in pairs(Auctionator.Database.db) do
-            local meta = MarketSyncDB and MarketSyncDB.ItemMetadata and MarketSyncDB.ItemMetadata[dbKey]
+            local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
             -- Only include true network items
             if meta and meta.source ~= "Personal" then
                 GuildTotal = GuildTotal + 1
@@ -912,11 +912,11 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         if self.dataSource == "personal" then
             local scanAge = nil
             local totalItems = 0
-            if MarketSyncDB and MarketSyncDB.PersonalData then
+            if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
                 local currentDay = MarketSync.GetCurrentScanDay()
                 local bestAge = 9999
                 local checked = 0
-                for _, data in pairs(MarketSyncDB.PersonalData) do
+                for _, data in pairs(MarketSync.GetRealmDB().PersonalData) do
                     totalItems = totalItems + 1
                     if checked < 50 then
                         local age = math.max(0, currentDay - (data.d or currentDay))
@@ -928,26 +928,27 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             end
             if scanAge then
                 if scanAge == 0 then
-                    if MarketSyncDB and MarketSyncDB.PersonalScanTime then
-                        self.statusText:SetText("|cff00ff00Last Scan:|r Today at " .. date("%I:%M %p", MarketSyncDB.PersonalScanTime))
+                    if MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+                        self.statusText:SetText("|cffffd700" .. MarketSync.FormatRealmDateString(MarketSync.GetRealmDB().PersonalScanTime) .. "|r")
                     else
-                        self.statusText:SetText("|cff00ff00Last Scan:|r Today")
+                        self.statusText:SetText("|cffffd700Today|r")
                     end
                 else
-                    self.statusText:SetText("|cff00ff00Last Scan:|r " .. scanAge .. " day(s) ago")
+                    self.statusText:SetText("|cffffd700" .. scanAge .. " day(s) ago|r")
                 end
+                self.syncLabel:SetText("|cff00ff00Last Personal Scan|r")
             else
                 self.statusText:SetText("|cffff8800No scan data available|r")
+                self.syncLabel:SetText("")
             end
             self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
-            self.syncLabel:SetText("")
 
         elseif self.dataSource == "guild" then
             local latestUser, latestTime = nil, 0
             local syncedItems = 0
             local uniqueSyncers = 0
-            if MarketSyncDB and MarketSyncDB.SyncStats then
-                for user, stats in pairs(MarketSyncDB.SyncStats) do
+            if MarketSyncDB and MarketSync.GetRealmDB().SyncStats then
+                for user, stats in pairs(MarketSync.GetRealmDB().SyncStats) do
                     uniqueSyncers = uniqueSyncers + 1
                     if stats.last and stats.last > latestTime then
                         latestTime = stats.last
@@ -955,15 +956,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     end
                 end
             end
-            if MarketSyncDB and MarketSyncDB.ItemMetadata then
-                for _ in pairs(MarketSyncDB.ItemMetadata) do syncedItems = syncedItems + 1 end
+            if MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
+                for _ in pairs(MarketSync.GetRealmDB().ItemMetadata) do syncedItems = syncedItems + 1 end
             end
             if latestUser then
-                local timeStr = date("%H:%M", latestTime)
-                local tzStr = date("%Z", latestTime) or ""
-                tzStr = tzStr:match("^%a+") or tzStr
+                local timeStr = MarketSync.FormatRealmTime(latestTime)
                 local shortName = latestUser:match("^([^%-]+)") or latestUser
-                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. tzStr .. " " .. shortName .. "|r")
+                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. shortName .. "|r")
                 self.syncLabel:SetText("|cff00ff00Last Guild Sync|r")
             else
                 self.statusText:SetText("|cffff8800No sync data yet|r")
@@ -1206,8 +1205,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 
                 local ageStr = "N/A"
                 if d.age then
-                    if d.age == 0 and d.exactTime then
-                        ageStr = date("%I:%M %p", d.exactTime)
+                    if d.exactTime then
+                        ageStr = MarketSync.FormatRealmTime(d.exactTime, "%H:%M RT")
                     elseif d.age == 0 then
                         ageStr = "Today"
                     else
