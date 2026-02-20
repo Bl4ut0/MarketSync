@@ -312,6 +312,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
         
         -- Store current key globally so the ticker can retrieve it on crash
         _G.MarketSyncActivePullKey = "Starting"
+        local yieldCounter = 0
 
         -- Count total eligible items first for progress tracking
         local totalEligible = 0
@@ -365,6 +366,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
                             messagesSent = messagesSent + 1
                             buffer = ""
                             bufferCount = 0
+                            yieldCounter = 0
                             
                             -- Advance round-robin
                             prefixIndex = (prefixIndex % numPrefixes) + 1
@@ -390,6 +392,14 @@ function MarketSync.RespondToPull(sinceDay, requester)
                     end
                 end
             end
+            
+            -- Safety yield: prevent WoW from killing the coroutine if we scan too many
+            -- items without a buffer flush (e.g. many skipped/ineligible items in a row)
+            yieldCounter = yieldCounter + 1
+            if yieldCounter >= 500 then
+                yieldCounter = 0
+                coroutine.yield()
+            end
         end
         -- Flush remaining buffer
         if buffer ~= "" then
@@ -402,6 +412,10 @@ function MarketSync.RespondToPull(sinceDay, requester)
         Debug("PULL response complete: sent " .. sent .. " items in " .. messagesSent .. " messages")
         if MarketSync.LogNetworkEvent then
             MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Complete]|r Sent %d items in %d messages via %d channels. (%d scanned, %d skipped)", sent, messagesSent, numPrefixes, scanned, skipped))
+        end
+        if requester and IsInGuild() then
+            -- Send an explicit END signal to let the receiver know we are done
+            C_ChatInfo.SendAddonMessage(PREFIX, string.format("END;%d;%d", sent, messagesSent), "GUILD")
         end
         pullInProgress = false
         if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end

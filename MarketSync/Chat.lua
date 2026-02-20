@@ -225,8 +225,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
             -- Receiver checkpoint logging
             if MarketSync.LogNetworkEvent then
                 local rxTotal = MarketSync.RxCount or 0
-                -- Log every 100 received items
-                if rxTotal % 100 < #items then
+                -- Log every roughly 100 received items by checking if this chunk crosses a 100-boundary
+                if math.floor(rxTotal / 100) > math.floor((rxTotal - #items) / 100) then
                     MarketSync.LogNetworkEvent(string.format("|cff00ccff[Rx Checkpoint]|r Received %d total items from %s (%d in this chunk, prefix: %s)", rxTotal, senderName, #items, prefix))
                 end
             end
@@ -242,7 +242,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             guildSyncCommitTimer = C_Timer.NewTimer(8, function()
                 guildSyncCommitTimer = nil
                 if MarketSync.LogNetworkEvent then
-                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Done]|r 8s idle — committing guild sync. Total received this session: %d items.", MarketSync.RxCount or 0))
+                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Timeout]|r 8s idle — committing guild sync. Total received this session: %d items.", MarketSync.RxCount or 0))
                 end
                 if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
                 if MarketSync.CommitGuildSync then
@@ -251,6 +251,36 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 -- Invalidate scan cache because we just received new items!
                 if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
             end)
+
+        elseif msgType == "END" then
+            local itemsSent = tonumber(p1) or 0
+            local messagesSent = tonumber(p2) or 0
+            
+            if MarketSync.LogNetworkEvent then
+                MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Complete]|r Sender finished (%d items sent). Committing %d received items to guild index.", itemsSent, MarketSync.RxCount or 0))
+            end
+            
+            -- Immediate commit
+            if guildSyncCommitTimer then guildSyncCommitTimer:Cancel(); guildSyncCommitTimer = nil end
+            if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
+            if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Idle") end
+            if MarketSync.CommitGuildSync then
+                MarketSync.CommitGuildSync()
+            end
+            
+            -- Update our own scan freshness so we don't re-PULL the same data
+            if MarketSyncDB then
+                local realmDB = MarketSync.GetRealmDB()
+                realmDB.CachedScanStats = nil
+                realmDB.PersonalScanTime = time()
+                -- Also snapshot personal data so item counts reflect the merged state
+                if MarketSync.SnapshotPersonalScan then
+                    MarketSync.SnapshotPersonalScan()
+                end
+            end
+            
+            -- Reset session Rx counter for a clean slate
+            MarketSync.RxCount = 0
 
         elseif msgType == "RES" then
             local link = p1
