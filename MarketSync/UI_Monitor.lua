@@ -8,6 +8,8 @@ local MarketSync = _G.MarketSync
 local FormatMoney = MarketSync.FormatMoney
 
 local MonitorFrame = nil
+local earlyCacheLogs = {}
+local earlyNetworkLogs = {}
 
 local function CreateMonitorFrame()
     if MonitorFrame then return end
@@ -148,12 +150,27 @@ local function CreateMonitorFrame()
     MonitorFrame.cacheScroll = cacheScroll
     cacheScroll:AddMessage("|cFF00FF00[MarketSync]|r Cache Monitor Initialized. Ready for rebuild tasks...", 1, 1, 1)
 
+    -- Dump early logs
+    for _, log in ipairs(earlyNetworkLogs) do
+        MonitorFrame.logScroll:AddMessage(log)
+    end
+    wipe(earlyNetworkLogs)
+    
+    for _, log in ipairs(earlyCacheLogs) do
+        MonitorFrame.cacheScroll:AddMessage(log)
+    end
+    wipe(earlyCacheLogs)
+
 end
 
 function MarketSync.LogCacheEvent(msg)
+    local timestamp = date("%H:%M:%S")
+    local formattedMsg = string.format("[%s] %s", timestamp, msg)
     if MonitorFrame and MonitorFrame.cacheScroll then
-        local timestamp = date("%H:%M:%S")
-        MonitorFrame.cacheScroll:AddMessage(string.format("[%s] %s", timestamp, msg))
+        MonitorFrame.cacheScroll:AddMessage(formattedMsg)
+    else
+        table.insert(earlyCacheLogs, formattedMsg)
+        if #earlyCacheLogs > 200 then table.remove(earlyCacheLogs, 1) end
     end
 end
 
@@ -190,8 +207,13 @@ end
 
 -- Function to add log entries
 function MarketSync.LogNetworkEvent(msg)
-    if not MonitorFrame then return end -- Don't initialize until opened
-    MonitorFrame.logScroll:AddMessage(date("%H:%M:%S") .. " " .. msg)
+    local formattedMsg = date("%H:%M:%S") .. " " .. msg
+    if MonitorFrame and MonitorFrame.logScroll then
+        MonitorFrame.logScroll:AddMessage(formattedMsg)
+    else
+        table.insert(earlyNetworkLogs, formattedMsg)
+        if #earlyNetworkLogs > 200 then table.remove(earlyNetworkLogs, 1) end
+    end
 end
 
 -- ================================================================

@@ -279,20 +279,18 @@ local function BuildSearchIndex(callback)
 
         -- 2. BUILD GUILD SYNC CACHE (from Live AH Engine filtering Meta)
         for dbKey, data in pairs(Auctionator.Database.db) do
-            local itemID = ParseItemID(dbKey)
-            if itemID then
-                local entry = BuildIndexEntry(dbKey, itemID, data, false)
-                if entry then
-                    if entry.hasMeta then
+            local meta = MarketSyncDB and MarketSyncDB.ItemMetadata and MarketSyncDB.ItemMetadata[dbKey]
+            -- Only include true network items
+            if meta and meta.source ~= "Personal" then
+                GuildTotal = GuildTotal + 1
+                local itemID = ParseItemID(dbKey)
+                if itemID then
+                    local entry = BuildIndexEntry(dbKey, itemID, data, false)
+                    if entry and entry.hasMeta then
                         GuildIndex[dbKey] = entry
-                        GuildTotal = GuildTotal + 1
                         GuildResolved = GuildResolved + 1
-                    end
-                else
-                    local meta = MarketSyncDB and MarketSyncDB.ItemMetadata and MarketSyncDB.ItemMetadata[dbKey]
-                    if meta then
+                    else
                         GuildPending[dbKey] = itemID
-                        GuildTotal = GuildTotal + 1
                         C_Item.RequestLoadItemDataByID(itemID)
                     end
                 end
