@@ -241,24 +241,25 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if guildSyncCommitTimer then guildSyncCommitTimer:Cancel(); guildSyncCommitTimer = nil end
             guildSyncCommitTimer = C_Timer.NewTimer(8, function()
                 guildSyncCommitTimer = nil
+                local rxCount = MarketSync.RxCount or 0
                 if MarketSync.LogNetworkEvent then
-                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Timeout]|r 8s idle — committing guild sync. Total received this session: %d items.", MarketSync.RxCount or 0))
+                    MarketSync.LogNetworkEvent(string.format("|cffff8800[Rx Timeout]|r 8s idle — partial sync committed. Received %d items (transfer may be incomplete).", rxCount))
                 end
                 if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
                 if MarketSync.CommitGuildSync then
                     MarketSync.CommitGuildSync()
                 end
-                -- Invalidate scan cache because we just received new items!
+                -- Invalidate scan cache but do NOT update PersonalScanTime
+                -- A timeout means the transfer was incomplete, so the receiver should
+                -- remain eligible for a re-PULL on the next ADV cycle.
                 if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
+                MarketSync.RxCount = 0
             end)
 
         elseif msgType == "END" then
             local itemsSent = tonumber(p1) or 0
             local messagesSent = tonumber(p2) or 0
-            
-            if MarketSync.LogNetworkEvent then
-                MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Complete]|r Sender finished (%d items sent). Committing %d received items to guild index.", itemsSent, MarketSync.RxCount or 0))
-            end
+            local rxCount = MarketSync.RxCount or 0
             
             -- Immediate commit
             if guildSyncCommitTimer then guildSyncCommitTimer:Cancel(); guildSyncCommitTimer = nil end
@@ -268,15 +269,28 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 MarketSync.CommitGuildSync()
             end
             
-            -- Update our own scan freshness so we don't re-PULL the same data
-            if MarketSyncDB then
-                local realmDB = MarketSync.GetRealmDB()
-                realmDB.CachedScanStats = nil
-                realmDB.PersonalScanTime = time()
-                -- Also snapshot personal data so item counts reflect the merged state
-                if MarketSync.SnapshotPersonalScan then
-                    MarketSync.SnapshotPersonalScan()
+            -- Validate: only stamp our freshness if we received the full payload
+            local isComplete = (rxCount >= itemsSent) and (itemsSent > 0)
+            
+            if isComplete then
+                if MarketSync.LogNetworkEvent then
+                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Complete]|r Full sync verified! Received %d / %d items. Scan freshness updated.", rxCount, itemsSent))
                 end
+                -- Full transfer confirmed — update our scan time so we won't re-PULL
+                if MarketSyncDB then
+                    local realmDB = MarketSync.GetRealmDB()
+                    realmDB.CachedScanStats = nil
+                    realmDB.PersonalScanTime = time()
+                    if MarketSync.SnapshotPersonalScan then
+                        MarketSync.SnapshotPersonalScan()
+                    end
+                end
+            else
+                if MarketSync.LogNetworkEvent then
+                    MarketSync.LogNetworkEvent(string.format("|cffff8800[Rx Partial]|r Received %d / %d items (%.0f%%). Will re-PULL on next ADV cycle.", rxCount, itemsSent, (itemsSent > 0 and (rxCount / itemsSent * 100) or 0)))
+                end
+                -- Partial transfer — do NOT update PersonalScanTime so we stay eligible for re-PULL
+                if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
             end
             
             -- Reset session Rx counter for a clean slate
