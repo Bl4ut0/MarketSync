@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-02-20
+### Fixed
+- **Fixed**: A severe ambiguity bug in the Swarm consensus logic. Previously, if two users scanned on the exact same "day" (e.g., today), the sync receiver would aggressively reject the upload if the incoming payload had superficially *fewer* items due to natural Auction House churn over the span of a few hours. The Swarm Receiver now intelligently parses the exact Realm Timestamp (`TSF`), prioritizing absolute time freshness over volatile item count differentials.
+- **Fixed**: Unregistered outgoing broadcast events. The Debug Console's Network Monitor previously ignored `CHAT_MSG_ADDON` packets matching your own character name, making it impossible to see your own data transmissions. Outgoing `[ADV]`, `[PULL]`, and `[ACCEPT]` signals are now natively hooked to safely bypass the chat filter, visually printing to your console so you know exactly when your client pings the guild.
+- **Fixed**: A cross-character data leak involving `SyncStats`. The all-time database seeding leaderboards were improperly writing your network statistics directly into the global `MarketSyncDB` root instead of your isolated `MarketSync.GetRealmDB()` partition. The counters have been rerouted to prevent cross-realm data contamination.
+
+### Improved
+- **Improved**: Complete conversion of all local timestamps to Realm Time (`RT`). Timestamp displays on the Personal Scan tab, Guild Sync tab, and Chat Price Checks now uniformly reflect the server's timezone, negating confusion across different geographical locations.
+- **Improved**: The Personal Scan tab date formatting was rewritten. It now dynamically calculates the physical Realm Time offset to accurately display `Today at XX:XX RT`, `Yesterday at XX:XX RT`, or `Month DD at XX:XX RT`. This replaces the static (and often incorrect) "Today at" text applied to legacy database entries. Local timezone acronyms (EST, PST, CEST, etc.) were completely stripped from the UI to match the new unified Realm Time standard.
+- **Improved**: Swarm Network Protocol upgraded. The `[ADV]` broadcast data packet now transmits a discrete 5th parameter specifically representing the rigid Realm Timestamp (`TSF`) of your data cache, allowing all clients in the swarm to accurately reconstruct chronological sync timelines.
+
 ## [0.4.3] - 2026-02-20
 ### Improved
 - **Improved**: Swarm sync engine completely rewritten for maximum throughput within WoW's documented addon message limits. The system now uses **3 parallel data channels** (`MSyncD1`, `MSyncD2`, `MSyncD3`) with round-robin dispatch at 1 msg/sec per prefix, achieving **3 messages per second** sustained (744 bytes/sec, well under the 2000 CPS safe limit). Combined with **base-36 payload encoding** (~30% compression), each message packs ~16 items into 248 bytes. Total throughput: **~48 items/sec**. A full 2355-item sync completes in **~50 seconds** in a single pass with zero drops, down from 5-6 retry cycles over 25+ minutes.
