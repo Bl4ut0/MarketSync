@@ -15,10 +15,46 @@ If *one* person scans the Auction House, *everyone* gets the data instantly.
 
 ## Key Features
 
-*   **Passive Sync:** Silently shares auction data over the addon channel. No performance hit, no user action required.
-*   **Smart Caching:** Builds a searchable index of tens of thousands of items without freezing your game.
-*   **Price History:** View detailed price history graphs and see exactly who scanned the item and when.
-*   **Flood Maintenance:** Intelligent chat throttling ensures the `?` command never spams your chat channels.
+*   **Passive Sync:** Silently shares auction data over the addon channel every 5 minutes. No performance hit, no user action required.
+*   **Smart Caching:** Builds a searchable index of tens of thousands of items without freezing your game. Configurable cache build speed (1–4) to balance between indexing speed and game performance.
+*   **Price History:** View detailed price history graphs and see exactly who contributed the item data for each specific day via per-scan-day attribution.
+*   **Separated Data Views:** Personal scans and guild sync data are physically separated. Your personal data never gets overwritten by incoming guild syncs.
+*   **Debug Console:** Full-featured network monitor with three panels — Sync Network event log, Swarm Queue tracker, and Cache Processing Stream — for complete visibility into what the addon is doing.
+*   **Version Guard:** Automatically handles version mismatches between guild members. Outdated clients are safely disabled from syncing to prevent data corruption.
+*   **Flood Protection:** Intelligent chat throttling ensures the `?` command never spams your chat channels.
+
+## How Sync Works
+
+MarketSync uses a **Swarm Coordinator** protocol to efficiently share data across your guild:
+
+1. **Advertisement:** Every 5 minutes, each client broadcasts what data it has (realm, scan day, item count, version).
+2. **Pull Request:** If another client has fresher data, you automatically request it.
+3. **Consensus:** Multiple potential senders coordinate to elect a single "seeder" to avoid redundant broadcasts.
+4. **Bulk Transfer:** The seeder transmits item data using the BRES v3 protocol:
+   - **3 parallel data channels** (`MSyncD1`, `MSyncD2`, `MSyncD3`) for triple throughput
+   - **Base-36 encoding** compresses numeric payloads by ~30%
+   - **248-byte dense packing** maximizes items per message (~16 per chunk)
+   - Achieves **~48 items/sec** sustained, completing a full 2355-item sync in **~50 seconds**
+5. **Commit:** After 8 seconds of idle (no more incoming data), the received items are committed to the guild index.
+
+### Protocol Architecture
+
+| Layer | Prefix | Purpose |
+|---|---|---|
+| **Control** | `MarketSync` | ADV, PULL, ACCEPT, RES, REQ, ERR — plain text with character names and realm info |
+| **Data** | `MSyncD1`, `MSyncD2`, `MSyncD3` | BRES bulk payloads — base-36 encoded numerics only |
+
+This separation ensures character names with special characters pass through untouched on the control layer, while the data layer maximizes throughput with compressed numeric encoding.
+
+### WoW Addon Message Limits
+
+MarketSync is engineered to stay well within WoW's documented throttle:
+
+| Constraint | WoW Limit | MarketSync Usage |
+|---|---|---|
+| Per-prefix bucket | 10 msgs burst, 1/sec regen | 1 msg/sec per prefix (never drains) |
+| Global CPS | ~2000 safe, ~3000 disconnect | 744 CPS (37% of safe limit) |
+| Message payload | 255 bytes | 248 bytes (7 byte safety margin) |
 
 ## Installation
 
@@ -31,15 +67,21 @@ If *one* person scans the Auction House, *everyone* gets the data instantly.
 **Dependencies:**
 *   [Auctionator](https://www.curseforge.com/wow/addons/auctionator) (Required)
 
+**Compatibility:**
+*   WoW Classic (including Anniversary, TBC, SoD)
+*   WoW Retail
+
 ## Usage
 
 ### 1. Syncing
-Just play the game! As long as you and other guildmates have the addon installed, you are syncing data in the background.
+Just play the game! As long as you and other guildmates have the addon installed, data syncs automatically in the background every 5 minutes. No manual action needed.
 
 ### 2. Offline Browsing
 Type `/ms` or `/marketsync` (or click the Minimap Button) to open the main window.
-*   **Browse Tab:** Search for items, filter by rarity/level, and see current market prices.
-*   **History:** Click the "History" button on an item to view price trends and scan details.
+*   **Personal Scan Tab:** Your personally scanned AH data, stored in an isolated snapshot.
+*   **Guild Sync Tab:** Data received from guild members via the Swarm Network.
+*   **Leaderboard Tab:** See which guild members are contributing the most data (toggle All Time / Weekly).
+*   **History:** Click the "History" button on any item to view price trend graphs and per-day scan attribution.
 
 ### 3. Chat Price Checks
 Link an item in **Guild Chat**, **Party**, or **Raid** with a `?` prefix:
@@ -57,7 +99,37 @@ Access settings via the **Settings Tab** in the main window (`/ms`):
 *   **Lock Minimap Button:** Prevent accidental movement.
 *   **Enable Chat Price Check:** Toggle the auto-reply feature on/off.
 *   **Enable Passive Sync:** Toggle background data sharing.
+*   **Cache Build Speed:** Adjust how aggressively the addon indexes items (1 = gentle, 4 = fast).
 *   **Debug Mode:** View verbose logs for troubleshooting.
+*   **Debug Console:** Open the standalone network monitor with full event log, swarm queue, and cache processing stream.
+*   **Reset Data:** Wipe all sync data and create a fresh personal snapshot.
+*   **Rebuild Caches:** Manually trigger a re-index of personal and guild databases.
+*   **Manage Users:** Block/unblock specific sync partners.
+
+## Slash Commands
+
+| Command | Description |
+|---|---|
+| `/ms` | Open the main window |
+| `/ms search` | Open the browse window |
+| `/ms config` | Open settings panel |
+| `/ms block [name]` | Block a sync sender |
+| `/ms unblock [name]` | Unblock a sync sender |
+
+## File Structure
+
+```
+MarketSync/
+├── Config.lua       # Shared globals, DB init, helpers, prefix registration
+├── Sync.lua         # Protocol, base-36 encoding, data merging, passive/bulk sync
+├── Chat.lua         # Event handler for addon messages and chat queries
+├── UI_Browse.lua    # Browse panel & search index
+├── UI_History.lua   # Price history graphs & scan attribution
+├── UI_Monitor.lua   # Debug Console (network log, swarm queue, cache stream)
+├── UI_Main.lua      # Frame shell, tabs, settings
+├── Core.lua         # Minimap, slash commands, ADDON_LOADED
+└── MarketSync.toc   # Table of contents
+```
 
 ## License
 

@@ -12,7 +12,16 @@ MarketSync.ADDON_NAME = ADDON_NAME
 MarketSync.PREFIX = PREFIX
 MarketSync.ICON_COIN = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
 
+-- Main prefix for control messages (ADV, PULL, ACCEPT, REQ, RES, ERR)
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+
+-- Data channel prefixes for parallel BRES bulk transfers.
+-- Each prefix gets its own token bucket (10 burst, 1/sec regen).
+-- 3 channels = 3 msg/sec sustained = ~48 items/sec with base-36 encoding.
+MarketSync.DATA_PREFIXES = { "MSyncD1", "MSyncD2", "MSyncD3" }
+for _, dp in ipairs(MarketSync.DATA_PREFIXES) do
+    C_ChatInfo.RegisterAddonMessagePrefix(dp)
+end
 
 -- ================================================================
 -- DEBUG
@@ -30,25 +39,32 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB then
         MarketSyncDB = {
             BlockedUsers = {},
-            PassiveSync = false,
+            PassiveSync = true,
             DebugMode = false,
-            BuildCacheOnStartup = false,
+            EnableChatPriceCheck = true,
+            BuildCacheOnStartup = true,
             CacheSpeed = 2,
             ItemMetadata = {},
             SyncStats = {},
             HistoryLog = {},
             MinimapIcon = { hide = false, angle = 0 },
+            PersonalData = {},
         }
     end
     if not MarketSyncDB.HistoryLog then MarketSyncDB.HistoryLog = {} end
     if not MarketSyncDB.BlockedUsers then MarketSyncDB.BlockedUsers = {} end
-    if MarketSyncDB.PassiveSync == nil then MarketSyncDB.PassiveSync = false end
+    if MarketSyncDB.PassiveSync == nil then MarketSyncDB.PassiveSync = true end
     if MarketSyncDB.DebugMode == nil then MarketSyncDB.DebugMode = false end
-    if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = false end
+    if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
+    if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
     if not MarketSyncDB.ItemMetadata then MarketSyncDB.ItemMetadata = {} end
     if not MarketSyncDB.SyncStats then MarketSyncDB.SyncStats = {} end
+    if not MarketSyncDB.WeeklySyncStats then 
+        MarketSyncDB.WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} } 
+    end
     if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false } end
+    if not MarketSyncDB.PersonalData then MarketSyncDB.PersonalData = {} end
 end
 
 -- ================================================================
@@ -82,11 +98,30 @@ end
 
 function MarketSync.TrackSync(sender, count)
     if sender and MarketSync.IsBlocked(sender) then return end
+    
+    -- Track All-Time Stats
     if not MarketSyncDB.SyncStats[sender] then
         MarketSyncDB.SyncStats[sender] = { count = 0, last = 0 }
     end
     MarketSyncDB.SyncStats[sender].count = MarketSyncDB.SyncStats[sender].count + count
     MarketSyncDB.SyncStats[sender].last = time()
+    
+    -- Track Weekly Stats
+    if not MarketSyncDB.WeeklySyncStats then
+        MarketSyncDB.WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} }
+    end
+    
+    local currentWeek = date("%Y-%W")
+    if MarketSyncDB.WeeklySyncStats.yearWeek ~= currentWeek then
+        MarketSyncDB.WeeklySyncStats.yearWeek = currentWeek
+        MarketSyncDB.WeeklySyncStats.data = {} -- Wipe stats for the new week
+    end
+    
+    if not MarketSyncDB.WeeklySyncStats.data[sender] then
+        MarketSyncDB.WeeklySyncStats.data[sender] = { count = 0, last = 0 }
+    end
+    MarketSyncDB.WeeklySyncStats.data[sender].count = MarketSyncDB.WeeklySyncStats.data[sender].count + count
+    MarketSyncDB.WeeklySyncStats.data[sender].last = time()
 end
 
 -- ================================================================

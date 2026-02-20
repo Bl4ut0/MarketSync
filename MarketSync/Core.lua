@@ -146,6 +146,19 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         MarketSync.InitializeDB()
         CreateMinimapButton()
 
+        -- FIRST LAUNCH PROTECTION: If the user doesn't have an offline personal snapshot pool yet, 
+        -- forcibly snapshot whatever exists in their Live Auctionator DB into the mirror pool right now.
+        -- This guarantees new users don't see an empty "Personal Snapshot" screen if they've used Auctionator before.
+        C_Timer.After(5, function()
+            local pCount = 0
+            if MarketSyncDB and MarketSyncDB.PersonalData then
+                for _ in pairs(MarketSyncDB.PersonalData) do pCount = pCount + 1; break end
+            end
+            if pCount == 0 and MarketSync.SnapshotPersonalScan then
+                MarketSync.SnapshotPersonalScan()
+            end
+        end)
+
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
     elseif event == "PLAYER_ENTERING_WORLD" then
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
@@ -171,6 +184,27 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 end
             end
         end)
+        
+        -- Register for AH events so we can invalidate the scan cache dynamically
+        self:RegisterEvent("AUCTION_HOUSE_CLOSED")
+        
+    elseif event == "AUCTION_HOUSE_CLOSED" then
+        if MarketSyncDB then
+            MarketSyncDB.PersonalScanTime = time()
+
+            -- Immediately snapshot the latest DB state exclusively to the PersonalData pool
+            if MarketSync.SnapshotPersonalScan then
+                MarketSync.SnapshotPersonalScan()
+            end
+
+            if MarketSyncDB.CachedScanStats then
+                MarketSyncDB.CachedScanStats = nil
+                if MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+                    -- Broadcast our new findings roughly 2 seconds after closing the AH
+                    C_Timer.After(2, function() MarketSync.SendAdvertisement() end)
+                end
+            end
+        end
     end
 end)
 
@@ -184,9 +218,7 @@ SlashCmdList["MarketSync"] = function(msg)
     local cmd, arg = msg:match("^(%S*)%s*(.*)$")
     cmd = cmd:lower()
 
-    if cmd == "sync" then
-        MarketSync.BroadcastRecentData()
-    elseif cmd == "search" or cmd == "browse" or cmd == "ui" then
+    if cmd == "search" or cmd == "browse" or cmd == "ui" then
         if MarketSync_ToggleUI then
             MarketSync_ToggleUI()
         end
@@ -202,8 +234,7 @@ SlashCmdList["MarketSync"] = function(msg)
         if #arg > 0 then MarketSync.ToggleBlock(arg) else print("Usage: /ms unblock [playername]") end
     else
         print("|cFF00FF00[MarketSync]|r Commands:")
-        print("  /ms sync   - Broadcasts today's data to guild.")
-        print("  /ms search - Search local database.")
+        print("  /ms search - Open the browse window.")
         print("  /ms config - Open settings panel.")
         print("  /ms block [name] - Block a sender.")
     end

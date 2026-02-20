@@ -110,6 +110,28 @@ local function CreateMainFrame()
     titleText:SetPoint("TOP", 0, -18)
     titleText:SetText("Browse Auctions")
     MainFrame.titleText = titleText
+    
+    -- --- SYNC MONITOR ---
+    local syncMonitor = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    syncMonitor:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -35, -20)
+    syncMonitor:SetJustifyH("RIGHT")
+    syncMonitor:SetText("|cff888888Network: Idle|r")
+    MainFrame.syncMonitor = syncMonitor
+    
+    function MarketSync.UpdateNetworkUI(txRate, rxRate, statusText)
+        if not MainFrame or not MainFrame.syncMonitor then return end
+        if statusText then
+            MainFrame.syncMonitor:SetText(statusText)
+        elseif txRate > 0 and rxRate > 0 then
+            MainFrame.syncMonitor:SetText(string.format("|cff00ff00Rx: %d/s|r   |cffff8800Tx: %d/s|r", rxRate, txRate))
+        elseif txRate > 0 then
+            MainFrame.syncMonitor:SetText(string.format("|cffff8800Sending: %d items/sec|r", txRate))
+        elseif rxRate > 0 then
+            MainFrame.syncMonitor:SetText(string.format("|cff00ff00Receiving: %d items/sec|r", rxRate))
+        else
+            MainFrame.syncMonitor:SetText("|cff888888Network: Idle|r")
+        end
+    end
 
     -- ================================================================
     -- BOTTOM TABS
@@ -131,7 +153,7 @@ local function CreateMainFrame()
                 if contentFrames[i] then contentFrames[i]:Hide() end
             end
         end
-        local titles = {"Browse Auctions (Personal)", "Browse Auctions (Guild Sync)", "Sync Leaderboard", "Addon Settings"}
+        local titles = {"Browse Auctions (Personal Scan)", "Browse Auctions (Guild Sync)", "Sync Leaderboard", "Addon Settings"}
         titleText:SetText(titles[id] or "")
     end
 
@@ -223,12 +245,30 @@ local function CreateMainFrame()
     lbr:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-BotRight")
     lbr:SetSize(256, 256); lbr:SetPoint("TOPLEFT", lbm, "TOPRIGHT")
 
-    local lColNames = {"Rank", "Player Name", "Items Synced", "Last Seen"}
-    local lColWidths = {60, 200, 150, 150}
+    -- Title and Toggle Buttons
+    local leaderTitle = LeaderContent:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    leaderTitle:SetPoint("TOPLEFT", 100, -70)
+    leaderTitle:SetText("Top Swarm Contributors")
+
+    local leaderboardMode = "alltime" -- "alltime" or "weekly"
+
+    local weeklyBtn = CreateFrame("Button", nil, LeaderContent, "UIPanelButtonTemplate")
+    weeklyBtn:SetSize(100, 24)
+    weeklyBtn:SetPoint("TOPLEFT", LeaderContent, "TOPRIGHT", -220, -68)
+    weeklyBtn:SetText("Weekly")
+    
+    local allTimeBtn = CreateFrame("Button", nil, LeaderContent, "UIPanelButtonTemplate")
+    allTimeBtn:SetSize(100, 24)
+    allTimeBtn:SetPoint("RIGHT", weeklyBtn, "LEFT", -5, 0)
+    allTimeBtn:SetText("All Time")
+
+    -- Column Headers
+    local lColNames = {"Rank", "Player Name", "Items Seeded", "Last Seen"}
+    local lColWidths = {60, 220, 160, 160}
     local lColX = 100
     for i, cname in ipairs(lColNames) do
         local hdr = LeaderContent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hdr:SetPoint("TOPLEFT", lColX, -65)
+        hdr:SetPoint("TOPLEFT", lColX, -110)
         hdr:SetWidth(lColWidths[i])
         hdr:SetJustifyH("LEFT")
         hdr:SetText("|cffffd700" .. cname .. "|r")
@@ -236,32 +276,58 @@ local function CreateMainFrame()
     end
 
     local sep = LeaderContent:CreateTexture(nil, "ARTWORK")
-    sep:SetColorTexture(0.5, 0.5, 0.5, 0.3)
+    sep:SetColorTexture(1, 0.84, 0, 0.2) -- subtle gold line
     sep:SetSize(600, 1)
-    sep:SetPoint("TOPLEFT", 100, -80)
+    sep:SetPoint("TOPLEFT", 100, -125)
 
     local lRows = {}
-    LeaderContent:SetScript("OnShow", function()
+    local emptyText = LeaderContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    emptyText:SetPoint("CENTER", 0, -20)
+    emptyText:Hide()
+    
+    local function UpdateLeaderboardUI()
         for _, r in pairs(lRows) do r:Hide() end
+        emptyText:Hide()
+        
+        -- Update button states
+        if leaderboardMode == "alltime" then
+            allTimeBtn:Disable()
+            weeklyBtn:Enable()
+        else
+            allTimeBtn:Enable()
+            weeklyBtn:Disable()
+        end
+        
         local list = {}
-        if MarketSyncDB and MarketSyncDB.SyncStats then
-            for u, s in pairs(MarketSyncDB.SyncStats) do
-                table.insert(list, {name=u, count=s.count, last=s.last})
+        if leaderboardMode == "alltime" then
+            if MarketSyncDB and MarketSyncDB.SyncStats then
+                for u, s in pairs(MarketSyncDB.SyncStats) do
+                    table.insert(list, {name=u, count=s.count, last=s.last})
+                end
+            end
+        else
+            if MarketSyncDB and MarketSyncDB.WeeklySyncStats and MarketSyncDB.WeeklySyncStats.data then
+                for u, s in pairs(MarketSyncDB.WeeklySyncStats.data) do
+                    table.insert(list, {name=u, count=s.count, last=s.last})
+                end
             end
         end
         table.sort(list, function(a,b) return a.count > b.count end)
 
         local y = 0
         for i, d in ipairs(list) do
-            if i > 20 then break end
+            if i > 12 then break end
             local row = lRows[i]
             if not row then
                 row = CreateFrame("Frame", nil, LeaderContent)
-                row:SetSize(600, 25)
+                row:SetSize(600, 22)
+                row.highlight = row:CreateTexture(nil, "HIGHLIGHT")
+                row.highlight:SetAllPoints()
+                row.highlight:SetColorTexture(1, 1, 1, 0.05)
                 row.rank = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); row.rank:SetPoint("LEFT", 0, 0); row.rank:SetWidth(60); row.rank:SetJustifyH("LEFT")
-                row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); row.name:SetPoint("LEFT", 60, 0); row.name:SetWidth(200); row.name:SetJustifyH("LEFT")
-                row.count = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); row.count:SetPoint("LEFT", 260, 0); row.count:SetWidth(150); row.count:SetJustifyH("LEFT")
-                row.last = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight"); row.last:SetPoint("LEFT", 410, 0); row.last:SetWidth(150); row.last:SetJustifyH("LEFT")
+                row.name = row:CreateFontString(nil, "ARTWORK", "GameFontNormal"); row.name:SetPoint("LEFT", 60, 0); row.name:SetWidth(220); row.name:SetJustifyH("LEFT")
+                row.count = row:CreateFontString(nil, "ARTWORK", "GameFontNormal"); row.count:SetPoint("LEFT", 280, 0); row.count:SetWidth(160); row.count:SetJustifyH("LEFT")
+                row.last = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall"); row.last:SetPoint("LEFT", 440, 0); row.last:SetWidth(160); row.last:SetJustifyH("LEFT")
                 lRows[i] = row
             end
 
@@ -269,11 +335,19 @@ local function CreateMainFrame()
             if i == 1 then prefix = "|cffffd700#1 |r"
             elseif i == 2 then prefix = "|cffc0c0c0#2 |r"
             elseif i == 3 then prefix = "|cffcd7f32#3 |r"
-            else prefix = "#" .. i .. " " end
+            else prefix = "|cff888888#" .. i .. " |r" end
 
             row.rank:SetText(prefix)
-            row.name:SetText(d.name)
-            row.count:SetText("|cff00ff00" .. d.count .. "|r items")
+            -- Apply a class color styling to the player name if possible? Let's just use bright white for now.
+            row.name:SetText("|cffffffff" .. d.name .. "|r")
+            
+            local function FormatCount(c)
+                if c >= 1000000 then return string.format("%.1fm", c / 1000000)
+                elseif c >= 1000 then return string.format("%.1fk", c / 1000)
+                else return tostring(c) end
+            end
+
+            row.count:SetText("|cff00ff00" .. FormatCount(d.count) .. "|r items")
 
             local ago = time() - d.last
             if ago < 60 then
@@ -286,17 +360,28 @@ local function CreateMainFrame()
                 row.last:SetText(math.floor(ago/86400) .. " days ago")
             end
 
-            row:SetPoint("TOPLEFT", 100, -85 - y)
+            row:SetPoint("TOPLEFT", 100, -131 - y)
             row:Show()
-            y = y + 25
+            y = y + 22
         end
 
         if #list == 0 then
-            local empty = LeaderContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-            empty:SetPoint("CENTER", 0, -20)
-            empty:SetText("No sync data yet. Sync with guild members to see stats!")
+            emptyText:SetText(leaderboardMode == "alltime" and "No sync data yet. Sync with guild members to see stats!" or "No sync data this week.")
+            emptyText:Show()
         end
+    end
+    
+    weeklyBtn:SetScript("OnClick", function()
+        leaderboardMode = "weekly"
+        UpdateLeaderboardUI()
     end)
+    
+    allTimeBtn:SetScript("OnClick", function()
+        leaderboardMode = "alltime"
+        UpdateLeaderboardUI()
+    end)
+
+    LeaderContent:SetScript("OnShow", UpdateLeaderboardUI)
 
     -- ================================================================
     -- TAB 4: SETTINGS
@@ -421,30 +506,6 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.DebugMode) end
     end)
 
-    -- Actions Section
-    local actHeader = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    actHeader:SetPoint("TOPLEFT", chkDebug, "BOTTOMLEFT", 0, -25)
-    actHeader:SetText("|cffffd700Actions|r")
-
-    local actSep = SettingsContent:CreateTexture(nil, "ARTWORK")
-    actSep:SetColorTexture(0.6, 0.6, 0.6, 0.4)
-    actSep:SetSize(350, 1)
-    actSep:SetPoint("TOPLEFT", actHeader, "BOTTOMLEFT", 0, -4)
-
-    local btnSync = CreateFrame("Button", nil, SettingsContent, "UIPanelButtonTemplate")
-    btnSync:SetPoint("TOPLEFT", actSep, "BOTTOMLEFT", 0, -10)
-    btnSync:SetSize(160, 25)
-    btnSync:SetText("Run Bulk Sync")
-    btnSync:SetScript("OnClick", function()
-        if MarketSync.BroadcastRecentData then MarketSync.BroadcastRecentData() end
-    end)
-
-    local syncBtnDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    syncBtnDesc:SetPoint("LEFT", btnSync, "RIGHT", 8, 0)
-    syncBtnDesc:SetWidth(180)
-    syncBtnDesc:SetJustifyH("LEFT")
-    syncBtnDesc:SetText("|cff888888Broadcasts your latest scan data to the guild.|r")
-
     -- --- RIGHT COLUMN: Quick Info + Cache Speed + Manage Users ---
     local rightColX = 430
 
@@ -536,6 +597,100 @@ local function CreateMainFrame()
     manageUsersDesc:SetWidth(140)
     manageUsersDesc:SetJustifyH("LEFT")
     manageUsersDesc:SetText("|cff888888Block/unblock sync partners.|r")
+
+    -- Open Debug Console button
+    local btnNetworkMonitor = CreateFrame("Button", nil, SettingsContent, "UIPanelButtonTemplate")
+    btnNetworkMonitor:SetSize(140, 22)
+    btnNetworkMonitor:SetPoint("TOPLEFT", btnManageUsers, "BOTTOMLEFT", 0, -10)
+    btnNetworkMonitor:SetText("Debug Console")
+
+    local monitorDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    monitorDesc:SetPoint("LEFT", btnNetworkMonitor, "RIGHT", 8, 0)
+    monitorDesc:SetWidth(150)
+    monitorDesc:SetJustifyH("LEFT")
+    monitorDesc:SetText("|cff888888View network stream and cache logs.|r")
+
+    btnNetworkMonitor:SetScript("OnClick", function()
+        if MarketSync.ToggleNetworkMonitor then
+            MarketSync.ToggleNetworkMonitor()
+        end
+    end)
+
+    -- Reset Data button
+    local btnResetData = CreateFrame("Button", nil, SettingsContent, "UIPanelButtonTemplate")
+    btnResetData:SetSize(140, 22)
+    btnResetData:SetPoint("TOPLEFT", btnNetworkMonitor, "BOTTOMLEFT", 0, -10)
+    btnResetData:SetText("Reset Data")
+
+    local resetDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    resetDesc:SetPoint("LEFT", btnResetData, "RIGHT", 8, 0)
+    resetDesc:SetWidth(150)
+    resetDesc:SetJustifyH("LEFT")
+    resetDesc:SetText("|cffff4444Wipe sync data & make new snapshot.|r")
+
+    btnResetData:SetScript("OnClick", function()
+        StaticPopupDialogs["MARKETSYNC_CONFIRM_RESET"] = {
+            text = "Are you sure you want to reset all MarketSync data? This will clear your personal snapshot and guild sync data, but will NOT delete your local Auctionator database. A new snapshot will be created immediately.",
+            button1 = "Yes",
+            button2 = "No",
+            OnAccept = function()
+                if MarketSyncDB then
+                    if MarketSyncDB.PersonalData then wipe(MarketSyncDB.PersonalData) end
+                    if MarketSyncDB.ItemMetadata then wipe(MarketSyncDB.ItemMetadata) end
+                    if MarketSyncDB.HistoryLog then wipe(MarketSyncDB.HistoryLog) end
+                    if MarketSyncDB.SyncStats then wipe(MarketSyncDB.SyncStats) end
+                    if MarketSyncDB.WeeklySyncStats and MarketSyncDB.WeeklySyncStats.data then wipe(MarketSyncDB.WeeklySyncStats.data) end
+                    MarketSyncDB.PersonalScanTime = nil
+                    MarketSyncDB.CachedScanStats = nil
+                end
+                
+                if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+                
+                if MarketSync.SnapshotPersonalScan then
+                    MarketSync.SnapshotPersonalScan()
+                end
+                
+                print("|cFF00FF00[MarketSync]|r All sync data has been wiped and a new snapshot was taken.")
+                
+                if activeBrowseTab == 1 or activeBrowseTab == 2 then
+                    if MarketSync.BuildSearchIndex then
+                        MarketSync.BuildSearchIndex()
+                    end
+                end
+                
+                -- Update settings stats view if currently showing
+                if MarketSyncMainFrame and MarketSyncMainFrame.UpdateRightStats then
+                    MarketSyncMainFrame.UpdateRightStats()
+                end
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+        }
+        StaticPopup_Show("MARKETSYNC_CONFIRM_RESET")
+    end)
+
+    -- Rebuild Cache button
+    local btnRebuildIndex = CreateFrame("Button", nil, SettingsContent, "UIPanelButtonTemplate")
+    btnRebuildIndex:SetSize(140, 22)
+    btnRebuildIndex:SetPoint("TOPLEFT", btnResetData, "BOTTOMLEFT", 0, -10)
+    btnRebuildIndex:SetText("Rebuild Caches")
+
+    local rebuildDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    rebuildDesc:SetPoint("LEFT", btnRebuildIndex, "RIGHT", 8, 0)
+    rebuildDesc:SetWidth(180)
+    rebuildDesc:SetJustifyH("LEFT")
+    rebuildDesc:SetText("|cff888888Manually process search index.|r")
+
+    btnRebuildIndex:SetScript("OnClick", function()
+        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        if MarketSync.BuildSearchIndex then
+            MarketSync.BuildSearchIndex()
+            if MarketSyncDB and MarketSyncDB.DebugMode then
+                print("|cFF00FF00[MarketSync]|r Triggered manual index rebuild.")
+            end
+        end
+    end)
 
     -- ================================================================
     -- USER MANAGEMENT POPUP

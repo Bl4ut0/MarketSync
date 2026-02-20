@@ -47,17 +47,34 @@ local function GetItemHistory(dbKey)
     if not priceData or not priceData.h then return {} end
 
     local history = {}
+    local meta = MarketSyncDB and MarketSyncDB.ItemMetadata and MarketSyncDB.ItemMetadata[dbKey]
+
     for dayStr, highPrice in pairs(priceData.h) do
         local day = tonumber(dayStr)
         if day then
             local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
             local qty = priceData.a and priceData.a[dayStr] or 0
+
+            -- Per-day source attribution (new system)
+            local source = "Personal"
+            if meta then
+                if meta.days and meta.days[dayStr] then
+                    -- New per-day attribution
+                    local s = meta.days[dayStr].source
+                    source = s and (s:match("^([^%-]+)") or s) or "Personal"
+                elseif meta.lastSource then
+                    -- Legacy flat fallback for old data
+                    source = meta.lastSource:match("^([^%-]+)") or meta.lastSource
+                end
+            end
+
             table.insert(history, {
                 day = day,
                 high = highPrice,
                 low = lowPrice,
                 price = highPrice,
                 quantity = qty,
+                source = source,
             })
         end
     end
@@ -692,16 +709,8 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
                 row.lowText:SetText(FormatMoney(d.low))
                 row.qtyText:SetText(d.quantity > 0 and d.quantity or "-")
                 row.ageText:SetText(ScanDayAge(d.day))
-
-                -- Source info from metadata
-                local source = "Scanned"
-                if self.currentDbKey and MarketSyncDB and MarketSyncDB.ItemMetadata then
-                    local meta = MarketSyncDB.ItemMetadata[self.currentDbKey]
-                    if meta and meta.source then
-                        source = meta.source:match("^([^%-]+)") or meta.source
-                    end
-                end
-                row.sourceText:SetText(source)
+                -- Source comes directly from the per-day attribution baked into historyData
+                row.sourceText:SetText(d.source or "Personal")
                 row:Show()
             else
                 row:Hide()
