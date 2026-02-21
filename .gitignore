@@ -1,27 +1,5 @@
-# User Requested Ignores
-.Auctionator/
-.BlizzardInterfaceCode/
-.Versions/
-*.png
-*.PNG
-
-# OS Generated Files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Editor/IDE Files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-*.bak
-
-# Logs and Temporary Files
-*.log
-*.tmp
+CURSEFORGE.md
+GITHUB_RELEASE.md
+.Versions
+.BlizzardInterfaceCode
+.Auctionator

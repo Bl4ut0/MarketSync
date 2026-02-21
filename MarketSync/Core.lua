@@ -10,7 +10,7 @@ local category  -- Forward declaration for minimap/options access
 -- MINIMAP BUTTON
 -- ================================================================
 local function CreateMinimapButton()
-    if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 0 } end
+    if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 3.75 } end
     if MarketSyncDB.MinimapIcon.hide then return end
 
     local btn = CreateFrame("Button", "MarketSyncMinimapButton", Minimap)
@@ -31,7 +31,7 @@ local function CreateMinimapButton()
     border:SetPoint("TOPLEFT", 0, 0)
 
     local function UpdatePosition()
-        local angle = MarketSyncDB.MinimapIcon.angle or 0
+        local angle = MarketSyncDB.MinimapIcon.angle or 3.75
         local radius = 80
         local x = math.cos(angle) * radius
         local y = math.sin(angle) * radius
@@ -150,11 +150,28 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- forcibly snapshot whatever exists in their Live Auctionator DB into the mirror pool right now.
         -- This guarantees new users don't see an empty "Personal Snapshot" screen if they've used Auctionator before.
         C_Timer.After(5, function()
-            local pCount = 0
+            local needsSnapshot = false
             if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
-                for _ in pairs(MarketSync.GetRealmDB().PersonalData) do pCount = pCount + 1; break end
+                local pdCount = 0
+                for _ in pairs(MarketSync.GetRealmDB().PersonalData) do pdCount = pdCount + 1 end
+                
+                local auctCount = 0
+                if Auctionator and Auctionator.Database and Auctionator.Database.db then
+                    for _ in pairs(Auctionator.Database.db) do auctCount = auctCount + 1 end
+                end
+                
+                if pdCount == 0 then
+                    needsSnapshot = true  -- First launch, no data at all
+                elseif auctCount > pdCount + 500 then
+                    needsSnapshot = true  -- Pre-0.4.5 data without variant keys
+                    if MarketSyncDB and MarketSyncDB.DebugMode then
+                        print("|cFF00FF00[MarketSync]|r Migration: PersonalData is missing variant keys (" .. pdCount .. " vs " .. auctCount .. "), re-snapshotting...")
+                    end
+                end
+            else
+                needsSnapshot = true
             end
-            if pCount == 0 and MarketSync.SnapshotPersonalScan then
+            if needsSnapshot and MarketSync.SnapshotPersonalScan then
                 MarketSync.SnapshotPersonalScan()
             end
         end)
@@ -219,6 +236,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                     -- Broadcast our new findings roughly 2 seconds after closing the AH
                     C_Timer.After(2, function() MarketSync.SendAdvertisement() end)
                 end
+            end
+            
+            -- Invalidate browse index so Guild Sync tab reflects fresh scan data
+            -- then trigger a rebuild so the async resolver starts fresh
+            if MarketSync.InvalidateIndexCache then
+                MarketSync.InvalidateIndexCache()
+            end
+            if MarketSync.BuildSearchIndex then
+                C_Timer.After(1, function() MarketSync.BuildSearchIndex() end)
             end
         end
     end

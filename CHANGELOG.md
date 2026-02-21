@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-20
+### Improved
+- **Improved**: Full `dbKey` string preservation (Protocol v4). The sync engine now safely transmits the raw Auctionator suffix formats (e.g. `11976:0:0:0:0:0:684:0`) utilizing a new `_` delimiter. This guarantees that **all** randomized enchantments and suffix items ("of the Bear", "of the Eagle") are perfectly preserved, synchronized, and accurately priced across the guild.
+- **Improved**: Settings tab Auto-Refresh. The Index Cache status indicators on the Settings page now smoothly poll and update in real-time every 0.5 seconds, preventing the progress from looking "stuck" until you swap tabs.
+- **Improved**: `ACK` Overload Prevention. Added a randomized 1-to-20 second jitter delay to the final `ACK` message when a client finishes downloading a full database. This completely prevents guild channel disconnection floods when massive 500-player guilds all finish a bulk transfer simultaneously.
+- **Improved**: The default Minimap Icon angle was moved from 0 degrees (3 o'clock) to 215 degrees (bottom-left) to cleanly avoid overlapping with Blizzard's default tracking and zoom buttons.
+- **Improved**: Added **Hard Search** capability logic to the Browse index engine. Users can now perfectly isolate massive variant pools by wrapping their query string in exact quotes (e.g., `"Runecloth"` vs just `Runecloth`), immediately hiding derivative items.
+
+### Fixed
+- **Fixed**: UI Browse Indexing Drop. Rewrote the `ParseItemID` omni-parser to intelligently locate numeric bases regardless of arbitrary Auctionator string prefixes (`item:`, `i:`, letter suffixes). This completely fixes the bug where tens of thousands of variant items correctly existed in the local cache but silently failed to appear in the Browse search list.
+
+## [0.4.5] - 2026-02-20
+### Fixed
+- **Fixed**: A critical sender coroutine starvation bug that caused mid-transfer disconnects. When large stretches of items were skipped (unparseable dbKey formats), the coroutine would run for too long without yielding, causing WoW to silently kill the execution frame. A safety yield every 500 scanned entries now prevents this.
+- **Fixed**: ADV item count inflation. `CountRecentItems` was counting ALL dbKeys in the Auctionator database (including unparseable suffix formats like `"12345:0:0:0"`), but `RespondToPull` could only send items with recognized key formats (`%d+`, `g:%d+`, `p:%d+`). The advertised count now matches the actual transferable count, preventing receivers from seeing partial sync percentages that never reach 100%.
+- **Fixed**: Personal Scan snapshot inflation. `SnapshotPersonalScan` was cloning every entry from the Auctionator database—including ~20,000 items with unparseable dbKey formats—into the PersonalData pool. The snapshot now filters with the same parseable-key validation used by the sync engine, so the reported item count matches what can actually be displayed in the Browse tab.
+- **Fixed**: Sync freshness backwards compatibility with v0.4.3 clients. When the sender doesn't include TSF (legacy client), the system now correctly falls back to item count comparison instead of silently failing the freshness check.
+
+### Improved
+- **Improved**: Explicit `END` packet for verified sync completion. The sender now transmits a dedicated `END;itemsSent;messagesSent;senderTSF` control message when the transfer finishes, allowing the receiver to immediately commit instead of waiting for an 8-second idle timeout.
+- **Improved**: Verified full-sync validation. The receiver compares its `RxCount` against `itemsSent` from the END packet. Only when `RxCount >= itemsSent` does it stamp its freshness. Partial or timed-out syncs remain eligible for re-PULL on the next ADV cycle.
+- **Improved**: Sender TSF passthrough prevents ping-pong sync loops. The receiver stamps the sender's original `PersonalScanTime` (not `time()`) so both clients share the same TSF watermark and neither sees the other as "fresher."
+- **Improved**: ADV and PULL suppression during active transfers. Clients no longer broadcast advertisements or initiate new PULLs while actively sending or receiving data, eliminating redundant sync cycles.
+- **Improved**: Personal Scan snapshot isolation. `SnapshotPersonalScan()` is no longer called after guild sync commits — the Personal Scan tab only updates when the player personally visits the Auction House.
+- **Improved**: Guild Sync tab redesigned as "Best Available Data" view. Instead of only showing items tagged with network metadata, the Guild Sync tab now indexes the complete live Auctionator database—your personal scan as baseline plus any incoming guild sync data merged on top. This ensures the Guild tab always shows the most up-to-date prices regardless of source. When you scan the AH, the index is automatically invalidated and rebuilt with your fresh data.
+- **Improved**: Automatic data migration on login. If existing `PersonalData` contains unparseable legacy keys from pre-0.4.5, the addon automatically re-snapshots on login to clean up inflated counts—no manual data wipe required.
+- **Improved**: Debug Console line caps set to 500 lines (network log, cache stream) and 50 lines (swarm queue) to prevent unbounded RAM growth during long sessions.
+- **Improved**: Cache builder coroutine ticker now respects the Cache Speed slider interval instead of hardcoded 0.01s.
+
 ## [0.4.4] - 2026-02-20
 ### Fixed
 - **Fixed**: A severe ambiguity bug in the Swarm consensus logic. Previously, if two users scanned on the exact same "day" (e.g., today), the sync receiver would aggressively reject the upload if the incoming payload had superficially *fewer* items due to natural Auction House churn over the span of a few hours. The Swarm Receiver now intelligently parses the exact Realm Timestamp (`TSF`), prioritizing absolute time freshness over volatile item count differentials.

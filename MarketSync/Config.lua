@@ -47,7 +47,7 @@ function MarketSync.InitializeDB()
             ItemMetadata = {},
             SyncStats = {},
             HistoryLog = {},
-            MinimapIcon = { hide = false, angle = 0 },
+            MinimapIcon = { hide = false, angle = 3.75 },
             PersonalData = {},
         }
     end
@@ -58,7 +58,7 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
-    if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false } end
+    if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 3.75 } end
     
     if not MarketSyncDB.RealmData then MarketSyncDB.RealmData = {} end
 

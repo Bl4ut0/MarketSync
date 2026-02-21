@@ -178,12 +178,12 @@ end
 -- PARSE ITEM ID from a dbKey
 -- ================================================================
 local function ParseItemID(dbKey)
+    if type(dbKey) == "number" then return dbKey end
     if type(dbKey) == "string" then
-        if dbKey:match("^%d+$") then return tonumber(dbKey)
-        elseif dbKey:match("^g:(%d+)") then return tonumber(dbKey:match("^g:(%d+)"))
-        elseif dbKey:match("^p:(%d+)") then return tonumber(dbKey:match("^p:(%d+)")) end
-    elseif type(dbKey) == "number" then
-        return dbKey
+        -- Find the first contiguous block of digits, safely ignoring prefixes like 'item:', 'g:', or 'p:'
+        -- as well as safely stripping out suffix variations like ':0:0:684:0'
+        local idStr = dbKey:match("(%d+)")
+        if idStr then return tonumber(idStr) end
     end
     return nil
 end
@@ -277,16 +277,16 @@ local function BuildSearchIndex(callback)
             MarketSync.LogCacheEvent(string.format("|cff00ff00[Personal Done]|r %d items resolved, %d pending item data loads.", PersonalResolved, PersonalTotal - PersonalResolved))
         end
 
-        -- 2. BUILD GUILD SYNC CACHE (from Live AH Engine filtering Meta)
+        -- 2. BUILD GUILD SYNC CACHE (from complete live Auctionator DB)
+        -- This represents the "best available data" — your personal scan as baseline
+        -- plus any incoming guild sync data merged on top. No metadata filter needed.
         for dbKey, data in pairs(Auctionator.Database.db) do
-            local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
-            -- Only include true network items
-            if meta and meta.source ~= "Personal" then
-                GuildTotal = GuildTotal + 1
+            if type(data) == "table" and data.m and data.m > 0 then
                 local itemID = ParseItemID(dbKey)
                 if itemID then
+                    GuildTotal = GuildTotal + 1
                     local entry = BuildIndexEntry(dbKey, itemID, data, false)
-                    if entry and entry.hasMeta then
+                    if entry then
                         GuildIndex[dbKey] = entry
                         GuildResolved = GuildResolved + 1
                     else
@@ -299,7 +299,7 @@ local function BuildSearchIndex(callback)
             totalProcessed = totalProcessed + 1
             if count >= currentYieldLimit then
                 if MarketSync.LogCacheEvent then
-                    MarketSync.LogCacheEvent(string.format("|cff88aaff[Guild]|r Processed %d entries so far (%d with meta resolved).", totalProcessed, GuildResolved))
+                    MarketSync.LogCacheEvent(string.format("|cff88aaff[Guild]|r Processed %d entries so far (%d resolved).", totalProcessed, GuildResolved))
                 end
                 coroutine.yield()
                 count = 0
@@ -310,13 +310,22 @@ local function BuildSearchIndex(callback)
         -- First pass complete - mark as ready so users can browse
         PersonalIndexReady = true; GuildIndexReady = true
         PersonalIndexBuilding = false
+        local pPending, gPending = 0, 0
+        for _ in pairs(PersonalPending) do pPending = pPending + 1 end
+        for _ in pairs(GuildPending) do gPending = gPending + 1 end
         if MarketSync.LogCacheEvent then
-            MarketSync.LogCacheEvent(string.format("|cff00ff00[Done]|r Index build complete. Personal: %d items. Guild: %d items.", PersonalResolved, GuildResolved))
+            if pPending + gPending > 0 then
+                MarketSync.LogCacheEvent(string.format("|cff00ff00[Pass 1 Done]|r Personal: %d resolved, %d pending. Guild: %d resolved, %d pending. Async resolver running...", PersonalResolved, pPending, GuildResolved, gPending))
+            else
+                MarketSync.LogCacheEvent(string.format("|cff00ff00[Done]|r Index build complete. Personal: %d items. Guild: %d items.", PersonalResolved, GuildResolved))
+            end
         end
         for _, cb in ipairs(IndexCallbacks) do cb() end
         wipe(IndexCallbacks)
     end)
 
+    -- Build ticker runs fast (0.01s) so items resolve quickly during first pass.
+    -- CPU load per tick is controlled by preset.yieldEvery, not ticker speed.
     activeBuildTicker = C_Timer.NewTicker(0.01, function()
         if coroutine.status(co) == "dead" then activeBuildTicker:Cancel(); activeBuildTicker = nil; return end
         local ok, err = coroutine.resume(co)
@@ -474,28 +483,15 @@ function MarketSync.AddToGuildIncoming(dbKey)
     if entry then
         if GuildSyncActive then
             -- Route to incoming buffer
-            if entry.hasMeta then
-                GuildIncomingBuffer[dbKey] = entry
-                GuildIncomingCount = GuildIncomingCount + 1
-            elseif GuildIndex[dbKey] then
-                -- Item exists in GuildIndex but is now disqualified
-                -- Mark for removal in the buffer
-                GuildIncomingBuffer[dbKey] = false
-            end
+            GuildIncomingBuffer[dbKey] = entry
+            GuildIncomingCount = GuildIncomingCount + 1
         else
-            -- No active sync, update guild index directly if qualified
+            -- No active sync, update guild index directly
             local isNewGuild = not GuildIndex[dbKey]
-            if entry.hasMeta then
-                GuildIndex[dbKey] = entry
-                if isNewGuild then
-                    GuildTotal = GuildTotal + 1
-                    GuildResolved = GuildResolved + 1
-                end
-            elseif GuildIndex[dbKey] then
-                -- Item transitioned out of Guild status
-                GuildIndex[dbKey] = nil
-                GuildTotal = GuildTotal - 1
-                GuildResolved = GuildResolved - 1
+            GuildIndex[dbKey] = entry
+            if isNewGuild then
+                GuildTotal = GuildTotal + 1
+                GuildResolved = GuildResolved + 1
             end
         end
     else
@@ -945,7 +941,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
         elseif self.dataSource == "guild" then
             local latestUser, latestTime = nil, 0
-            local syncedItems = 0
             local uniqueSyncers = 0
             if MarketSyncDB and MarketSync.GetRealmDB().SyncStats then
                 for user, stats in pairs(MarketSync.GetRealmDB().SyncStats) do
@@ -956,10 +951,15 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     end
                 end
             end
-            if MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
-                for _ in pairs(MarketSync.GetRealmDB().ItemMetadata) do syncedItems = syncedItems + 1 end
-            end
-            if latestUser then
+            
+            -- Check if our personal scan is newer than the latest guild sync
+            local personalTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime or 0
+            if personalTime > latestTime then
+                local timeStr = MarketSync.FormatRealmTime(personalTime)
+                local myName = UnitName("player") or "You"
+                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. myName .. "|r")
+                self.syncLabel:SetText("|cff00ff00Latest Data|r")
+            elseif latestUser then
                 local timeStr = MarketSync.FormatRealmTime(latestTime)
                 local shortName = latestUser:match("^([^%-]+)") or latestUser
                 self.statusText:SetText("|cffffd700" .. timeStr .. " " .. shortName .. "|r")
@@ -968,7 +968,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 self.statusText:SetText("|cffff8800No sync data yet|r")
                 self.syncLabel:SetText("")
             end
-            self.itemCountText:SetText("|cffffd700" .. syncedItems .. "|r synced")
+            self.itemCountText:SetText("|cffffd700" .. GuildResolved .. "|r items")
         end
     end)
 
@@ -1154,13 +1154,27 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         local activeCat = self.activeCategory
         local activeSub = self.activeSubCategory
         local isGuild = self.dataSource == "guild"
-        local minQueryLen = 2
+        local exactQuery = query:match('^"(.-)"$')
+        local isExact = exactQuery ~= nil
+        if isExact then
+            query = exactQuery
+        end
+
+        local minQueryLen = isExact and 1 or 2
 
         -- Use the appropriate index for this tab
         local index = isGuild and GuildIndex or PersonalIndex
         
         for _, item in pairs(index) do
-            local matchesQuery = (#query < minQueryLen) or item.nameLower:find(query, 1, true)
+            local matchesQuery = false
+            if not isExact and #query < minQueryLen then
+                matchesQuery = true
+            elseif isExact then
+                matchesQuery = (item.nameLower == query)
+            else
+                matchesQuery = (item.nameLower:find(query, 1, true) ~= nil)
+            end
+
             if matchesQuery then
                 local matchesCat = (not activeCat) or (item.classID == activeCat)
                 if matchesCat then

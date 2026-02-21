@@ -119,7 +119,6 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 MarketSync.LogNetworkEvent(string.format("Incoming |cff00ffff[ADV]|r from |cffffff00%s|r (Day %d, %d items, v%s)", senderName, advScanDay, advItemCount, advVersion))
             end
             if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Ready") end
-            MarketSync.TrackSync(senderName, 0)
             local ourDay = MarketSync.GetMyLatestScanDay()
             local ourItemCount = 0
             if advScanDay == ourDay then
@@ -149,6 +148,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
             end
             
             if isFresher then
+                -- Don't initiate a PULL if we're already mid-transfer
+                if (MarketSync.RxCount or 0) > 0 then
+                    Debug("Suppressing PULL: already receiving data (" .. (MarketSync.RxCount or 0) .. " items so far)")
+                    return
+                end
+                
                 Debug(string.format("Their data is fresher (Day %d vs %d, Time %d vs %d, Items %d vs %d), sending PULL", advScanDay, ourDay, advScanTime, ourScanTime, advItemCount, ourItemCount))
                 if MarketSync.LogNetworkEvent then
                     MarketSync.LogNetworkEvent("Data is fresher. Sending |cffff8800[PULL]|r request to Guild...")
@@ -214,10 +219,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local FromBase36 = MarketSync.FromBase36
             local items = {strsplit(",", payloadStr)}
             for _, itemData in ipairs(items) do
-                local idStr, priceStr, qtyStr, dayStr = strsplit(":", itemData)
-                -- Try base-36 decode first (v3), fall back to decimal (v1/v2 compat)
-                local itemID = FromBase36(idStr)
-                if itemID == 0 then itemID = tonumber(idStr) end
+                local dbKey, priceStr, qtyStr, dayStr
+                local isV4 = false
+                
+                if itemData:find("_") then
+                    dbKey, priceStr, qtyStr, dayStr = strsplit("_", itemData)
+                    isV4 = true
+                else
+                    dbKey, priceStr, qtyStr, dayStr = strsplit(":", itemData)
+                end
+                
                 local price = FromBase36(priceStr)
                 if price == 0 and priceStr ~= "0" then price = tonumber(priceStr) end
                 local quantity = FromBase36(qtyStr)
@@ -225,9 +236,20 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 local day = FromBase36(dayStr)
                 if day == 0 then day = tonumber(dayStr) or legacyDay end
                 
-                if itemID and itemID > 0 and price and day and day > 0 then
-                    local link = "item:" .. itemID .. ":0:0:0:0:0:0:0:0:0:0:0:0"
-                    MarketSync.UpdateLocalDB(link, price, day, quantity, senderName)
+                if price and day and day > 0 then
+                    if isV4 then
+                        -- For v4, dbKey is the direct Auctionator database key string, no base36 decode
+                        local finalDbKey = tonumber(dbKey) or dbKey
+                        MarketSync.UpdateLocalDBByKey(finalDbKey, price, day, quantity, senderName)
+                    else
+                        -- Legacy handling
+                        local itemID = FromBase36(dbKey)
+                        if itemID == 0 then itemID = tonumber(dbKey) end
+                        if itemID and itemID > 0 then
+                            local link = "item:" .. itemID .. ":0:0:0:0:0:0:0:0:0:0:0:0"
+                            MarketSync.UpdateLocalDB(link, price, day, quantity, senderName)
+                        end
+                    end
                 end
             end
             MarketSync.RxCount = (MarketSync.RxCount or 0) + #items
@@ -297,6 +319,18 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     realmDB.CachedScanStats = nil
                     realmDB.PersonalScanTime = (senderScanTime > 0) and senderScanTime or time()
                 end
+                -- Send ACK back to guild so the sender sees confirmation
+                -- Add a randomized jitter delay (1-20 seconds) to prevent guild channel flood 
+                -- if hundreds of members finish downloading at the exact same moment.
+                if IsInGuild() then
+                    local myName = UnitName("player") or "Unknown"
+                    local jitter = math.random(1, 20)
+                    C_Timer.After(jitter, function()
+                        if IsInGuild() then
+                            C_ChatInfo.SendAddonMessage("MSync", string.format("ACK;%d;%s", rxCount, myName), "GUILD")
+                        end
+                    end)
+                end
             else
                 if MarketSync.LogNetworkEvent then
                     MarketSync.LogNetworkEvent(string.format("|cffff8800[Rx Partial]|r Received %d / %d items (%.0f%%). Will re-PULL on next ADV cycle.", rxCount, itemsSent, (itemsSent > 0 and (rxCount / itemsSent * 100) or 0)))
@@ -337,6 +371,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
                 end)
             end
+        elseif msgType == "ACK" then
+            local ackCount = tonumber(p1) or 0
+            local ackUser = p2 or senderName
+            if senderName ~= UnitName("player") then
+                if MarketSync.LogNetworkEvent then
+                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[ACK]|r %s confirmed download complete (%d items received).", ackUser, ackCount))
+                end
+                if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Idle") end
+            end
+
         elseif msgType == "ERR" then
             local targetName = p1
             local crashKey = p2

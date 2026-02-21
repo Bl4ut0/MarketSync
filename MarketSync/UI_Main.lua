@@ -845,9 +845,9 @@ local function CreateMainFrame()
     end)
 
     -- ================================================================
-    -- SETTINGS OnShow: refresh stats
+    -- SETTINGS Auto-Refresh Stats
     -- ================================================================
-    SettingsContent:SetScript("OnShow", function(self)
+    local function UpdateSettingsStats()
         -- Update DB stats
         local totalItems = 0
         local syncedItems = 0
@@ -890,13 +890,26 @@ local function CreateMainFrame()
         if idxStatus and idxStatus.guildSyncActive then
             syncActiveStr = "\n|cffff8800Guild Sync In Progress|r (" .. (idxStatus.guildIncoming or 0) .. " incoming)"
         end
-        self.rightStatsText:SetText(
+        SettingsContent.rightStatsText:SetText(
             "|cff00ff00Total Items:|r " .. totalItems .. "  |cff00ff00Synced:|r " .. syncedItems .. "\n" ..
             "|cff00ff00Personal Cache:|r " .. personalCache .. "\n" ..
             "|cff00ff00Guild Cache:|r " .. guildCache .. "\n" ..
             "|cff00ff00Sync Partners:|r " .. uniqueSyncers ..
             syncActiveStr
         )
+    end
+
+    SettingsContent.lastUpdate = 0
+    SettingsContent:SetScript("OnUpdate", function(self, elapsed)
+        self.lastUpdate = self.lastUpdate + elapsed
+        if self.lastUpdate >= 0.5 then
+            self.lastUpdate = 0
+            UpdateSettingsStats()
+        end
+    end)
+    SettingsContent:SetScript("OnShow", function(self)
+        self.lastUpdate = 0
+        UpdateSettingsStats()
     end)
 
     -- ================================================================

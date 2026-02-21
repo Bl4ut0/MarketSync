@@ -78,7 +78,7 @@ local function CreateMonitorFrame()
     logScroll:SetFontObject("GameFontHighlightSmall")
     logScroll:SetJustifyH("LEFT")
     logScroll:SetFading(false)
-    logScroll:SetMaxLines(250)
+    logScroll:SetMaxLines(500)
     logScroll:EnableMouseWheel(true)
     logScroll:SetScript("OnMouseWheel", function(self, delta)
         if delta > 0 then self:ScrollUp() else self:ScrollDown() end
@@ -107,7 +107,7 @@ local function CreateMonitorFrame()
     swarmText:SetFontObject("GameFontHighlightSmall")
     swarmText:SetJustifyH("LEFT")
     swarmText:SetFading(false)
-    swarmText:SetMaxLines(100)
+    swarmText:SetMaxLines(50)
     swarmText:EnableMouseWheel(true)
     swarmText:SetScript("OnMouseWheel", function(self, delta)
         if delta > 0 then self:ScrollUp() else self:ScrollDown() end
@@ -142,7 +142,7 @@ local function CreateMonitorFrame()
     cacheScroll:SetFontObject("GameFontHighlightSmall")
     cacheScroll:SetJustifyH("LEFT")
     cacheScroll:SetFading(false)
-    cacheScroll:SetMaxLines(250)
+    cacheScroll:SetMaxLines(500)
     cacheScroll:EnableMouseWheel(true)
     cacheScroll:SetScript("OnMouseWheel", function(self, delta)
         if delta > 0 then self:ScrollUp() else self:ScrollDown() end
@@ -170,7 +170,7 @@ function MarketSync.LogCacheEvent(msg)
         MonitorFrame.cacheScroll:AddMessage(formattedMsg)
     else
         table.insert(earlyCacheLogs, formattedMsg)
-        if #earlyCacheLogs > 200 then table.remove(earlyCacheLogs, 1) end
+        if #earlyCacheLogs > 500 then table.remove(earlyCacheLogs, 1) end
     end
 end
 
@@ -196,7 +196,7 @@ function MarketSync.LogNetworkEvent(msg)
         MonitorFrame.logScroll:AddMessage(formattedMsg)
     else
         table.insert(earlyNetworkLogs, formattedMsg)
-        if #earlyNetworkLogs > 200 then table.remove(earlyNetworkLogs, 1) end
+        if #earlyNetworkLogs > 500 then table.remove(earlyNetworkLogs, 1) end
     end
 end
 

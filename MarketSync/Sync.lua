@@ -86,34 +86,39 @@ function MarketSync.SnapshotPersonalScan()
     local today = MarketSync.GetCurrentScanDay()
     local count = 0
     local todayCount = 0
+    local skipped = 0
     
     for dbKey, data in pairs(Auctionator.Database.db) do
-        -- Only copy price and day if the item was seen TODAY and it's not a fresh guild sync.
-        -- We just literally copy everything that exists in the database to build a raw offline view.
-        -- If the user wants a 1:1 local offline scan, we capture dbKey => Data map.
-        -- To keep memory small, we just save { m = data.m, d = lastSeen }
         if type(data) == "table" then
-            local lastSeenDay = 0
-            if data.h then
-                for dayStr in pairs(data.h) do
-                    local d = tonumber(dayStr)
-                    if d and d > lastSeenDay then lastSeenDay = d end
-                end
+            -- Only snapshot items with parseable itemIDs (consistent with CountRecentItems/RespondToPull)
+            local hasValidID = false
+            if type(dbKey) == "number" or type(dbKey) == "string" then
+                hasValidID = true
             end
-            if data.m and data.m > 0 then
+            
+            if hasValidID and data.m and data.m > 0 then
+                local lastSeenDay = 0
+                if data.h then
+                    for dayStr in pairs(data.h) do
+                        local d = tonumber(dayStr)
+                        if d and d > lastSeenDay then lastSeenDay = d end
+                    end
+                end
                 MarketSync.GetRealmDB().PersonalData[dbKey] = { m = data.m, d = lastSeenDay }
                 count = count + 1
                 if lastSeenDay == today then
                     todayCount = todayCount + 1
                 end
+            else
+                skipped = skipped + 1
             end
         end
     end
     
-    Debug("SnapshotPersonalScan: Duplicated " .. count .. " items (" .. todayCount .. " from today) into Personal storage.")
+    Debug("SnapshotPersonalScan: Duplicated " .. count .. " items (" .. todayCount .. " from today, " .. skipped .. " skipped) into Personal storage.")
     
     if MarketSyncDB and MarketSyncDB.DebugMode then
-        print("|cFF00FF00[MarketSync]|r Duplicated " .. count .. " items into Personal cache.")
+        print("|cFF00FF00[MarketSync]|r Duplicated " .. count .. " items into Personal cache. (" .. skipped .. " unparseable keys skipped)")
     end
     
     return count, todayCount
@@ -157,11 +162,18 @@ function MarketSync.CountRecentItems(sinceDay)
     local count = 0
     for dbKey, data in pairs(Auctionator.Database.db) do
         if type(data) == "table" and data.h then
-            for dayStr in pairs(data.h) do
-                local d = tonumber(dayStr)
-                if d and d >= sinceDay then 
-                    count = count + 1
-                    break 
+            -- Only count items with parseable itemIDs (must match RespondToPull logic)
+            local hasValidID = false
+            if type(dbKey) == "number" or type(dbKey) == "string" then
+                hasValidID = true
+            end
+            if hasValidID then
+                for dayStr in pairs(data.h) do
+                    local d = tonumber(dayStr)
+                    if d and d >= sinceDay then 
+                        count = count + 1
+                        break 
+                    end
                 end
             end
         end
@@ -180,6 +192,16 @@ end
 -- ================================================================
 function MarketSync.SendAdvertisement()
     if not IsInGuild() then return end
+    -- Suppress ADV while we are actively sending data (pullInProgress)
+    if pullInProgress then
+        Debug("ADV suppressed: PULL response in progress")
+        return
+    end
+    -- Suppress ADV while we are actively receiving data (RxCount > 0 means mid-transfer)
+    if (MarketSync.RxCount or 0) > 0 then
+        Debug("ADV suppressed: receiving transfer in progress")
+        return
+    end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
     myLatestScanDay = MarketSync.GetMyLatestScanDay()
     myRecentItemCount = MarketSync.CountRecentItems(myLatestScanDay)
@@ -342,18 +364,14 @@ function MarketSync.RespondToPull(sinceDay, requester)
                     if d and d > lastSeenDay then lastSeenDay = d end
                 end
                 if lastSeenDay >= sinceDay then
-                    local itemID = nil
-                    if type(dbKey) == "string" then
-                        if dbKey:match("^%d+$") then itemID = tonumber(dbKey)
-                        elseif dbKey:match("^g:(%d+)") then itemID = tonumber(dbKey:match("^g:(%d+)"))
-                        elseif dbKey:match("^p:(%d+)") then itemID = tonumber(dbKey:match("^p:(%d+)")) end
-                    end
+                    local itemID = dbKey
+
                     if itemID then
                         local price = tonumber(data.m) or 0
                         local dateStr = tostring(lastSeenDay)
                         local quantity = (data.a and data.a[dateStr]) or 0
-                        -- Base-36 encode all numeric fields
-                        local itemStr = ToBase36(itemID) .. ":" .. ToBase36(price) .. ":" .. ToBase36(quantity) .. ":" .. ToBase36(lastSeenDay)
+                        -- Base-36 encode numeric fields, dbKey as string
+                        local itemStr = tostring(itemID) .. "_" .. ToBase36(price) .. "_" .. ToBase36(quantity) .. "_" .. ToBase36(lastSeenDay)
                         
                         -- Flush buffer if adding this item would exceed the wire limit
                         local currentLen = string.len(buffer)
@@ -454,12 +472,10 @@ end
 -- ================================================================
 -- UPDATE LOCAL DATABASE (Smart Merge)
 -- ================================================================
-function MarketSync.UpdateLocalDB(itemLink, price, day, quantity, sender)
+function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
     if sender and IsBlocked(sender) then return end
 
-    Auctionator.Utilities.DBKeyFromLink(itemLink, function(dbKeys)
-        if not dbKeys or #dbKeys == 0 then return end
-        local key = dbKeys[1]
+    local itemLink = "item:" .. tostring(key) -- Fallback for logs
 
         local currentPrice = Auctionator.Database:GetPrice(key)
         local currentAge = Auctionator.Database:GetPriceAge(key)
@@ -549,6 +565,15 @@ function MarketSync.UpdateLocalDB(itemLink, price, day, quantity, sender)
         if not MarketSync.GetRealmDB().HistoryLog then MarketSync.GetRealmDB().HistoryLog = {} end
         table.insert(MarketSync.GetRealmDB().HistoryLog, 1, { link = itemLink, price = price, sender = sender or "Self", time = time() })
         if #MarketSync.GetRealmDB().HistoryLog > 100 then table.remove(MarketSync.GetRealmDB().HistoryLog) end
+end
+
+function MarketSync.UpdateLocalDB(itemLink, price, day, quantity, sender)
+    if sender and IsBlocked(sender) then return end
+
+    Auctionator.Utilities.DBKeyFromLink(itemLink, function(dbKeys)
+        if not dbKeys or #dbKeys == 0 then return end
+        local key = dbKeys[1]
+        MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
     end)
 end
 
@@ -617,10 +642,11 @@ function MarketSync.BroadcastRecentData()
                     if data.a and data.a[dateStr] then quantity = data.a[dateStr] end
 
                     local itemID = nil
-                    if type(dbKey) == "string" then
-                        if dbKey:match("^%d+$") then itemID = tonumber(dbKey)
-                        elseif dbKey:match("^g:(%d+)") then itemID = tonumber(dbKey:match("^g:(%d+)"))
-                        elseif dbKey:match("^p:(%d+)") then itemID = tonumber(dbKey:match("^p:(%d+)")) end
+                    if type(dbKey) == "number" then
+                        itemID = dbKey
+                    elseif type(dbKey) == "string" then
+                        local idStr = dbKey:match("(%d+)")
+                        if idStr then itemID = tonumber(idStr) end
                     end
 
                     if itemID then
@@ -686,10 +712,11 @@ function MarketSync.SearchLocalDB(query)
 
     for dbKey, data in pairs(Auctionator.Database.db) do
         local itemID = nil
-        if type(dbKey) == "string" then
-            if dbKey:match("^%d+$") then itemID = tonumber(dbKey)
-            elseif dbKey:match("^g:(%d+)") then itemID = tonumber(dbKey:match("^g:(%d+)"))
-            elseif dbKey:match("^p:(%d+)") then itemID = tonumber(dbKey:match("^p:(%d+)")) end
+        if type(dbKey) == "number" then
+            itemID = dbKey
+        elseif type(dbKey) == "string" then
+            local idStr = dbKey:match("(%d+)")
+            if idStr then itemID = tonumber(idStr) end
         end
 
         if itemID then

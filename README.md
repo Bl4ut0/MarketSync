@@ -23,6 +23,14 @@ If *one* person scans the Auction House, *everyone* gets the data instantly.
 *   **Version Guard:** Automatically handles version mismatches between guild members. Outdated clients are safely disabled from syncing to prevent data corruption.
 *   **Flood Protection:** Intelligent chat throttling ensures the `?` command never spams your chat channels.
 
+## ⚠️ System Impact & RAM Usage
+
+Because MarketSync stores the *entire* auction house directly in your client's active memory for instant, offline browsing, **it does use a noticeable amount of RAM**. 
+
+For example, maintaining two simultaneous, 30,000-item caches (one for your Personal Scan, one for the Guild Sync proxy) can consume **~60-70 MB** of system memory. While this is highly optimized for the sheer scale of data being handled, MarketSync will likely appear at the top of your addon memory usage list.
+
+If you experience frame drops or stutters during the background index building process (which occurs when you first log in, or right after you finish an AH scan), you can adjust the **Cache Build Speed** slider in the MarketSync Settings tab. Lowering the speed will dramatically ease the CPU load by spreading the cache building process over a longer, gentler background duration.
+
 ## How Sync Works
 
 MarketSync uses a **Swarm Coordinator** protocol to efficiently share data across your guild:
@@ -30,31 +38,33 @@ MarketSync uses a **Swarm Coordinator** protocol to efficiently share data acros
 1. **Advertisement:** Every 5 minutes, each client broadcasts what data it has (realm, scan day, item count, version).
 2. **Pull Request:** If another client has fresher data, you automatically request it.
 3. **Consensus:** Multiple potential senders coordinate to elect a single "seeder" to avoid redundant broadcasts.
-4. **Bulk Transfer:** The seeder transmits item data using the BRES v3 protocol:
+4. **Bulk Transfer:** The seeder transmits item data using the **Protocol v4** architecture:
+   - **Full Variation Support:** Base-36 encoding perfectly preserves random suffixes (e.g., "of the Bear") using a custom `_` packet delineator, allowing accurate pricing across thousands of variant enchants.
    - **3 parallel data channels** (`MSyncD1`, `MSyncD2`, `MSyncD3`) for triple throughput
    - **Base-36 encoding** compresses numeric payloads by ~30%
    - **248-byte dense packing** maximizes items per message (~16 per chunk)
-   - Achieves **~48 items/sec** sustained, completing a full 2355-item sync in **~50 seconds**
-5. **Commit:** After 8 seconds of idle (no more incoming data), the received items are committed to the guild index.
+   - Achieves **~48 items/sec** sustained, completing a full 25,000-item sync in **~18 minutes**
+5. **Commit:** After receiving the `END` signal, clients immediately commit the items to their guild index. To prevent chat flood from massive guilds, the client applies a **randomized 1-20s Jitter Delay** before responding with a safe `ACK` confirmation to the sender.
 
 ### Protocol Architecture
 
 | Layer | Prefix | Purpose |
 |---|---|---|
-| **Control** | `MarketSync` | ADV, PULL, ACCEPT, RES, REQ, ERR — plain text with character names and realm info |
-| **Data** | `MSyncD1`, `MSyncD2`, `MSyncD3` | BRES bulk payloads — base-36 encoded numerics only |
+| **Control** | `MarketSync` | ADV, PULL, ACCEPT, RES, REQ, ERR, ACK, END — plain text with character names and realm info |
+| **Data** | `MSyncD1`, `MSyncD2`, `MSyncD3` | BRES bulk payloads (`dbKey_price_qty_day`) — v4 base-36 compressed |
 
-This separation ensures character names with special characters pass through untouched on the control layer, while the data layer maximizes throughput with compressed numeric encoding.
+This separation ensures character names with special characters pass through untouched on the control layer, while the data layer maximizes throughput with compressed encoding.
 
-### WoW Addon Message Limits
+### WoW Addon Message Limits & Safety Overloads
 
-MarketSync is engineered to stay well within WoW's documented throttle:
+MarketSync is explicitly engineered to never trigger a Blizzard API throttle disconnect. Even in a 500-member mega-guild, the Swarm Sync engine protects bandwidth:
 
 | Constraint | WoW Limit | MarketSync Usage |
 |---|---|---|
 | Per-prefix bucket | 10 msgs burst, 1/sec regen | 1 msg/sec per prefix (never drains) |
-| Global CPS | ~2000 safe, ~3000 disconnect | 744 CPS (37% of safe limit) |
+| Global CPS (Bytes/Sec) | ~1500–2000 safe threshold | 744 bytes/sec (~50% beneath safety limit) |
 | Message payload | 255 bytes | 248 bytes (7 byte safety margin) |
+| ACK Flood Protection | Chat channel disconnects | Staggered 1-20s random jitter on all bulk confirmations |
 
 ## Installation
 
