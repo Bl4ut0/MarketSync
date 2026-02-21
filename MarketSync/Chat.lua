@@ -129,12 +129,22 @@ frame:SetScript("OnEvent", function(self, event, ...)
             
             local isFresher = false
             if advScanDay > ourDay then
+                -- They have a newer scan day, always fresher
                 isFresher = true
             elseif advScanDay == ourDay then
-                if advScanTime > 0 and advScanTime > ourScanTime then
-                    isFresher = true
-                elseif advScanTime == ourScanTime and advItemCount > ourItemCount then
-                    isFresher = true
+                -- Same scan day — need finer-grained comparison
+                if advScanTime > 0 and ourScanTime > 0 then
+                    -- Both clients support TSF: compare exact timestamps
+                    if advScanTime > ourScanTime then
+                        isFresher = true
+                    elseif advScanTime == ourScanTime and advItemCount > ourItemCount then
+                        isFresher = true  -- tiebreaker: more items wins
+                    end
+                else
+                    -- Legacy fallback (one or both don't have TSF): use item count
+                    if advItemCount > ourItemCount then
+                        isFresher = true
+                    end
                 end
             end
             
@@ -259,6 +269,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         elseif msgType == "END" then
             local itemsSent = tonumber(p1) or 0
             local messagesSent = tonumber(p2) or 0
+            local senderScanTime = tonumber(p3) or 0  -- sender's original PersonalScanTime
             local rxCount = MarketSync.RxCount or 0
             
             -- Immediate commit
@@ -274,16 +285,17 @@ frame:SetScript("OnEvent", function(self, event, ...)
             
             if isComplete then
                 if MarketSync.LogNetworkEvent then
-                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Complete]|r Full sync verified! Received %d / %d items. Scan freshness updated.", rxCount, itemsSent))
+                    MarketSync.LogNetworkEvent(string.format("|cff00ff00[Rx Complete]|r Full sync verified! Received %d / %d items. Scan freshness updated (TSF: %d).", rxCount, itemsSent, senderScanTime))
                 end
-                -- Full transfer confirmed — update our scan time so we won't re-PULL
+                -- Full transfer confirmed — stamp the SENDER's scan time (not ours!)
+                -- This ensures both clients share the same TSF and won't ping-pong sync.
+                -- NOTE: We do NOT call SnapshotPersonalScan() here! The Personal Scan
+                -- snapshot is sacred — it only updates when the player visits the AH.
+                -- This timestamp is purely for swarm freshness comparison (ADV TSF).
                 if MarketSyncDB then
                     local realmDB = MarketSync.GetRealmDB()
                     realmDB.CachedScanStats = nil
-                    realmDB.PersonalScanTime = time()
-                    if MarketSync.SnapshotPersonalScan then
-                        MarketSync.SnapshotPersonalScan()
-                    end
+                    realmDB.PersonalScanTime = (senderScanTime > 0) and senderScanTime or time()
                 end
             else
                 if MarketSync.LogNetworkEvent then

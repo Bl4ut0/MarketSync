@@ -414,8 +414,10 @@ function MarketSync.RespondToPull(sinceDay, requester)
             MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Complete]|r Sent %d items in %d messages via %d channels. (%d scanned, %d skipped)", sent, messagesSent, numPrefixes, scanned, skipped))
         end
         if requester and IsInGuild() then
-            -- Send an explicit END signal to let the receiver know we are done
-            C_ChatInfo.SendAddonMessage(PREFIX, string.format("END;%d;%d", sent, messagesSent), "GUILD")
+            -- Send an explicit END signal including our PersonalScanTime so the receiver
+            -- stamps the SAME time as us (prevents ping-pong re-sync loops)
+            local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalScanTime) or 0
+            C_ChatInfo.SendAddonMessage(PREFIX, string.format("END;%d;%d;%s", sent, messagesSent, tostring(myScanTime)), "GUILD")
         end
         pullInProgress = false
         if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
