@@ -190,6 +190,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end)
 
+        -- STAGE 2.5: Metadata pruning (60s) — trim stale ItemMetadata to prevent RAM bloat
+        C_Timer.After(60, function()
+            if MarketSync.PruneMetadata then
+                MarketSync.PruneMetadata()
+            end
+        end)
+
         -- STAGE 3: Search index cache (90s) — only if user opted in
         C_Timer.After(90, function()
             if MarketSyncDB and MarketSyncDB.BuildCacheOnStartup then
@@ -204,8 +211,22 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         
         -- Register for AH events so we can invalidate the scan cache dynamically
         self:RegisterEvent("AUCTION_HOUSE_CLOSED")
+        self:RegisterEvent("AUCTION_HOUSE_SHOW")
+        
+    elseif event == "AUCTION_HOUSE_SHOW" then
+        MarketSync.IsAuctionHouseOpen = true
         
     elseif event == "AUCTION_HOUSE_CLOSED" then
+        -- Guard: Only run the snapshot pipeline if we actually tracked the AH opening.
+        -- Some WoW edge cases (NPC interactions, addon taint, etc.) can fire
+        -- AUCTION_HOUSE_CLOSED without a preceding AUCTION_HOUSE_SHOW. Running the
+        -- pipeline on a spurious close would set a false PersonalScanTime and trigger
+        -- phantom ADV broadcasts to the guild.
+        if not MarketSync.IsAuctionHouseOpen then
+            MarketSync.Debug("AUCTION_HOUSE_CLOSED fired but AH was never opened — ignoring (spurious event)")
+            return
+        end
+        MarketSync.IsAuctionHouseOpen = false
         if MarketSyncDB then
             local today = MarketSync.GetCurrentScanDay()
             local myLatestScanDay = MarketSync.GetMyLatestScanDay()
@@ -223,7 +244,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                     end
                     
                     if not MarketSync.GetRealmDB().PersonalScanTime or (todayCount > lastCount) then
-                        MarketSync.GetRealmDB().PersonalScanTime = time()
+                        local now = time()
+                        MarketSync.GetRealmDB().PersonalScanTime = now  -- Sacred: actual AH visit
+                        MarketSync.GetRealmDB().SwarmTSF = now          -- Protocol freshness
                         MarketSync.GetRealmDB().LastCountDay = today
                     end
                     MarketSync.GetRealmDB().LastTodayCount = todayCount

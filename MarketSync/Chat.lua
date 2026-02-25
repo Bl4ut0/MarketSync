@@ -12,6 +12,10 @@ local FormatAge = MarketSync.FormatAge
 local guildSyncCommitTimer = nil
 local GUILD_SYNC_IDLE_TIMEOUT = 5
 
+-- Session-level Rx counter: survives the idle timeout reset so END can validate completeness
+local sessionRxTotal = 0
+local scanCacheInvalidatedThisSession = false
+
 -- ================================================================
 -- EVENT FRAME
 -- ================================================================
@@ -116,7 +120,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
             Debug("Received ADV from " .. senderName .. ": day=" .. advScanDay .. " items=" .. advItemCount)
             if MarketSync.LogNetworkEvent then
-                MarketSync.LogNetworkEvent(string.format("Incoming |cff00ffff[ADV]|r from |cffffff00%s|r (Day %d, %d items, v%s)", senderName, advScanDay, advItemCount, advVersion))
+                MarketSync.LogNetworkEvent(string.format("Incoming |cff00ffff[ADV]|r from |cffffff00%s|r (Day %d, %d items, TSF: %s, v%s)", senderName, advScanDay, advItemCount, advScanTime > 0 and tostring(advScanTime) or "None", advVersion))
             end
             if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Ready") end
             local ourDay = MarketSync.GetMyLatestScanDay()
@@ -124,26 +128,22 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if advScanDay == ourDay then
                 ourItemCount = MarketSync.CountRecentItems(ourDay)
             end
-            local ourScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalScanTime) or 0
+            local ourScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
             
             local isFresher = false
             if advScanDay > ourDay then
                 -- They have a newer scan day, always fresher
                 isFresher = true
             elseif advScanDay == ourDay then
-                -- Same scan day — need finer-grained comparison
-                if advScanTime > 0 and ourScanTime > 0 then
-                    -- Both clients support TSF: compare exact timestamps
-                    if advScanTime > ourScanTime then
-                        isFresher = true
-                    elseif advScanTime == ourScanTime and advItemCount > ourItemCount then
-                        isFresher = true  -- tiebreaker: more items wins
-                    end
-                else
-                    -- Legacy fallback (one or both don't have TSF): use item count
-                    if advItemCount > ourItemCount then
-                        isFresher = true
-                    end
+                -- Same scan day — Since version guard ensures both clients >= current version,
+                -- both universally support TSF. If the TSF timestamp is identical, 
+                -- the payload represents the exact identical snapshot hash.
+                -- NEVER ping-pong sync for minor local count artifacts if TSF matches.
+                if advScanTime > ourScanTime then
+                    isFresher = true
+                elseif advScanTime == 0 and advItemCount > ourItemCount then
+                    -- Legacy fallback ONLY if neither client has ever generated a TSF token
+                    isFresher = true
                 end
             end
             
@@ -239,7 +239,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 if price and day and day > 0 then
                     if isV4 then
                         -- For v4, dbKey is the direct Auctionator database key string, no base36 decode
-                        local finalDbKey = tonumber(dbKey) or dbKey
+                        local finalDbKey = dbKey
                         MarketSync.UpdateLocalDBByKey(finalDbKey, price, day, quantity, senderName)
                     else
                         -- Legacy handling
@@ -253,6 +253,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
             MarketSync.RxCount = (MarketSync.RxCount or 0) + #items
+            sessionRxTotal = sessionRxTotal + #items
+            
+            -- Eagerly invalidate CachedScanStats on first data chunk of a sync session.
+            -- This prevents stale cached counts from being served to ADV broadcasts
+            -- while sync data is actively modifying the Auctionator database.
+            if not scanCacheInvalidatedThisSession then
+                scanCacheInvalidatedThisSession = true
+                if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
+                Debug("CachedScanStats invalidated on first BRES chunk (session Rx: " .. sessionRxTotal .. ")")
+            end
             
             -- Receiver checkpoint logging
             if MarketSync.LogNetworkEvent then
@@ -286,13 +296,17 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 -- remain eligible for a re-PULL on the next ADV cycle.
                 if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
                 MarketSync.RxCount = 0
+                -- Do NOT reset sessionRxTotal here — END handler needs it to validate completeness
             end)
 
         elseif msgType == "END" then
             local itemsSent = tonumber(p1) or 0
             local messagesSent = tonumber(p2) or 0
             local senderScanTime = tonumber(p3) or 0  -- sender's original PersonalScanTime
-            local rxCount = MarketSync.RxCount or 0
+            -- Use the session-level counter for completeness validation.
+            -- MarketSync.RxCount may have been reset by the 8s idle timeout,
+            -- but sessionRxTotal survives that reset.
+            local rxCount = sessionRxTotal
             
             -- Immediate commit
             if guildSyncCommitTimer then guildSyncCommitTimer:Cancel(); guildSyncCommitTimer = nil end
@@ -317,7 +331,11 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 if MarketSyncDB then
                     local realmDB = MarketSync.GetRealmDB()
                     realmDB.CachedScanStats = nil
-                    realmDB.PersonalScanTime = (senderScanTime > 0) and senderScanTime or time()
+                    -- Only stamp SwarmTSF (protocol freshness), NOT PersonalScanTime.
+                    -- PersonalScanTime is sacred — it only updates when the player
+                    -- actually visits the AH. This prevents guild syncs from appearing
+                    -- as false personal scans in the UI.
+                    realmDB.SwarmTSF = (senderScanTime > 0) and senderScanTime or time()
                 end
                 -- Send ACK back to guild so the sender sees confirmation
                 -- Add a randomized jitter delay (1-20 seconds) to prevent guild channel flood 
@@ -339,8 +357,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
             end
             
-            -- Reset session Rx counter for a clean slate
+            -- Reset session Rx counters for a clean slate
             MarketSync.RxCount = 0
+            sessionRxTotal = 0
+            scanCacheInvalidatedThisSession = false
 
         elseif msgType == "RES" then
             local link = p1
@@ -397,6 +417,30 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     guildSyncCommitTimer = nil
                 end
             end
+
+        elseif msgType == "CLAIM" then
+            local claimedItemID = tonumber(p1)
+            if not claimedItemID then return end
+            
+            -- Track all competing claimants for this itemID so we can tiebreak deterministically
+            if not MarketSync.claimContestants then MarketSync.claimContestants = {} end
+            if not MarketSync.claimContestants[claimedItemID] then MarketSync.claimContestants[claimedItemID] = {} end
+            MarketSync.claimContestants[claimedItemID][senderName] = true
+            
+            -- If we haven't claimed this item ourselves yet, cancel our pending lottery immediately.
+            -- (Their timer fired before ours — they're ahead of us in the lottery.)
+            if MarketSync.pendingQueries and MarketSync.pendingQueries[claimedItemID] then
+                MarketSync.pendingQueries[claimedItemID] = nil
+                Debug("Price check for " .. claimedItemID .. " claimed by " .. senderName .. ", cancelling our pending lottery")
+            end
+
+            -- Housekeeping: evict stale claimContestants entries for items no longer in play.
+            -- This prevents the table from growing indefinitely over a long session.
+            for itemID, _ in pairs(MarketSync.claimContestants) do
+                if itemID ~= claimedItemID then
+                    MarketSync.claimContestants[itemID] = nil
+                end
+            end
         end
         return
     end
@@ -409,14 +453,18 @@ frame:SetScript("OnEvent", function(self, event, ...)
     -- Guild Requirement: If we are not in a guild, ignore all public channels (except whispers)
     if not IsInGuild() and event ~= "CHAT_MSG_WHISPER" then return end
     
-    -- 1. Anti-Flood: Monitor for existing replies
-    -- If we see "[Item Link]: 1g 20s" from someone else, cancel our pending reply for that item.
-    local replyLink = msg:match("(|c%x+|Hitem:.-|h%[.-%]|h|r):")
-    if replyLink and sender ~= UnitName("player") then
-        local itemID = tonumber(replyLink:match("item:(%d+)"))
-        if itemID and MarketSync.pendingQueries and MarketSync.pendingQueries[itemID] then
+    -- Strip sender name for comparison (sender may include realm suffix)
+    local querySender = sender and sender:match("^([^%-]+)") or sender
+    
+    -- 1. Anti-Flood: Monitor for existing replies from other clients
+    -- If we see a price reply message from someone else, cancel our pending reply for that item.
+    -- Match both raw escape-coded links and rendered item links to be safe across WoW versions.
+    local replyLink = msg:match("(|c%x+|Hitem:.-|h%[.-%]|h|r):") or msg:match("(%[.-%]):.*%d+[gsc]")
+    if replyLink and querySender ~= UnitName("player") then
+        local itemID = tonumber(replyLink:match("item:(%d+)")) or tonumber(replyLink:match("%[(.-)%]") and select(1, C_Item.GetItemInfoInstant(replyLink:match("%[(.-)%]"))) or 0)
+        if itemID and itemID > 0 and MarketSync.pendingQueries and MarketSync.pendingQueries[itemID] then
             MarketSync.pendingQueries[itemID] = nil -- Cancel our pending reply
-            Debug("Suppressed reply for " .. itemID .. " (beaten by " .. sender .. ")")
+            Debug("Suppressed reply for " .. itemID .. " (beaten by " .. querySender .. " via chat)")
         end
         return
     end
@@ -425,6 +473,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if msg:find("^%?") then
         -- Respect the user's setting to disable auto-replies
         if MarketSyncDB and not MarketSyncDB.EnableChatPriceCheck then return end
+
+        -- Never reply to your own queries
+        if querySender == UnitName("player") then return end
 
         local link = msg:match("(|c%x+|Hitem:.-|h%[.-%]|h|r)")
         if link then
@@ -443,68 +494,98 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
             -- Start the lottery!
             MarketSync.pendingQueries[itemID] = true
-            local delay = 0.5 + (math.random() * 1.5) -- 0.5s to 2.0s random delay
+            local delay = 0.5 + (math.random() * 2.5) -- 0.5s to 3.0s random delay (wider window for coordination)
 
             C_Timer.After(delay, function()
-                -- If the flag was cleared by the monitor above, abort.
+                -- PHASE 1: If a CLAIM from another client arrived while we waited, abort.
                 if not MarketSync.pendingQueries[itemID] then return end
                 MarketSync.pendingQueries[itemID] = nil -- Clear flag
 
-                -- Re-check price (just in case, though unlikely to change in 1s)
-                local age = MarketSync.GetAuctionAge(link)
-                local ageStr
-
-                local itemID = tonumber(link:match("item:(%d+)"))
-                local exactTime = nil
-                local source = UnitName("player") -- Default to self
+                -- Broadcast our CLAIM to other clients (addon channel = near-instant)
+                -- but do NOT send the visible chat reply yet.
+                local myName = UnitName("player") or "Unknown"
+                if not MarketSync.claimContestants then MarketSync.claimContestants = {} end
+                if not MarketSync.claimContestants[itemID] then MarketSync.claimContestants[itemID] = {} end
+                MarketSync.claimContestants[itemID][myName] = true -- Register ourselves
                 
-                if itemID and MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
-                    -- ItemMetadata might be stored under dbKey like "1234", "g:1234", or "p:1234"
-                    local meta = MarketSync.GetRealmDB().ItemMetadata[tostring(itemID)] or MarketSync.GetRealmDB().ItemMetadata["g:"..itemID] or MarketSync.GetRealmDB().ItemMetadata["p:"..itemID]
-                    if meta then
-                        exactTime = meta.lastTime or meta.time
-                        local contributor = meta.lastSource or meta.source
-                        if contributor and contributor ~= "Personal" then
-                            source = contributor
+                if IsInGuild() then
+                    C_ChatInfo.SendAddonMessage(PREFIX, "CLAIM;" .. itemID, "GUILD")
+                end
+
+                -- PHASE 2: Grace period — wait 300ms for competing CLAIMs to arrive.
+                -- If another client fired at nearly the same time, their CLAIM will arrive
+                -- during this window. We then use alphabetical name order as a deterministic
+                -- tiebreaker so exactly one client always wins.
+                C_Timer.After(0.3, function()
+                    -- Check all contestants for this item
+                    local contestants = MarketSync.claimContestants and MarketSync.claimContestants[itemID]
+                    if contestants then
+                        -- Deterministic tiebreak: lowest alphabetical name wins
+                        for name, _ in pairs(contestants) do
+                            if name < myName then
+                                -- Someone with a lower name also claimed — they win, we stand down
+                                Debug("Price check tiebreak: " .. name .. " wins over " .. myName .. " for item " .. itemID)
+                                MarketSync.claimContestants[itemID] = nil
+                                return
+                            end
+                        end
+                        MarketSync.claimContestants[itemID] = nil -- Clean up
+                    end
+
+                    -- We won the tiebreak (or were the only claimant) — send the reply!
+                    local age = MarketSync.GetAuctionAge(link)
+                    local ageStr
+
+                    local itemID = tonumber(link:match("item:(%d+)"))
+                    local exactTime = nil
+                    local source = myName -- Default to self
+                    
+                    if itemID and MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
+                        local meta = MarketSync.GetRealmDB().ItemMetadata[tostring(itemID)] or MarketSync.GetRealmDB().ItemMetadata["g:"..itemID] or MarketSync.GetRealmDB().ItemMetadata["p:"..itemID]
+                        if meta then
+                            exactTime = meta.lastTime or meta.time
+                            local contributor = meta.lastSource or meta.source
+                            if contributor and contributor ~= "Personal" then
+                                source = contributor
+                            end
                         end
                     end
-                end
 
-                if age == 0 and not exactTime and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
-                    exactTime = MarketSync.GetRealmDB().PersonalScanTime
-                end
+                    if age == 0 and not exactTime and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+                        exactTime = MarketSync.GetRealmDB().PersonalScanTime
+                    end
 
-                if exactTime then
-                    ageStr = MarketSync.FormatRealmTime(exactTime, "%H:%M RT (") .. source .. ")"
-                elseif age == 0 then
-                    ageStr = "Today (" .. source .. ")"
-                elseif age then
-                    ageStr = age .. "d ago (" .. source .. ")"
-                else
-                    ageStr = "Unknown"
-                end
-                
-                local output = string.format("%s: %s (Age: %s)", link, FormatMoney(price), ageStr)
+                    if exactTime then
+                        ageStr = MarketSync.FormatRealmTime(exactTime, "%H:%M RT (") .. source .. ")"
+                    elseif age == 0 then
+                        ageStr = "Today (" .. source .. ")"
+                    elseif age then
+                        ageStr = age .. "d ago (" .. source .. ")"
+                    else
+                        ageStr = "Unknown"
+                    end
+                    
+                    local output = string.format("%s: %s (Age: %s)", link, FormatMoney(price), ageStr)
 
-                -- Determine channel to reply in
-                local replyChannel = "SAY"
-                local target = nil
-                
-                -- Map event to reply channel
-                if event == "CHAT_MSG_GUILD" then replyChannel = "GUILD"
-                elseif event == "CHAT_MSG_PARTY" or event == "CHAT_MSG_PARTY_LEADER" then replyChannel = "PARTY"
-                elseif event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER" then replyChannel = "RAID"
-                elseif event == "CHAT_MSG_YELL" then replyChannel = "YELL"
-                elseif event == "CHAT_MSG_OFFICER" then replyChannel = "OFFICER"
-                elseif event == "CHAT_MSG_WHISPER" then
-                    replyChannel = "WHISPER"
-                    target = sender
-                elseif event == "CHAT_MSG_CHANNEL" then
-                    replyChannel = "CHANNEL"
-                    target = channelID
-                end
+                    -- Determine channel to reply in
+                    local replyChannel = "SAY"
+                    local target = nil
+                    
+                    if event == "CHAT_MSG_GUILD" then replyChannel = "GUILD"
+                    elseif event == "CHAT_MSG_PARTY" or event == "CHAT_MSG_PARTY_LEADER" then replyChannel = "PARTY"
+                    elseif event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER" then replyChannel = "RAID"
+                    elseif event == "CHAT_MSG_YELL" then replyChannel = "YELL"
+                    elseif event == "CHAT_MSG_OFFICER" then replyChannel = "OFFICER"
+                    elseif event == "CHAT_MSG_WHISPER" then
+                        replyChannel = "WHISPER"
+                        target = sender
+                    elseif event == "CHAT_MSG_CHANNEL" then
+                        replyChannel = "CHANNEL"
+                        target = channelID
+                    end
 
-                C_ChatInfo.SendChatMessage(output, replyChannel, nil, target)
+                    C_ChatInfo.SendChatMessage(output, replyChannel, nil, target)
+                end)
             end)
         end
     end

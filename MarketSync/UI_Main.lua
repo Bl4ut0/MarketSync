@@ -530,14 +530,9 @@ local function CreateMainFrame()
     rightHeader:SetPoint("TOPLEFT", rightColX, -50)
     rightHeader:SetText("|cffffd700Quick Info|r")
 
-    local rightSep = SettingsContent:CreateTexture(nil, "ARTWORK")
-    rightSep:SetColorTexture(0.6, 0.6, 0.6, 0.4)
-    rightSep:SetSize(320, 1)
-    rightSep:SetPoint("TOPLEFT", rightHeader, "BOTTOMLEFT", 0, -4)
-
     -- Right column status info
     local rightStatsText = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    rightStatsText:SetPoint("TOPLEFT", rightSep, "BOTTOMLEFT", 5, -8)
+    rightStatsText:SetPoint("TOPLEFT", rightHeader, "BOTTOMLEFT", 0, -13)
     rightStatsText:SetWidth(310)
     rightStatsText:SetJustifyH("LEFT")
     rightStatsText:SetSpacing(4)
@@ -627,6 +622,71 @@ local function CreateMainFrame()
     monitorDesc:SetJustifyH("LEFT")
     monitorDesc:SetText("|cff888888View network stream and cache logs.|r")
 
+    local btnSmartBandwidth = CreateFrame("Button", nil, SettingsContent, "UIPanelButtonTemplate")
+    btnSmartBandwidth:SetSize(140, 22)
+    btnSmartBandwidth:SetPoint("TOPLEFT", btnNetworkMonitor, "BOTTOMLEFT", 0, -10)
+    btnSmartBandwidth:SetText("Smart Rules")
+
+    local smartDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    smartDesc:SetPoint("LEFT", btnSmartBandwidth, "RIGHT", 8, 0)
+    smartDesc:SetWidth(150)
+    smartDesc:SetJustifyH("LEFT")
+    smartDesc:SetText("|cff888888Toggle auto-suspend states.|r")
+
+    local smartRulesFrame = CreateFrame("Frame", "MarketSyncSmartRulesFrame", UIParent, "BasicFrameTemplateWithInset")
+    smartRulesFrame:SetSize(420, 280)
+    smartRulesFrame:SetPoint("CENTER")
+    smartRulesFrame:SetFrameStrata("DIALOG")
+    smartRulesFrame.title = smartRulesFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    smartRulesFrame.title:SetPoint("CENTER", smartRulesFrame.TitleBg, "CENTER", 0, 0)
+    smartRulesFrame.title:SetText("Smart Bandwidth Rules")
+    smartRulesFrame:Hide()
+
+    local swDesc = smartRulesFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    swDesc:SetPoint("TOPLEFT", 15, -35)
+    swDesc:SetWidth(390)
+    swDesc:SetJustifyH("LEFT")
+    swDesc:SetText("Automatically suspend heavy background operations to protect your network ping.")
+
+    local function CreateSmartCheckbox(parent, label, key, xOffset, yOffset)
+        local cb = CreateFrame("CheckButton", nil, parent, "ChatConfigCheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", xOffset, yOffset)
+        cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        cb.text:SetPoint("LEFT", cb, "RIGHT", 5, 0)
+        cb.text:SetText(label)
+        cb:SetScript("OnShow", function(self)
+            self:SetChecked(MarketSyncDB and MarketSyncDB[key])
+        end)
+        cb:SetScript("OnClick", function(self)
+            if MarketSyncDB then MarketSyncDB[key] = self:GetChecked() end
+        end)
+        return cb
+    end
+
+    local syncLabel = smartRulesFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    syncLabel:SetPoint("TOPLEFT", 20, -75)
+    syncLabel:SetText("|cffffd700Allow Swarm Sync in:|r")
+
+    CreateSmartCheckbox(smartRulesFrame, "Combat", "AllowSyncInCombat", 25, -95)
+    CreateSmartCheckbox(smartRulesFrame, "Raids", "AllowSyncInRaid", 25, -125)
+    CreateSmartCheckbox(smartRulesFrame, "Dungeons / Parties", "AllowSyncInDungeon", 25, -155)
+    CreateSmartCheckbox(smartRulesFrame, "Battlegrounds", "AllowSyncInPvP", 25, -185)
+    CreateSmartCheckbox(smartRulesFrame, "Arenas", "AllowSyncInArena", 25, -215)
+
+    local cacheLabel = smartRulesFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cacheLabel:SetPoint("TOPLEFT", 220, -75)
+    cacheLabel:SetText("|cffffd700Allow Cache Indexer in:|r")
+
+    CreateSmartCheckbox(smartRulesFrame, "Combat", "AllowCacheInCombat", 225, -95)
+    CreateSmartCheckbox(smartRulesFrame, "Raids", "AllowCacheInRaid", 225, -125)
+    CreateSmartCheckbox(smartRulesFrame, "Dungeons / Parties", "AllowCacheInDungeon", 225, -155)
+    CreateSmartCheckbox(smartRulesFrame, "Battlegrounds", "AllowCacheInPvP", 225, -185)
+    CreateSmartCheckbox(smartRulesFrame, "Arenas", "AllowCacheInArena", 225, -215)
+
+    btnSmartBandwidth:SetScript("OnClick", function()
+        if smartRulesFrame:IsShown() then smartRulesFrame:Hide() else smartRulesFrame:Show() end
+    end)
+
     btnNetworkMonitor:SetScript("OnClick", function()
         if MarketSync.ToggleNetworkMonitor then
             MarketSync.ToggleNetworkMonitor()
@@ -636,7 +696,7 @@ local function CreateMainFrame()
     -- Reset Data button
     local btnResetData = CreateFrame("Button", nil, SettingsContent, "UIPanelButtonTemplate")
     btnResetData:SetSize(140, 22)
-    btnResetData:SetPoint("TOPLEFT", btnNetworkMonitor, "BOTTOMLEFT", 0, -10)
+    btnResetData:SetPoint("TOPLEFT", btnSmartBandwidth, "BOTTOMLEFT", 0, -10)
     btnResetData:SetText("Reset Data")
 
     local resetDesc = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")

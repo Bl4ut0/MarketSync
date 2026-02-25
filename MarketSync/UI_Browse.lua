@@ -168,7 +168,7 @@ local function BuildIndexEntry(dbKey, itemID, data, forcePersonal)
         name = name, nameLower = name:lower(), link = link,
         rarity = rarity or 1, ilvl = ilvl or 0, minLevel = minLevel or 0,
         icon = icon, classID = classID, subClassID = subClassID,
-        price = price, age = age, dbKey = dbKey,
+        price = price, age = age, dbKey = dbKey, itemID = itemID,
         source = source, exactTime = exactTime,
         hasMeta = (source ~= "Personal"),
     }
@@ -211,6 +211,25 @@ function MarketSync.InvalidateIndexCache()
         activeRetryFrame:SetScript("OnEvent", nil)
         activeRetryFrame = nil
     end
+end
+
+-- ================================================================
+-- CACHE SUSPENSION LOGIC
+-- ================================================================
+function MarketSync.CanBuildCache()
+    if not MarketSyncDB then return true end
+    if not MarketSyncDB.AllowCacheInCombat and InCombatLockdown and InCombatLockdown() then return false end
+    
+    if IsInInstance then
+        local inInstance, instanceType = IsInInstance()
+        if inInstance then
+            if instanceType == "raid" and not MarketSyncDB.AllowCacheInRaid then return false end
+            if instanceType == "party" and not MarketSyncDB.AllowCacheInDungeon then return false end
+            if instanceType == "pvp" and not MarketSyncDB.AllowCacheInPvP then return false end
+            if instanceType == "arena" and not MarketSyncDB.AllowCacheInArena then return false end
+        end
+    end
+    return true
 end
 
 -- ================================================================
@@ -327,6 +346,7 @@ local function BuildSearchIndex(callback)
     -- Build ticker runs fast (0.01s) so items resolve quickly during first pass.
     -- CPU load per tick is controlled by preset.yieldEvery, not ticker speed.
     activeBuildTicker = C_Timer.NewTicker(0.01, function()
+        if not MarketSync.CanBuildCache() then return end
         if coroutine.status(co) == "dead" then activeBuildTicker:Cancel(); activeBuildTicker = nil; return end
         local ok, err = coroutine.resume(co)
         if not ok then print("|cffff0000[MarketSync] Index error:|r", err); activeBuildTicker:Cancel(); activeBuildTicker = nil end
@@ -423,6 +443,7 @@ local function BuildSearchIndex(callback)
     -- Periodic retry for missed events
     if activePeriodicRetry then activePeriodicRetry:Cancel() end
     activePeriodicRetry = C_Timer.NewTicker(preset.interval, function()
+        if not MarketSync.CanBuildCache() then return end
         local pRemaining, gRemaining = 0, 0
         for _ in pairs(PersonalPending) do pRemaining = pRemaining + 1 end
         for _ in pairs(GuildPending) do gRemaining = gRemaining + 1 end
@@ -466,7 +487,6 @@ function MarketSync.BeginGuildSync()
     end
 end
 
--- Called by sync module for each item received during sync
 -- Called by sync module for each item received during sync
 function MarketSync.AddToGuildIncoming(dbKey)
     if not GuildIndexReady then return end  -- Index hasn't been built yet
@@ -532,6 +552,11 @@ function MarketSync.CommitGuildSync()
     GuildSyncActive = false
     GuildIncomingCount = 0
     wipe(GuildIncomingBuffer)
+
+    -- Invalidate CachedScanStats so the next ADV re-counts from the live database.
+    -- This is the critical handoff point: new items are now in the Auctionator DB,
+    -- so any pre-sync cached count is definitively stale.
+    if MarketSyncDB then MarketSync.GetRealmDB().CachedScanStats = nil end
 
     if MarketSync.LogCacheEvent then
         MarketSync.LogCacheEvent(string.format("|cff88aaff[Guild Commit]|r Merged %d items, removed %d. Guild index now %d items total.", merged, removed, GuildTotal))
@@ -629,12 +654,11 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     -- --- CATEGORY SIDEBAR ---
     local SIDEBAR_WIDTH = 155
     local SIDEBAR_HEIGHT = 305
-    local filterScroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    -- Creating raw ScrollFrame WITHOUT UIPanelScrollFrameTemplate removes all visual scrollbar elements completely
+    local filterScroll = CreateFrame("ScrollFrame", nil, panel)
     filterScroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 23, -105)
     filterScroll:SetSize(SIDEBAR_WIDTH, SIDEBAR_HEIGHT)
     local filterChild = CreateFrame("Frame"); filterChild:SetSize(SIDEBAR_WIDTH, 800); filterScroll:SetScrollChild(filterChild)
-    local scrollBar = filterScroll.ScrollBar or _G[filterScroll:GetName() and (filterScroll:GetName().."ScrollBar")]
-    if scrollBar then scrollBar:Hide() end
     filterScroll:EnableMouseWheel(true)
     filterScroll:SetScript("OnMouseWheel", function(self, delta)
         local step = FILTER_HEIGHT * 3
@@ -678,18 +702,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         for _, b in ipairs(self.filterButtons) do b:Hide() end
         wipe(self.filterButtons)
 
-        -- Pre-calculate total height to determine if scrollbar is needed
-        local totalHeight = 0
-        for _, cat in ipairs(CATEGORIES) do
-            totalHeight = totalHeight + FILTER_HEIGHT
-            if self.expandedCategory == cat.classID and cat.subs then
-                totalHeight = totalHeight + (#cat.subs * FILTER_HEIGHT)
-            end
-        end
-
-        local needsScrollbar = totalHeight > SIDEBAR_HEIGHT
-        local btnWidth = needsScrollbar and (SIDEBAR_WIDTH - 20) or SIDEBAR_WIDTH
-
+        local btnWidth = SIDEBAR_WIDTH
         local y = 0
         for _, cat in ipairs(CATEGORIES) do
             local btn = MakeFilterButton(self.filterChild, cat.name, 0, y, btnWidth)
@@ -739,10 +752,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             end
         end
         self.filterChild:SetHeight(math.max(y, SIDEBAR_HEIGHT))
-        local sb = self.filterScroll.ScrollBar or _G[self.filterScroll:GetName() and (self.filterScroll:GetName().."ScrollBar")]
-        if sb then
-            if needsScrollbar then sb:Show() else sb:Hide() end
-        end
     end
     panel:RebuildFilters()
 
@@ -923,12 +932,10 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 if bestAge < 9999 then scanAge = bestAge end
             end
             if scanAge then
-                if scanAge == 0 then
-                    if MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
-                        self.statusText:SetText("|cffffd700" .. MarketSync.FormatRealmDateString(MarketSync.GetRealmDB().PersonalScanTime) .. "|r")
-                    else
-                        self.statusText:SetText("|cffffd700Today|r")
-                    end
+                if MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+                    self.statusText:SetText("|cffffd700" .. MarketSync.FormatRealmDateString(MarketSync.GetRealmDB().PersonalScanTime) .. "|r")
+                elseif scanAge == 0 then
+                    self.statusText:SetText("|cffffd700Today|r")
                 else
                     self.statusText:SetText("|cffffd700" .. scanAge .. " day(s) ago|r")
                 end
@@ -1165,6 +1172,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         -- Use the appropriate index for this tab
         local index = isGuild and GuildIndex or PersonalIndex
         
+        local uniqueResults = {}
         for _, item in pairs(index) do
             local matchesQuery = false
             if not isExact and #query < minQueryLen then
@@ -1180,10 +1188,17 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 if matchesCat then
                     local matchesSub = (not activeSub) or (item.subClassID == activeSub)
                     if matchesSub then
-                        table.insert(self.currentResults, item)
+                        local existing = uniqueResults[item.itemID]
+                        if not existing or item.price < existing.price then
+                            uniqueResults[item.itemID] = item
+                        end
                     end
                 end
             end
+        end
+
+        for _, item in pairs(uniqueResults) do
+            table.insert(self.currentResults, item)
         end
 
         self:ApplySort()
@@ -1269,7 +1284,23 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             local va, vb = a[field], b[field]
             if va == nil then va = 0 end
             if vb == nil then vb = 0 end
-            if va == vb then return a.name < b.name end
+            
+            if va == vb then
+                if field == "minLevel" then
+                    -- Secondary Sort: Best rarity first (highest rarity ID)
+                    local ra = a.rarity or 0
+                    local rb = b.rarity or 0
+                    if ra ~= rb then
+                        return ra > rb
+                    end
+                end
+                
+                -- Fallback / Tertiary Sort: Alphabetical order (Name string)
+                local nameA = (a.nameLower or a.name or "")
+                local nameB = (b.nameLower or b.name or "")
+                return nameA < nameB
+            end
+            
             if asc then return va < vb else return va > vb end
         end)
     end

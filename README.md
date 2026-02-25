@@ -21,7 +21,7 @@ If *one* person scans the Auction House, *everyone* gets the data instantly.
 *   **Separated Data Views:** Personal scans and guild sync data are physically separated. Your personal data never gets overwritten by incoming guild syncs.
 *   **Debug Console:** Full-featured network monitor with three panels — Sync Network event log, Swarm Queue tracker, and Cache Processing Stream — for complete visibility into what the addon is doing.
 *   **Version Guard:** Automatically handles version mismatches between guild members. Outdated clients are safely disabled from syncing to prevent data corruption.
-*   **Flood Protection:** Intelligent chat throttling ensures the `?` command never spams your chat channels.
+*   **Flood Protection:** A two-phase `CLAIM` protocol with deterministic tiebreaking guarantees exactly one client responds to any `?` price check — even when multiple guild members are online simultaneously.
 
 ## ⚠️ System Impact & RAM Usage
 
@@ -40,18 +40,18 @@ MarketSync uses a **Swarm Coordinator** protocol to efficiently share data acros
 3. **Consensus:** Multiple potential senders coordinate to elect a single "seeder" to avoid redundant broadcasts.
 4. **Bulk Transfer:** The seeder transmits item data using the **Protocol v4** architecture:
    - **Full Variation Support:** Base-36 encoding perfectly preserves random suffixes (e.g., "of the Bear") using a custom `_` packet delineator, allowing accurate pricing across thousands of variant enchants.
-   - **3 parallel data channels** (`MSyncD1`, `MSyncD2`, `MSyncD3`) for triple throughput
+   - **5 parallel data channels** (`MSyncD1`–`MSyncD5`) for quintuple throughput
    - **Base-36 encoding** compresses numeric payloads by ~30%
    - **248-byte dense packing** maximizes items per message (~16 per chunk)
-   - Achieves **~48 items/sec** sustained, completing a full 25,000-item sync in **~18 minutes**
+   - Achieves **~80 items/sec** sustained, completing a full 25,000-item sync in **~10 minutes**
 5. **Commit:** After receiving the `END` signal, clients immediately commit the items to their guild index. To prevent chat flood from massive guilds, the client applies a **randomized 1-20s Jitter Delay** before responding with a safe `ACK` confirmation to the sender.
 
 ### Protocol Architecture
 
 | Layer | Prefix | Purpose |
 |---|---|---|
-| **Control** | `MarketSync` | ADV, PULL, ACCEPT, RES, REQ, ERR, ACK, END — plain text with character names and realm info |
-| **Data** | `MSyncD1`, `MSyncD2`, `MSyncD3` | BRES bulk payloads (`dbKey_price_qty_day`) — v4 base-36 compressed |
+| **Control** | `MarketSync` | ADV, PULL, ACCEPT, CLAIM, RES, REQ, ERR, END — plain text with character names and realm info |
+| **Data** | `MSyncD1`–`MSyncD5` | BRES bulk payloads (`dbKey_price_qty_day`) — v4 base-36 compressed |
 
 This separation ensures character names with special characters pass through untouched on the control layer, while the data layer maximizes throughput with compressed encoding.
 
@@ -62,9 +62,9 @@ MarketSync is explicitly engineered to never trigger a Blizzard API throttle dis
 | Constraint | WoW Limit | MarketSync Usage |
 |---|---|---|
 | Per-prefix bucket | 10 msgs burst, 1/sec regen | 1 msg/sec per prefix (never drains) |
-| Global CPS (Bytes/Sec) | ~1500–2000 safe threshold | 744 bytes/sec (~50% beneath safety limit) |
+| Global CPS (Bytes/Sec) | ~1500–2000 safe threshold | ~1250 bytes/sec (~30% beneath safety limit) |
 | Message payload | 255 bytes | 248 bytes (7 byte safety margin) |
-| ACK Flood Protection | Chat channel disconnects | Staggered 1-20s random jitter on all bulk confirmations |
+| Price Check Flood | Chat channel disconnects | Two-phase CLAIM protocol with 300ms grace + deterministic tiebreaker |
 
 ## Installation
 
@@ -100,8 +100,9 @@ Link an item in **Guild Chat**, **Party**, or **Raid** with a `?` prefix:
 ```
 MarketSync will automatically reply with the most recent price from the guild database:
 ```
-[Linen Cloth]: 5s 20c (Age: 10m)
+[Linen Cloth]: 5s 20c (Age: 14:32 RT (Playername))
 ```
+If multiple guild members have the addon installed, only **one** client responds — the built-in Swarm anti-flood system uses a randomized lottery with instant addon-channel coordination to guarantee a single reply.
 
 ## Configuration
 

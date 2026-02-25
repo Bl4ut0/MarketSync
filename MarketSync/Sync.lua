@@ -190,8 +190,25 @@ end
 -- ================================================================
 -- SEND FUNCTIONS
 -- ================================================================
+function MarketSync.CanSync()
+    if not IsInGuild() then return false end
+    if not MarketSyncDB then return true end
+    if not MarketSyncDB.AllowSyncInCombat and InCombatLockdown and InCombatLockdown() then return false end
+    
+    if IsInInstance then
+        local inInstance, instanceType = IsInInstance()
+        if inInstance then
+            if instanceType == "raid" and not MarketSyncDB.AllowSyncInRaid then return false end
+            if instanceType == "party" and not MarketSyncDB.AllowSyncInDungeon then return false end
+            if instanceType == "pvp" and not MarketSyncDB.AllowSyncInPvP then return false end
+            if instanceType == "arena" and not MarketSyncDB.AllowSyncInArena then return false end
+        end
+    end
+    return true
+end
+
 function MarketSync.SendAdvertisement()
-    if not IsInGuild() then return end
+    if not MarketSync.CanSync() then return end
     -- Suppress ADV while we are actively sending data (pullInProgress)
     if pullInProgress then
         Debug("ADV suppressed: PULL response in progress")
@@ -202,12 +219,17 @@ function MarketSync.SendAdvertisement()
         Debug("ADV suppressed: receiving transfer in progress")
         return
     end
+    -- Suppress ADV while the Auction House is actively open (e.g. running an Auctionator scan)
+    if MarketSync.IsAuctionHouseOpen then
+        Debug("ADV suppressed: Auction House is currently open")
+        return
+    end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
     myLatestScanDay = MarketSync.GetMyLatestScanDay()
     myRecentItemCount = MarketSync.CountRecentItems(myLatestScanDay)
     if myLatestScanDay > 0 and myRecentItemCount > 0 then
         local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or "0.0.0"
-        local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalScanTime) or 0
+        local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
         local payload = string.format("ADV;%s;%d;%d;%s;%s", MarketSync.myRealm, myLatestScanDay, myRecentItemCount, localVersion, tostring(myScanTime))
         C_ChatInfo.SendAddonMessage(PREFIX, payload, "GUILD")
         if MarketSync.LogNetworkEvent then
@@ -218,7 +240,7 @@ function MarketSync.SendAdvertisement()
 end
 
 function MarketSync.SendPullRequest(sinceDay)
-    if not IsInGuild() then return end
+    if not MarketSync.CanSync() then return end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
     local payload = string.format("PULL;%s;%d", MarketSync.myRealm, sinceDay)
     C_ChatInfo.SendAddonMessage(PREFIX, payload, "GUILD")
@@ -252,7 +274,7 @@ end
 MarketSync.PullQueue = {}
 
 function MarketSync.SendPullAccept(sinceDay)
-    if not IsInGuild() then return end
+    if not MarketSync.CanSync() then return end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
     local payload = string.format("ACCEPT;%s;%d", MarketSync.myRealm, sinceDay)
     C_ChatInfo.SendAddonMessage(PREFIX, payload, "GUILD")
@@ -272,6 +294,7 @@ function MarketSync.RegisterPullAccept(sinceDay, senderName)
 end
 
 function MarketSync.SchedulePullResponse(sinceDay, requester)
+    if not MarketSync.CanSync() then return end
     if pullInProgress then return end
 
     local delay = math.random() * 8.0 -- 0.0 to 8.0 seconds for large guilds
@@ -322,6 +345,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
     -- Total throughput: ~48 items/sec. Full 2355-item sync in ~50 seconds.
     local MAX_PAYLOAD = 248  -- 255 minus "BRES;" prefix (5) minus safety margin (2)
     local numPrefixes = #DATA_PREFIXES
+    local prefixIndex = 0  -- round-robin counter shared between coroutine and ticker
     
     local co = coroutine.create(function()
         local sent = 0
@@ -330,7 +354,6 @@ function MarketSync.RespondToPull(sinceDay, requester)
         local messagesSent = 0
         local buffer = ""
         local bufferCount = 0
-        local prefixIndex = 1  -- round-robin counter
         
         -- Store current key globally so the ticker can retrieve it on crash
         _G.MarketSyncActivePullKey = "Starting"
@@ -376,7 +399,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
                         -- Flush buffer if adding this item would exceed the wire limit
                         local currentLen = string.len(buffer)
                         if currentLen > 0 and currentLen + 1 + string.len(itemStr) > MAX_PAYLOAD then
-                            -- Send on the current round-robin prefix
+                            -- Send on the current round-robin prefix (injected by the outer ticker)
                             local dp = DATA_PREFIXES[prefixIndex]
                             MarketSync.SendBulkSyncResponse(buffer, dp, "GUILD")
                             MarketSync.TxCount = MarketSync.TxCount + bufferCount
@@ -385,9 +408,6 @@ function MarketSync.RespondToPull(sinceDay, requester)
                             buffer = ""
                             bufferCount = 0
                             yieldCounter = 0
-                            
-                            -- Advance round-robin
-                            prefixIndex = (prefixIndex % numPrefixes) + 1
                             
                             -- Checkpoint every 100 items
                             if sent % 100 < 16 then
@@ -432,27 +452,29 @@ function MarketSync.RespondToPull(sinceDay, requester)
             MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Complete]|r Sent %d items in %d messages via %d channels. (%d scanned, %d skipped)", sent, messagesSent, numPrefixes, scanned, skipped))
         end
         if requester and IsInGuild() then
-            -- Send an explicit END signal including our PersonalScanTime so the receiver
+            -- Send an explicit END signal including our SwarmTSF so the receiver
             -- stamps the SAME time as us (prevents ping-pong re-sync loops)
-            local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalScanTime) or 0
+            local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
             C_ChatInfo.SendAddonMessage(PREFIX, string.format("END;%d;%d;%s", sent, messagesSent, tostring(myScanTime)), "GUILD")
         end
         pullInProgress = false
         if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
     end)
 
-    -- Multi-prefix round-robin: 3 prefixes, each gets 1 msg/sec.
-    -- Ticker fires every 1/3 second (0.34s). Each tick sends on 1 prefix,
-    -- so each individual prefix sends at most 1 msg/sec (safe for its bucket).
-    -- Total sustained: 3 msg/sec × ~16 items/msg = ~48 items/sec.
-    -- Global CPS: 3 × 248 = 744 bytes/sec (well under 2000 safe limit).
+    -- Multi-prefix round-robin: 5 prefixes available
+    -- Total sustained: ~5 msg/sec × ~16 items/msg = ~80 items/sec.
     local ticker
-    ticker = C_Timer.NewTicker(0.34, function()
+    ticker = C_Timer.NewTicker(0.2, function()
         if coroutine.status(co) == "dead" then
             ticker:Cancel()
             pullInProgress = false
             return
         end
+        
+        -- Advance prefix index before resuming coroutine
+        -- The coroutine will use this to send its chunk
+        prefixIndex = (prefixIndex % numPrefixes) + 1
+        
         local ok, err = coroutine.resume(co)
         if not ok then
             local crashKey = _G.MarketSyncActivePullKey or "Unknown"
@@ -475,6 +497,7 @@ end
 function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
     if sender and IsBlocked(sender) then return end
 
+    local realmDB = MarketSync.GetRealmDB() -- Cache once per call (hot path during sync)
     local itemLink = "item:" .. tostring(key) -- Fallback for logs
 
         local currentPrice = Auctionator.Database:GetPrice(key)
@@ -536,13 +559,13 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
 
         if sender and (historyUpdated or incomingScanDay >= maxDay) then
             TrackSync(sender, 1)
-            if not MarketSync.GetRealmDB().ItemMetadata then MarketSync.GetRealmDB().ItemMetadata = {} end
+            if not realmDB.ItemMetadata then realmDB.ItemMetadata = {} end
             
             -- Per-day attribution: each scan day credits the actual sender
-            local meta = MarketSync.GetRealmDB().ItemMetadata[key]
+            local meta = realmDB.ItemMetadata[key]
             if not meta then
                 meta = { days = {}, lastSource = sender, lastTime = time() }
-                MarketSync.GetRealmDB().ItemMetadata[key] = meta
+                realmDB.ItemMetadata[key] = meta
             end
             if not meta.days then meta.days = {} end
             
@@ -562,9 +585,9 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
         end
 
         -- Log to History
-        if not MarketSync.GetRealmDB().HistoryLog then MarketSync.GetRealmDB().HistoryLog = {} end
-        table.insert(MarketSync.GetRealmDB().HistoryLog, 1, { link = itemLink, price = price, sender = sender or "Self", time = time() })
-        if #MarketSync.GetRealmDB().HistoryLog > 100 then table.remove(MarketSync.GetRealmDB().HistoryLog) end
+        if not realmDB.HistoryLog then realmDB.HistoryLog = {} end
+        table.insert(realmDB.HistoryLog, 1, { link = itemLink, price = price, sender = sender or "Self", time = time() })
+        if #realmDB.HistoryLog > 100 then table.remove(realmDB.HistoryLog) end
 end
 
 function MarketSync.UpdateLocalDB(itemLink, price, day, quantity, sender)
@@ -595,8 +618,7 @@ function MarketSync.StartPassiveSync()
     -- Re-advertise every 5 minutes
     passiveTicker = C_Timer.NewTicker(300, function()
         if not MarketSyncDB or not MarketSyncDB.PassiveSync then return end
-        if IsInInstance() then return end
-        MarketSync.SendAdvertisement()
+        MarketSync.SendAdvertisement() -- CanSync() inside handles combat/instance/arena suppression
     end)
 end
 
@@ -690,8 +712,9 @@ function MarketSync.BroadcastRecentData()
         if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
     end)
 
-    local ticker = C_Timer.NewTicker(0.2, function()
-        if coroutine.status(co) == "dead" then return end
+    local ticker
+    ticker = C_Timer.NewTicker(0.2, function()
+        if coroutine.status(co) == "dead" then ticker:Cancel(); return end
         local success, err = coroutine.resume(co)
         if not success then print("|cFFFF0000[MarketSync] Sync Error:|r", err) end
     end)

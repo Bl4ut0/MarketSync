@@ -17,8 +17,8 @@ C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
 
 -- Data channel prefixes for parallel BRES bulk transfers.
 -- Each prefix gets its own token bucket (10 burst, 1/sec regen).
--- 3 channels = 3 msg/sec sustained = ~48 items/sec with base-36 encoding.
-MarketSync.DATA_PREFIXES = { "MSyncD1", "MSyncD2", "MSyncD3" }
+-- 5 channels = 5 msg/sec sustained = ~80 items/sec with base-36 encoding.
+MarketSync.DATA_PREFIXES = { "MSyncD1", "MSyncD2", "MSyncD3", "MSyncD4", "MSyncD5" }
 for _, dp in ipairs(MarketSync.DATA_PREFIXES) do
     C_ChatInfo.RegisterAddonMessagePrefix(dp)
 end
@@ -60,6 +60,18 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
     if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 3.75 } end
     
+    if MarketSyncDB.AllowSyncInCombat == nil then MarketSyncDB.AllowSyncInCombat = true end
+    if MarketSyncDB.AllowSyncInRaid == nil then MarketSyncDB.AllowSyncInRaid = false end
+    if MarketSyncDB.AllowSyncInDungeon == nil then MarketSyncDB.AllowSyncInDungeon = false end
+    if MarketSyncDB.AllowSyncInPvP == nil then MarketSyncDB.AllowSyncInPvP = false end
+    if MarketSyncDB.AllowSyncInArena == nil then MarketSyncDB.AllowSyncInArena = false end
+
+    if MarketSyncDB.AllowCacheInCombat == nil then MarketSyncDB.AllowCacheInCombat = true end
+    if MarketSyncDB.AllowCacheInRaid == nil then MarketSyncDB.AllowCacheInRaid = false end
+    if MarketSyncDB.AllowCacheInDungeon == nil then MarketSyncDB.AllowCacheInDungeon = false end
+    if MarketSyncDB.AllowCacheInPvP == nil then MarketSyncDB.AllowCacheInPvP = false end
+    if MarketSyncDB.AllowCacheInArena == nil then MarketSyncDB.AllowCacheInArena = false end
+    
     if not MarketSyncDB.RealmData then MarketSyncDB.RealmData = {} end
 
     -- MIGRATION: Move old global data to the current realm's partition on first load
@@ -82,6 +94,14 @@ function MarketSync.InitializeDB()
     MarketSyncDB.SyncStats = nil
     MarketSyncDB.WeeklySyncStats = nil
     MarketSyncDB.PersonalScanTime = nil
+
+    -- MIGRATION (v0.5.2 → v0.5.3): Seed SwarmTSF from PersonalScanTime if missing.
+    -- Without this, the first ADV after upgrade would broadcast TSF=0, making other
+    -- clients think we have no freshness data and triggering an unnecessary PULL.
+    local realmDB = MarketSyncDB.RealmData[realm]
+    if realmDB and realmDB.PersonalScanTime and not realmDB.SwarmTSF then
+        realmDB.SwarmTSF = realmDB.PersonalScanTime
+    end
 end
 
 -- Fast helper function to get the partitioned database for the current realm
@@ -157,6 +177,71 @@ function MarketSync.TrackSync(sender, count)
     end
     realmDB.WeeklySyncStats.data[sender].count = realmDB.WeeklySyncStats.data[sender].count + count
     realmDB.WeeklySyncStats.data[sender].last = time()
+end
+
+-- ================================================================
+-- METADATA PRUNING (Hybrid Retention Policy)
+-- ================================================================
+-- Prevents unbounded RAM growth from ItemMetadata accumulation.
+-- Tier 1: Cap per-item `days` sub-tables to the N most recent scan days.
+-- Tier 2: Remove entire metadata entries for items not seen in 30 days.
+-- Designed to run once per login (deferred, low-priority).
+local MAX_DAYS_PER_ITEM = 7          -- Keep only the 7 most recent day entries per item
+local STALE_THRESHOLD_SECONDS = 30 * 86400  -- 30 days in seconds
+
+function MarketSync.PruneMetadata()
+    local realmDB = MarketSync.GetRealmDB()
+    if not realmDB or not realmDB.ItemMetadata then return end
+
+    local now = time()
+    local prunedItems = 0      -- Entire entries removed (stale)
+    local trimmedDays = 0      -- Individual day sub-entries trimmed
+    local totalItems = 0
+
+    for key, meta in pairs(realmDB.ItemMetadata) do
+        totalItems = totalItems + 1
+
+        -- TIER 2: Remove entire entry if lastTime is older than 30 days
+        local lastTime = meta.lastTime or meta.time or 0
+        if lastTime > 0 and (now - lastTime) > STALE_THRESHOLD_SECONDS then
+            realmDB.ItemMetadata[key] = nil
+            prunedItems = prunedItems + 1
+        else
+            -- TIER 1: Cap days sub-table to MAX_DAYS_PER_ITEM most recent entries
+            if meta.days then
+                -- Collect all day keys and sort descending (most recent first)
+                local dayKeys = {}
+                for dayStr in pairs(meta.days) do
+                    dayKeys[#dayKeys + 1] = dayStr
+                end
+
+                if #dayKeys > MAX_DAYS_PER_ITEM then
+                    table.sort(dayKeys, function(a, b)
+                        return (tonumber(a) or 0) > (tonumber(b) or 0)
+                    end)
+
+                    -- Remove entries beyond the cap
+                    for i = MAX_DAYS_PER_ITEM + 1, #dayKeys do
+                        meta.days[dayKeys[i]] = nil
+                        trimmedDays = trimmedDays + 1
+                    end
+                end
+            end
+        end
+    end
+
+    if prunedItems > 0 or trimmedDays > 0 then
+        MarketSync.Debug(string.format(
+            "PruneMetadata: %d/%d stale items removed, %d day-entries trimmed (cap: %d days/item, stale: %dd)",
+            prunedItems, totalItems, trimmedDays, MAX_DAYS_PER_ITEM, STALE_THRESHOLD_SECONDS / 86400
+        ))
+        if MarketSyncDB and MarketSyncDB.DebugMode then
+            print(string.format(
+                "|cFF00FF00[MarketSync]|r Pruned metadata: %d stale items removed, %d day-entries trimmed.",
+                prunedItems, trimmedDays
+            ))
+        end
+    end
 end
 
 -- ================================================================
