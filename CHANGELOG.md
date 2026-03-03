@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-03-02
+### Fixed
+- **Fixed**: A severe UI taint issue where action bar items, macros, and tradeskills would unexpectedly darken and become "unavailable" (as if missing required reagents/tools, like a Blacksmithing Hammer). This was caused by the background cache builder aggressively requesting item data from the WoW server (up to 200 items per tick), which flooded the client's item cache event dispatcher. This blocked the default UI from receiving `GET_ITEM_INFO_RECEIVED` events for player inventory items. The cache builder requests have been drastically throttled across all cache speed presets (e.g., Maximum speed lowered from 200 to 40 items/tick), completely eliminating the client stall while maintaining fast indexing performance.
+
 ## [0.5.3] - 2026-02-25
 ### Improved
 - **Improved**: **Hybrid Metadata Retention Policy**. Introduced a two-tier automated pruning system that prevents unbounded RAM growth from `ItemMetadata` accumulation over long-term usage. **Tier 1** caps per-item `days` attribution sub-tables to the **7 most recent scan days**, removing old day-by-day "who synced it" entries that no feature relies on. **Tier 2** removes the **entire** metadata entry for items whose `lastTime` is older than **30 days** — if nobody has scanned or synced an item in a month, the attribution data is stale and meaningless. On a mature dataset (~30k items with months of daily scans), this reduces `ItemMetadata` RAM usage by approximately **75-80%**. The pruning runs lazily at **Stage 2.5** (60 seconds after login), slotted between passive sync startup and search index building, with zero impact on gameplay performance. **Auctionator's price database is never touched** — only MarketSync's own attribution metadata is pruned.

@@ -2,7 +2,7 @@
 ## Title: MarketSync
 ## Notes: The Guild Auction DB - Sync prices, check history, and browse offline.
 ## Author: Gemini
-## Version: 0.5.3
+## Version: 0.5.4
 ## SavedVariables: MarketSyncDB
 ## Dependencies: Auctionator
 

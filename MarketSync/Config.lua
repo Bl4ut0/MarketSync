@@ -125,10 +125,10 @@ end
 -- ================================================================
 -- Each level controls: batch size per tick, retry interval, re-request count, coroutine yield frequency
 MarketSync.CacheSpeedPresets = {
-    [1] = { name = "Conservative",  batchSize = 25,  interval = 1.0,  requests = 25,   yieldEvery = 20,  desc = "|cff888888Minimal CPU impact. Best for older hardware.\nVery smooth but slower indexing.|r" },
-    [2] = { name = "Balanced",      batchSize = 50,  interval = 0.5,  requests = 50,   yieldEvery = 50,  desc = "|cff888888Good balance. Smooth performance for most PCs.\nRecommended default.|r" },
-    [3] = { name = "Aggressive",    batchSize = 100, interval = 0.25, requests = 100,  yieldEvery = 100, desc = "|cff888888Faster indexing with potential minor stutter.\nUse if you have a high-end CPU.|r" },
-    [4] = { name = "Maximum",       batchSize = 200, interval = 0.1,  requests = 200,  yieldEvery = 200, desc = "|cffff8800Fastest possible. Will likely cause frame drops.\nOnly use if you want it done NOW.|r" },
+    [1] = { name = "Conservative",  batchSize = 25,  interval = 1.0,  requests = 5,    yieldEvery = 20,  desc = "|cff888888Minimal CPU impact. Best for older hardware.\\nVery smooth but slower indexing.|r" },
+    [2] = { name = "Balanced",      batchSize = 50,  interval = 0.5,  requests = 10,   yieldEvery = 50,  desc = "|cff888888Good balance. Smooth performance for most PCs.\\nRecommended default.|r" },
+    [3] = { name = "Aggressive",    batchSize = 100, interval = 0.25, requests = 20,   yieldEvery = 100, desc = "|cff888888Faster indexing with potential minor stutter.\\nUse if you have a high-end CPU.|r" },
+    [4] = { name = "Maximum",       batchSize = 200, interval = 0.1,  requests = 40,   yieldEvery = 200, desc = "|cffff8800Fastest possible. Will likely cause frame drops.\\nOnly use if you want it done NOW.|r" },
 }
 
 -- ================================================================
