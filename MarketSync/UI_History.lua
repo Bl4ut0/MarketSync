@@ -41,47 +41,6 @@ end
 -- ================================================================
 -- EXTRACT HISTORY DATA FROM AUCTIONATOR DB
 -- ================================================================
-local function GetItemHistory(dbKey)
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return {} end
-    local priceData = Auctionator.Database.db[dbKey]
-    if not priceData or not priceData.h then return {} end
-
-    local history = {}
-    local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
-
-    for dayStr, highPrice in pairs(priceData.h) do
-        local day = tonumber(dayStr)
-        if day then
-            local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
-            local qty = priceData.a and priceData.a[dayStr] or 0
-
-            -- Per-day source attribution (new system)
-            local source = "Personal"
-            if meta then
-                if meta.days and meta.days[dayStr] then
-                    -- New per-day attribution
-                    local s = meta.days[dayStr].source
-                    source = s and (s:match("^([^%-]+)") or s) or "Personal"
-                elseif meta.lastSource then
-                    -- Legacy flat fallback for old data
-                    source = meta.lastSource:match("^([^%-]+)") or meta.lastSource
-                end
-            end
-
-            table.insert(history, {
-                day = day,
-                high = highPrice,
-                low = lowPrice,
-                price = highPrice,
-                quantity = qty,
-                source = source,
-            })
-        end
-    end
-
-    table.sort(history, function(a, b) return a.day > b.day end)
-    return history
-end
 
 -- Convert scan day number to a readable date string
 local function ScanDayToDate(scanDay)
@@ -114,6 +73,10 @@ local function CreateGraph(parent, width, height)
     graph.labels = {}
     graph.plotWidth = width
     graph.plotHeight = height
+    graph.lineCursor = 0
+    graph.dotCursor = 0
+    graph.gridCursor = 0
+    graph.labelCursor = 0
 
     -- Background
     local bg = graph:CreateTexture(nil, "BACKGROUND", nil, 2)
@@ -147,20 +110,24 @@ local function CreateGraph(parent, width, height)
         for _, dot in ipairs(self.dots) do dot:Hide() end
         for _, gl in ipairs(self.gridLines) do gl:Hide() end
         for _, lbl in ipairs(self.labels) do lbl:Hide() end
+        self.lineCursor = 0
+        self.dotCursor = 0
+        self.gridCursor = 0
+        self.labelCursor = 0
     end
 
-    function graph:GetOrCreateLine(pool)
-        local idx = #pool + 1
-        local line = pool[idx]
+    function graph:GetOrCreateLine()
+        self.lineCursor = self.lineCursor + 1
+        local line = self.lines[self.lineCursor]
         if not line then
             line = self:CreateLine(nil, "ARTWORK")
-            pool[idx] = line
+            self.lines[self.lineCursor] = line
         end
         return line
     end
 
     function graph:DrawLine(x1, y1, x2, y2, r, g, b, a, thickness)
-        local line = self:GetOrCreateLine(self.lines)
+        local line = self:GetOrCreateLine()
         line:SetThickness(thickness or 2)
         line:SetColorTexture(r or 1, g or 1, b or 1, a or 1)
         line:SetStartPoint("BOTTOMLEFT", x1, y1)
@@ -169,11 +136,11 @@ local function CreateGraph(parent, width, height)
     end
 
     function graph:DrawDot(x, y, r, g, b, size)
-        local idx = #self.dots + 1
-        local dot = self.dots[idx]
+        self.dotCursor = self.dotCursor + 1
+        local dot = self.dots[self.dotCursor]
         if not dot then
             dot = self:CreateTexture(nil, "OVERLAY")
-            self.dots[idx] = dot
+            self.dots[self.dotCursor] = dot
         end
         local s = size or 6
         dot:SetSize(s, s)
@@ -184,11 +151,11 @@ local function CreateGraph(parent, width, height)
     end
 
     function graph:DrawGridLine(y, alpha)
-        local idx = #self.gridLines + 1
-        local gl = self.gridLines[idx]
+        self.gridCursor = self.gridCursor + 1
+        local gl = self.gridLines[self.gridCursor]
         if not gl then
             gl = self:CreateTexture(nil, "BACKGROUND", nil, 3)
-            self.gridLines[idx] = gl
+            self.gridLines[self.gridCursor] = gl
         end
         gl:SetColorTexture(0.5, 0.5, 0.5, alpha or 0.15)
         gl:SetSize(self.plotWidth - 2, 1)
@@ -198,11 +165,11 @@ local function CreateGraph(parent, width, height)
     end
 
     function graph:AddLabel(x, y, text, anchor)
-        local idx = #self.labels + 1
-        local lbl = self.labels[idx]
+        self.labelCursor = self.labelCursor + 1
+        local lbl = self.labels[self.labelCursor]
         if not lbl then
             lbl = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
-            self.labels[idx] = lbl
+            self.labels[self.labelCursor] = lbl
         end
         lbl:ClearAllPoints()
         lbl:SetPoint(anchor or "TOP", self, "BOTTOMLEFT", x, y)
@@ -212,11 +179,6 @@ local function CreateGraph(parent, width, height)
 
     function graph:PlotHistory(history)
         self:Clear()
-        -- Reset pools (re-use existing objects on next call)
-        wipe(self.lines)
-        wipe(self.dots)
-        wipe(self.gridLines)
-        wipe(self.labels)
 
         if not history or #history < 1 then
             local noData = self:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -482,22 +444,22 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
 
     -- Sync label
     panel.syncLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.syncLabel:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 175, 20)
+    panel.syncLabel:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 195, 20)
     panel.syncLabel:SetJustifyH("LEFT")
 
     -- Item count
     panel.itemCountText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.itemCountText:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 280, 20)
+    panel.itemCountText:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 300, 20)
     panel.itemCountText:SetWidth(100)
     panel.itemCountText:SetJustifyH("LEFT")
 
     -- Pagination (moved to center-left, after item count)
     panel.scanPageText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.scanPageText:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 380, 20)
+    panel.scanPageText:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 400, 20)
 
     local scanPrevBtn = CreateFrame("Button", nil, panel)
     scanPrevBtn:SetSize(28, 28)
-    scanPrevBtn:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 495, 11)
+    scanPrevBtn:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 510, 11)
     scanPrevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
     scanPrevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
     scanPrevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
@@ -533,21 +495,21 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     -- Left slot: Back
     local backBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     backBtn:SetSize(75, 19)
-    backBtn:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -180, 17)
+    backBtn:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -170, 14)
     backBtn:SetText("Back")
     panel.backBtn = backBtn
 
     -- Middle slot: History
     local tabHistBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     tabHistBtn:SetSize(75, 19)
-    tabHistBtn:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -100, 17)
+    tabHistBtn:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -90, 14)
     tabHistBtn:SetText("History")
     panel.tabHistBtn = tabHistBtn
 
     -- Right slot: Data
     local tabSalesBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     tabSalesBtn:SetSize(80, 19)
-    tabSalesBtn:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -14, 17)
+    tabSalesBtn:SetPoint("BOTTOMRIGHT", parentFrame, "BOTTOMRIGHT", -8, 14)
     tabSalesBtn:SetText("Data")
     panel.tabSalesBtn = tabSalesBtn
 
@@ -640,47 +602,41 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
 
     function panel:UpdateStatusBar()
         if self.sourceTab == "personal" then
-            local scanAge = nil
+            local personalTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime or 0
             local totalItems = 0
             if Auctionator and Auctionator.Database and Auctionator.Database.db then
-                local bestAge = 9999
-                local checked = 0
-                for dbKey, _ in pairs(Auctionator.Database.db) do
-                    totalItems = totalItems + 1
-                    if checked < 50 then
-                        local age = Auctionator.Database:GetPriceAge(dbKey)
-                        if age and age < bestAge then bestAge = age end
-                        checked = checked + 1
-                    end
-                end
-                if bestAge < 9999 then scanAge = bestAge end
+                for _ in pairs(Auctionator.Database.db) do totalItems = totalItems + 1 end
             end
-            if scanAge then
-                if scanAge == 0 then
-                    self.statusText:SetText("|cff00ff00Last Scan:|r Today")
-                else
-                    self.statusText:SetText("|cff00ff00Last Scan:|r " .. scanAge .. " day(s) ago")
-                end
+
+            if personalTime > 0 then
+                local timeStr = MarketSync.FormatRealmTime(personalTime)
+                local myName = UnitName("player") or "You"
+                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. myName .. "|r")
             else
-                self.statusText:SetText("|cffff8800No scan data available|r")
+                self.statusText:SetText("|cffff8800No personal scan data|r")
             end
             self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
-            self.syncLabel:SetText("")
+            self.syncLabel:SetText("|cff00ff00Last Personal Scan|r")
         elseif self.sourceTab == "guild" then
             local latestUser, latestTime = nil, 0
-            local syncedItems = 0
-            if MarketSyncDB and MarketSync.GetRealmDB().SyncStats then
-                for user, stats in pairs(MarketSync.GetRealmDB().SyncStats) do
-                    if stats.last and stats.last > latestTime then
-                        latestTime = stats.last
-                        latestUser = user
-                    end
-                end
+            local totalItems = 0
+            if MarketSync.GetLatestSyncContributor then
+                latestUser, latestTime = MarketSync.GetLatestSyncContributor(false)
             end
-            if MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata then
-                for _ in pairs(MarketSync.GetRealmDB().ItemMetadata) do syncedItems = syncedItems + 1 end
+            latestTime = tonumber(latestTime) or 0
+            -- Count items from the live Auctionator DB (same source as Guild Sync browse tab)
+            if Auctionator and Auctionator.Database and Auctionator.Database.db then
+                for _ in pairs(Auctionator.Database.db) do totalItems = totalItems + 1 end
             end
-            if latestUser then
+            
+            -- Check if our personal scan is newer than the latest guild sync
+            local personalTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime or 0
+            if personalTime > latestTime then
+                local timeStr = MarketSync.FormatRealmTime(personalTime)
+                local myName = UnitName("player") or "You"
+                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. myName .. "|r")
+                self.syncLabel:SetText("|cff00ff00Latest Data|r")
+            elseif latestUser then
                 local timeStr = MarketSync.FormatRealmTime(latestTime)
                 local shortName = latestUser:match("^([^%-]+)") or latestUser
                 self.statusText:SetText("|cffffd700" .. timeStr .. " " .. shortName .. "|r")
@@ -689,7 +645,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
                 self.statusText:SetText("|cffff8800No sync data yet|r")
                 self.syncLabel:SetText("")
             end
-            self.itemCountText:SetText("|cffffd700" .. syncedItems .. "|r synced")
+            self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
         end
     end
 
@@ -835,7 +791,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     -- ---- SHOW ITEM ----
     function panel:ShowItem(dbKey, itemLink, name, icon, price, sourceTab)
         self.currentDbKey = dbKey
-        self.historyData = GetItemHistory(dbKey)
+        self.historyData = MarketSync.GetItemHistory(dbKey)
         self.scanPage = 0
         self.sourceTab = sourceTab or "personal"
 

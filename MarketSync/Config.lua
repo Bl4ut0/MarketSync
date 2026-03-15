@@ -33,6 +33,71 @@ function MarketSync.Debug(msg)
 end
 
 -- ================================================================
+-- LINK-AWARE EDITBOX SUPPORT
+-- Shift-click item links into focused addon editboxes without hijacking chat.
+-- ================================================================
+local _msLinkAware = {
+    installed = false,
+    originalInsertLink = nil,
+    activeEditBox = nil,
+    registry = setmetatable({}, { __mode = "k" }),
+}
+
+local function InstallLinkAwareInsertHook()
+    if _msLinkAware.installed then return end
+    _msLinkAware.installed = true
+    _msLinkAware.originalInsertLink = ChatEdit_InsertLink
+
+    ChatEdit_InsertLink = function(text, ...)
+        -- If chat has focus, never interfere.
+        local activeChat = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow() or nil
+        if activeChat and activeChat:IsShown() and activeChat:HasFocus() and _msLinkAware.originalInsertLink then
+            return _msLinkAware.originalInsertLink(text, ...)
+        end
+
+        local editBox = _msLinkAware.activeEditBox
+        local opts = editBox and _msLinkAware.registry[editBox] or nil
+        if editBox and opts and text and editBox:IsShown() and editBox:HasFocus() then
+            if type(opts.onInsertLink) == "function" then
+                local ok, handled = pcall(opts.onInsertLink, editBox, text)
+                if ok and handled then
+                    return true
+                end
+            end
+            if editBox.Insert then
+                editBox:Insert(text)
+                return true
+            end
+        end
+
+        if _msLinkAware.originalInsertLink then
+            return _msLinkAware.originalInsertLink(text, ...)
+        end
+        return false
+    end
+end
+
+function MarketSync.RegisterLinkAwareEditBox(editBox, opts)
+    if not editBox then return end
+    InstallLinkAwareInsertHook()
+    _msLinkAware.registry[editBox] = opts or {}
+
+    editBox:HookScript("OnEditFocusGained", function(self)
+        _msLinkAware.activeEditBox = self
+    end)
+    editBox:HookScript("OnEditFocusLost", function(self)
+        if _msLinkAware.activeEditBox == self then
+            _msLinkAware.activeEditBox = nil
+        end
+    end)
+    editBox:HookScript("OnHide", function(self)
+        if _msLinkAware.activeEditBox == self then
+            _msLinkAware.activeEditBox = nil
+        end
+    end)
+end
+
+-- ================================================================
 -- DATABASE INITIALIZATION
 -- ================================================================
 function MarketSync.InitializeDB()
@@ -42,24 +107,43 @@ function MarketSync.InitializeDB()
             PassiveSync = true,
             DebugMode = false,
             EnableChatPriceCheck = true,
+            EnableNotificationSounds = true,
             BuildCacheOnStartup = true,
+            LowRamMode = false,
+            OnDemandPersonal = false,
+            OnDemandGuild = false,
+            OnDemandNeutral = false,
             CacheSpeed = 2,
             ItemMetadata = {},
-            SyncStats = {},
             HistoryLog = {},
             MinimapIcon = { hide = false, angle = 3.75 },
             PersonalData = {},
+            NotificationSoundID = 8959, -- Raid Warning
+            NotificationVolume = 1.0,
+            NotificationMode = "on_scan",
+            PerNotificationSounds = {},
         }
     end
     if not MarketSyncDB.HistoryLog then MarketSyncDB.HistoryLog = {} end
     if not MarketSyncDB.BlockedUsers then MarketSyncDB.BlockedUsers = {} end
     if MarketSyncDB.PassiveSync == nil then MarketSyncDB.PassiveSync = true end
+    if MarketSyncDB.EnableNeutralSync == nil then MarketSyncDB.EnableNeutralSync = true end
     if MarketSyncDB.DebugMode == nil then MarketSyncDB.DebugMode = false end
     if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
+    if MarketSyncDB.EnableTooltipProb == nil then MarketSyncDB.EnableTooltipProb = true end
+    if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
     if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 3.75 } end
+    if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
+    if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
+    if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
+    if not MarketSyncDB.PerNotificationSounds then MarketSyncDB.PerNotificationSounds = {} end
     
+    -- Persistent item info cache (global, not per-realm — item metadata is universal)
+    -- Stores name/icon/rarity/classID so items only need to be fetched from WoW server once
+    if not MarketSyncDB.ItemInfoCache then MarketSyncDB.ItemInfoCache = {} end
+
     if MarketSyncDB.AllowSyncInCombat == nil then MarketSyncDB.AllowSyncInCombat = true end
     if MarketSyncDB.AllowSyncInRaid == nil then MarketSyncDB.AllowSyncInRaid = false end
     if MarketSyncDB.AllowSyncInDungeon == nil then MarketSyncDB.AllowSyncInDungeon = false end
@@ -81,9 +165,21 @@ function MarketSync.InitializeDB()
             PersonalData = MarketSyncDB.PersonalData or {},
             ItemMetadata = MarketSyncDB.ItemMetadata or {},
             HistoryLog = MarketSyncDB.HistoryLog or {},
-            SyncStats = MarketSyncDB.SyncStats or {},
-            WeeklySyncStats = MarketSyncDB.WeeklySyncStats or { yearWeek = date("%Y-%W"), data = {} },
-            PersonalScanTime = MarketSyncDB.PersonalScanTime
+            PersonalScanTime = MarketSyncDB.PersonalScanTime,
+            NeutralData = {},
+            NeutralMeta = {},
+            NeutralSync = {},
+            NeutralScanTime = nil,
+            NeutralSwarmTSF = nil,
+            KnownCraftingRecipesByCharacter = {},
+            KnownProfessionsByCharacter = {},
+            NotificationRequests = {},
+            NotificationState = {},
+            NotificationSettings = {
+                rearmBufferPct = 5,
+                rearmAfterSec = 1800,
+                defaultCooldownSec = 300,
+            },
         }
     end
     
@@ -102,6 +198,25 @@ function MarketSync.InitializeDB()
     if realmDB and realmDB.PersonalScanTime and not realmDB.SwarmTSF then
         realmDB.SwarmTSF = realmDB.PersonalScanTime
     end
+
+    if realmDB then
+        if not realmDB.NeutralData then realmDB.NeutralData = {} end
+        if not realmDB.NeutralMeta then realmDB.NeutralMeta = {} end
+        if not realmDB.NeutralSync then realmDB.NeutralSync = {} end
+        if not realmDB.KnownCraftingRecipesByCharacter then realmDB.KnownCraftingRecipesByCharacter = {} end
+        if not realmDB.KnownProfessionsByCharacter then realmDB.KnownProfessionsByCharacter = {} end
+        if not realmDB.NotificationRequests then realmDB.NotificationRequests = {} end
+        if not realmDB.NotificationState then realmDB.NotificationState = {} end
+        realmDB.SyncStats = nil
+        realmDB.WeeklySyncStats = nil
+        if not realmDB.NotificationSettings then
+            realmDB.NotificationSettings = {
+                rearmBufferPct = 5,
+                rearmAfterSec = 1800,
+                defaultCooldownSec = 300,
+            }
+        end
+    end
 end
 
 -- Fast helper function to get the partitioned database for the current realm
@@ -113,22 +228,51 @@ function MarketSync.GetRealmDB()
             PersonalData = {},
             ItemMetadata = {},
             HistoryLog = {},
-            SyncStats = {},
-            WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} }
+            NeutralData = {},
+            NeutralMeta = {},
+            NeutralSync = {},
+            NeutralScanTime = nil,
+            NeutralSwarmTSF = nil,
+            KnownCraftingRecipesByCharacter = {},
+            KnownProfessionsByCharacter = {},
+            NotificationRequests = {},
+            NotificationState = {},
+            NotificationSettings = {
+                rearmBufferPct = 5,
+                rearmAfterSec = 1800,
+                defaultCooldownSec = 300,
+            },
         }
     end
-    return MarketSyncDB.RealmData[realm]
+    local realmDB = MarketSyncDB.RealmData[realm]
+    if not realmDB.NeutralData then realmDB.NeutralData = {} end
+    if not realmDB.NeutralMeta then realmDB.NeutralMeta = {} end
+    if not realmDB.NeutralSync then realmDB.NeutralSync = {} end
+    if not realmDB.KnownCraftingRecipesByCharacter then realmDB.KnownCraftingRecipesByCharacter = {} end
+    if not realmDB.KnownProfessionsByCharacter then realmDB.KnownProfessionsByCharacter = {} end
+    if not realmDB.NotificationRequests then realmDB.NotificationRequests = {} end
+    if not realmDB.NotificationState then realmDB.NotificationState = {} end
+    realmDB.SyncStats = nil
+    realmDB.WeeklySyncStats = nil
+    if not realmDB.NotificationSettings then
+        realmDB.NotificationSettings = {
+            rearmBufferPct = 5,
+            rearmAfterSec = 1800,
+            defaultCooldownSec = 300,
+        }
+    end
+    return realmDB
 end
 
 -- ================================================================
 -- CACHE SPEED PRESETS
 -- ================================================================
--- Each level controls: batch size per tick, retry interval, re-request count, coroutine yield frequency
+-- Each level controls: batch size per tick, retry interval, re-request count, coroutine yield frequency, resolve debounce
 MarketSync.CacheSpeedPresets = {
-    [1] = { name = "Conservative",  batchSize = 25,  interval = 1.0,  requests = 5,    yieldEvery = 20,  desc = "|cff888888Minimal CPU impact. Best for older hardware.\\nVery smooth but slower indexing.|r" },
-    [2] = { name = "Balanced",      batchSize = 50,  interval = 0.5,  requests = 10,   yieldEvery = 50,  desc = "|cff888888Good balance. Smooth performance for most PCs.\\nRecommended default.|r" },
-    [3] = { name = "Aggressive",    batchSize = 100, interval = 0.25, requests = 20,   yieldEvery = 100, desc = "|cff888888Faster indexing with potential minor stutter.\\nUse if you have a high-end CPU.|r" },
-    [4] = { name = "Maximum",       batchSize = 200, interval = 0.1,  requests = 40,   yieldEvery = 200, desc = "|cffff8800Fastest possible. Will likely cause frame drops.\\nOnly use if you want it done NOW.|r" },
+    [1] = { name = "Conservative",  batchSize = 25,  interval = 1.5,  requests = 5,    yieldEvery = 20,  resolveDelay = 1.0,  desc = "|cff888888Minimal CPU impact. Best for older hardware.\\nVery smooth but slower indexing.|r" },
+    [2] = { name = "Balanced",      batchSize = 50,  interval = 0.8,  requests = 8,    yieldEvery = 50,  resolveDelay = 0.5,  desc = "|cff888888Good balance. Smooth performance for most PCs.\\nRecommended default.|r" },
+    [3] = { name = "Aggressive",    batchSize = 100, interval = 0.5,  requests = 12,   yieldEvery = 100, resolveDelay = 0.3,  desc = "|cff888888Faster indexing with potential minor stutter.\\nUse if you have a high-end CPU.|r" },
+    [4] = { name = "Maximum",       batchSize = 200, interval = 0.25, requests = 20,   yieldEvery = 200, resolveDelay = 0.1,  desc = "|cffff8800Fastest possible. Will likely cause frame drops.\\nOnly use if you want it done NOW.|r" },
 }
 
 -- ================================================================
@@ -150,33 +294,96 @@ function MarketSync.ToggleBlock(user)
 end
 
 function MarketSync.TrackSync(sender, count)
-    if sender and MarketSync.IsBlocked(sender) then return end
-    
-    local realmDB = MarketSync.GetRealmDB()
+    return
+end
 
-    -- Track All-Time Stats
-    if not realmDB.SyncStats[sender] then
-        realmDB.SyncStats[sender] = { count = 0, last = 0 }
+local SyncContributorCache = {
+    builtAt = 0,
+    list = {},
+    latestUser = nil,
+    latestTime = 0,
+}
+
+local function NormalizeContributor(source)
+    if not source or source == "" then return nil end
+    if source == "Personal" or source == "Unknown" then return nil end
+    return tostring(source)
+end
+
+local function BuildSyncContributorCache()
+    local realmDB = MarketSync.GetRealmDB()
+    local seen = {}
+    local list = {}
+    local latestUser, latestTime = nil, 0
+
+    if realmDB and realmDB.ItemMetadata then
+        for _, meta in pairs(realmDB.ItemMetadata) do
+            if type(meta) == "table" then
+                local source = NormalizeContributor(meta.lastSource or meta.source)
+                local stamp = tonumber(meta.lastTime or meta.time) or 0
+                if source and not seen[source] then
+                    seen[source] = true
+                    table.insert(list, source)
+                end
+                if source and stamp > latestTime then
+                    latestTime = stamp
+                    latestUser = source
+                end
+            end
+        end
     end
-    realmDB.SyncStats[sender].count = realmDB.SyncStats[sender].count + count
-    realmDB.SyncStats[sender].last = time()
-    
-    -- Track Weekly Stats
-    if not realmDB.WeeklySyncStats then
-        realmDB.WeeklySyncStats = { yearWeek = date("%Y-%W"), data = {} }
+
+    if realmDB and realmDB.NeutralMeta then
+        for _, meta in pairs(realmDB.NeutralMeta) do
+            if type(meta) == "table" then
+                local source = NormalizeContributor(meta.source)
+                local stamp = tonumber(meta.time) or 0
+                if source and not seen[source] then
+                    seen[source] = true
+                    table.insert(list, source)
+                end
+                if source and stamp > latestTime then
+                    latestTime = stamp
+                    latestUser = source
+                end
+            end
+        end
     end
-    
-    local currentWeek = date("%Y-%W")
-    if realmDB.WeeklySyncStats.yearWeek ~= currentWeek then
-        realmDB.WeeklySyncStats.yearWeek = currentWeek
-        realmDB.WeeklySyncStats.data = {} -- Wipe stats for the new week
+
+    table.sort(list, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
+
+    SyncContributorCache.builtAt = time()
+    SyncContributorCache.list = list
+    SyncContributorCache.latestUser = latestUser
+    SyncContributorCache.latestTime = latestTime
+end
+
+function MarketSync.InvalidateSyncContributorCache()
+    SyncContributorCache.builtAt = 0
+    SyncContributorCache.list = {}
+    SyncContributorCache.latestUser = nil
+    SyncContributorCache.latestTime = 0
+end
+
+function MarketSync.GetSyncContributorSnapshot(forceRebuild)
+    local now = time()
+    if forceRebuild or (now - (SyncContributorCache.builtAt or 0)) >= 10 then
+        BuildSyncContributorCache()
     end
-    
-    if not realmDB.WeeklySyncStats.data[sender] then
-        realmDB.WeeklySyncStats.data[sender] = { count = 0, last = 0 }
+
+    local out = {}
+    for i, name in ipairs(SyncContributorCache.list or {}) do
+        out[i] = name
     end
-    realmDB.WeeklySyncStats.data[sender].count = realmDB.WeeklySyncStats.data[sender].count + count
-    realmDB.WeeklySyncStats.data[sender].last = time()
+
+    return out, SyncContributorCache.latestUser, SyncContributorCache.latestTime
+end
+
+function MarketSync.GetLatestSyncContributor(forceRebuild)
+    local _, latestUser, latestTime = MarketSync.GetSyncContributorSnapshot(forceRebuild)
+    return latestUser, latestTime
 end
 
 -- ================================================================
@@ -298,6 +505,22 @@ function MarketSync.FormatRealmDateString(timestamp)
     return date("%b %d at %H:%M RT", adjustedTime)
 end
 
+function MarketSync.ParseItemIDFromDBKey(dbKey)
+    if type(dbKey) == "number" then return dbKey end
+    if type(dbKey) ~= "string" then return nil end
+
+    local idStr = dbKey:match("^item:(%d+)")
+        or dbKey:match("^gr:(%d+)")
+        or dbKey:match("^g:(%d+)")
+        or dbKey:match("^p:(%d+)")
+        or dbKey:match("^(%d+)$")
+        or dbKey:match("(%d+)")
+    if idStr then
+        return tonumber(idStr)
+    end
+    return nil
+end
+
 -- ================================================================
 -- AUCTIONATOR HELPERS
 -- ================================================================
@@ -339,5 +562,86 @@ function MarketSync.FormatAge(days)
     if days == 1 then return "Yesterday" end
     return string.format("%d days ago", days)
 end
+
+-- ================================================================
+-- SHARED UTILITIES
+-- ================================================================
+
+local function TrimText(text)
+    local raw = tostring(text or "")
+    if strtrim then return strtrim(raw) end
+    return raw:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+function MarketSync.ResolveItemID(query)
+    local raw = TrimText(query)
+    if raw == "" then return nil end
+
+    -- 1. Try itemID or itemLink match
+    local linkedID = raw:match("|Hitem:(%d+):") or raw:match("item:(%d+)")
+    if linkedID then
+        return tonumber(linkedID)
+    end
+
+    local bracketed = raw:match("%[(.-)%]")
+    if bracketed and bracketed ~= "" then
+        raw = TrimText(bracketed)
+    end
+
+    local numericID = tonumber(raw)
+    if numericID and numericID > 0 then
+        return math.floor(numericID)
+    end
+
+    -- 2. Try Exact Name Match (Case-Insensitive) via GetItemInfo
+    local _, linkByName = GetItemInfo(raw)
+    if linkByName then
+        local idFromLink = linkByName:match("item:(%d+)")
+        if idFromLink then
+            return tonumber(idFromLink)
+        end
+    end
+
+    -- 3. Try Local Cache (MarketSyncDB.ItemInfoCache)
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    if type(cache) == "table" then
+        local needle = string.lower(raw)
+        for id, info in pairs(cache) do
+            local name = info and info.n and string.lower(tostring(info.n)) or ""
+            if name == needle then
+                return tonumber(id)
+            end
+        end
+    end
+
+    -- 4. Try Processing Targets (if available)
+    if MarketSync.GetProcessingTargets then
+        local ok, targets = pcall(MarketSync.GetProcessingTargets)
+        if ok and type(targets) == "table" then
+            local needle = string.lower(raw)
+            for _, t in ipairs(targets) do
+                if string.lower(t.name or "") == needle then
+                    return tonumber(t.itemID)
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+-- ================================================================
+-- NOTIFICATION SOUNDS DATA
+-- ================================================================
+MarketSync.StandardSounds = {
+    { name = "Raid Warning", id = 8959 },
+    { name = "Auction Open", id = 3171 },
+    { name = "Level Up",     id = 124 },
+    { name = "Quest Done",   id = 125 },
+    { name = "Ready Check",  id = 8960 },
+    { name = "Inbox Open",   id = 1404 },
+    { name = "Item Sold",    id = 1195 },
+    { name = "Hush",         id = 0 }, -- Mute
+}
 
 
