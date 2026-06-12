@@ -92,20 +92,20 @@ local function IsADVNewer(left, right)
     return (left.itemCount or 0) > (right.itemCount or 0)
 end
 
-local function ComputeFreshness(advScanDay, advItemCount, advScanTime)
-    local ourDay = MarketSync.GetMyLatestScanDay()
+local function ComputeFreshness(advBucket, advItemCount, advScanTime)
+    local ourBucket = MarketSync.GetMyLatestBucket()
     local ourItemCount = 0
-    if advScanDay == ourDay then
-        ourItemCount = MarketSync.CountRecentItems(ourDay)
+    if advBucket == ourBucket then
+        ourItemCount = MarketSync.CountRecentItemsBucket(ourBucket)
     end
     local ourScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
 
     local isFresher = false
-    if advScanDay > ourDay then
-        -- They have a newer scan day, always fresher
+    if advBucket > ourBucket then
+        -- They have a newer bucket, always fresher
         isFresher = true
-    elseif advScanDay == ourDay then
-        -- Same scan day: TSF decides; count fallback only for legacy TSF=0 paths.
+    elseif advBucket == ourBucket then
+        -- Same bucket: TSF decides; count fallback only for legacy TSF=0 paths.
         if advScanTime > ourScanTime then
             isFresher = true
         elseif advScanTime == 0 and advItemCount > ourItemCount then
@@ -113,7 +113,7 @@ local function ComputeFreshness(advScanDay, advItemCount, advScanTime)
         end
     end
 
-    return isFresher, ourDay, ourItemCount, ourScanTime
+    return isFresher, ourBucket, ourItemCount, ourScanTime
 end
 
 local function ComputeNeutralFreshness(advScanDay, advItemCount, advScanTime)
@@ -303,8 +303,7 @@ function MarketSync.ProcessDeferredADV()
     if MarketSync.IsSyncBusy and MarketSync.IsSyncBusy() then return false end
 
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-    local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata("MarketSync", "Version")
-        or GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
+    local localVersion = MarketSync.GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
 
     -- Process standard deferred ADV first.
     if pendingFreshADV then
@@ -425,7 +424,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
         if msgType == "ADV" then
             local advRealm = p1
-            local advScanDay = tonumber(p2) or 0
+            local advBucket = tonumber(p2) or 0
             local advItemCount = tonumber(p3) or 0
             local advVersion = p4 or "0.4.0-beta"
             local rawP5 = p5 or "0"
@@ -439,7 +438,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             end
             
             -- Version Compatibility Check
-            local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata("MarketSync", "Version") or GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
+            local localVersion = MarketSync.GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
             local cmp = CompareVersions(advVersion, localVersion)
             if cmp > 0 then
                 -- They are newer. We must disable our sync and warn the user to update.
@@ -470,12 +469,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 return
             end
 
-            Debug("Received ADV from " .. senderName .. ": day=" .. advScanDay .. " items=" .. advItemCount)
+            Debug("Received ADV from " .. senderName .. ": bucket=" .. advBucket .. " items=" .. advItemCount)
             if MarketSync.LogNetworkEvent then
-                MarketSync.LogNetworkEvent(string.format("Incoming |cff00ffff[ADV]|r from |cffffff00%s|r (Day %d, %d items, TSF: %s, v%s)", senderName, advScanDay, advItemCount, advScanTime > 0 and tostring(advScanTime) or "None", advVersion))
+                MarketSync.LogNetworkEvent(string.format("Incoming |cff00ffff[ADV]|r from |cffffff00%s|r (Bucket %d, %d items, TSF: %s, v%s)", senderName, advBucket, advItemCount, advScanTime > 0 and tostring(advScanTime) or "None", advVersion))
             end
             if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Ready") end
-            local isFresher, ourDay, ourItemCount, ourScanTime = ComputeFreshness(advScanDay, advItemCount, advScanTime)
+            local isFresher, ourBucket, ourItemCount, ourScanTime = ComputeFreshness(advBucket, advItemCount, advScanTime)
             
             if isFresher then
                 -- Don't initiate a new PULL while any sync blast is active.
@@ -483,18 +482,18 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     QueueDeferredADV({
                         sender = senderName,
                         realm = advRealm,
-                        scanDay = advScanDay,
+                        scanDay = advBucket,
                         itemCount = advItemCount,
                         scanTime = advScanTime,
                         version = advVersion,
                     })
                     if MarketSync.LogNetworkEvent then
-                        MarketSync.LogNetworkEvent(string.format("|cffaaaaaa[Deferred ADV]|r Busy sync session; queued %s (Day %d, TSF %d) for next pull window.", senderName, advScanDay, advScanTime))
+                        MarketSync.LogNetworkEvent(string.format("|cffaaaaaa[Deferred ADV]|r Busy sync session; queued %s (Bucket %d, TSF %d) for next pull window.", senderName, advBucket, advScanTime))
                     end
                     return
                 end
                 
-                Debug(string.format("Their data is fresher (Day %d vs %d, Time %d vs %d, Items %d vs %d), sending PULL", advScanDay, ourDay, advScanTime, ourScanTime, advItemCount, ourItemCount))
+                Debug(string.format("Their data is fresher (Bucket %d vs %d, Time %d vs %d, Items %d vs %d), sending PULL", advBucket, ourBucket, advScanTime, ourScanTime, advItemCount, ourItemCount))
                 if MarketSync.LogNetworkEvent then
                     MarketSync.LogNetworkEvent("Data is fresher. Sending |cffff8800[PULL]|r request to Guild...")
                 end
@@ -506,7 +505,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 if MarketSync.BeginGuildSync then
                     MarketSync.BeginGuildSync()
                 end
-                MarketSync.SendPullRequest(ourDay)
+                MarketSync.SendPullRequest(ourBucket)
             end
 
         elseif msgType == "NADV" then
@@ -521,7 +520,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
             if advRealm ~= MarketSync.myRealm then return end
 
-            local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata("MarketSync", "Version") or GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
+            local localVersion = MarketSync.GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
             local cmp = CompareVersions(advVersion, localVersion)
             if cmp > 0 then
                 if MarketSyncDB and MarketSyncDB.PassiveSync then
@@ -581,19 +580,19 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
         elseif msgType == "PULL" then
             local pullRealm = p1
-            local sinceDay = tonumber(p2) or 0
+            local sinceBucket = tonumber(p2) or 0
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
             if pullRealm ~= MarketSync.myRealm then return end
             if not MarketSyncDB or not MarketSyncDB.PassiveSync then return end
             
             if MarketSync.LogNetworkEvent then
-                MarketSync.LogNetworkEvent(string.format("Received |cffff8800[PULL]|r from |cffffff00%s|r (Since Day %d). Coordinating swarm...", senderName, sinceDay))
+                MarketSync.LogNetworkEvent(string.format("Received |cffff8800[PULL]|r from |cffffff00%s|r (Since Bucket %d). Coordinating swarm...", senderName, sinceBucket))
             end
             
             if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Receiving") end
             
             if MarketSync.SchedulePullResponse then
-                MarketSync.SchedulePullResponse(sinceDay, senderName)
+                MarketSync.SchedulePullResponse(sinceBucket, senderName)
             end
 
         elseif msgType == "NPULL" then
@@ -660,33 +659,41 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local items = {strsplit(",", payloadStr)}
             for _, itemData in ipairs(items) do
                 local dbKey, priceStr, qtyStr, dayStr
-                local isV4 = false
-                
                 if itemData:find("_") then
-                    dbKey, priceStr, qtyStr, dayStr = strsplit("_", itemData)
-                    isV4 = true
-                else
-                    dbKey, priceStr, qtyStr, dayStr = strsplit(":", itemData)
-                end
-                
-                local price = FromBase36(priceStr)
-                if price == 0 and priceStr ~= "0" then price = tonumber(priceStr) end
-                local quantity = FromBase36(qtyStr)
-                if quantity == 0 and qtyStr and qtyStr ~= "0" then quantity = tonumber(qtyStr) or 0 end
-                local day = FromBase36(dayStr)
-                if day == 0 then day = tonumber(dayStr) or legacyDay end
-                
-                if price and day and day > 0 then
-                    if isV4 then
-                        -- For v4, dbKey is the direct Auctionator database key string, no base36 decode
-                        local finalDbKey = dbKey
-                        if isNeutralPayload and MarketSync.UpdateLocalNeutralDBByKey then
-                            MarketSync.UpdateLocalNeutralDBByKey(finalDbKey, price, day, quantity, senderName)
-                        else
-                            MarketSync.UpdateLocalDBByKey(finalDbKey, price, day, quantity, senderName)
+                    if isNeutralPayload then
+                        local dbKey, priceStr, qtyStr, dayStr = strsplit("_", itemData)
+                        local price = FromBase36(priceStr)
+                        if price == 0 and priceStr ~= "0" then price = tonumber(priceStr) end
+                        local quantity = FromBase36(qtyStr)
+                        if quantity == 0 and qtyStr and qtyStr ~= "0" then quantity = tonumber(qtyStr) or 0 end
+                        local day = FromBase36(dayStr)
+                        if day == 0 then day = tonumber(dayStr) or legacyDay end
+                        
+                        if price and day and day > 0 and MarketSync.UpdateLocalNeutralDBByKey then
+                            MarketSync.UpdateLocalNeutralDBByKey(dbKey, price, day, quantity, senderName)
                         end
                     else
-                        -- Legacy handling
+                        -- Timeseries String Payload
+                        local dbKey, dayB36, safeHistStr = strsplit("_", itemData)
+                        local day = FromBase36(dayB36)
+                        if day == 0 then day = tonumber(dayB36) end
+                        
+                        if day and day > 0 and safeHistStr then
+                             local histStr = string.gsub(safeHistStr, "%.", ",")
+                             MarketSync.UpdateLocalDBByKey(dbKey, day, histStr, senderName)
+                        end
+                    end
+                else
+                    -- Legacy v1 handling (Only applicable for extremely old clients, gracefully handle)
+                    local dbKey, priceStr, qtyStr, dayStr = strsplit(":", itemData)
+                    local price = FromBase36(priceStr)
+                    if price == 0 and priceStr ~= "0" then price = tonumber(priceStr) end
+                    local quantity = FromBase36(qtyStr)
+                    if quantity == 0 and qtyStr and qtyStr ~= "0" then quantity = tonumber(qtyStr) or 0 end
+                    local day = FromBase36(dayStr)
+                    if day == 0 then day = tonumber(dayStr) or legacyDay end
+                    
+                    if price and day and day > 0 then
                         local itemID = FromBase36(dbKey)
                         if itemID == 0 then itemID = tonumber(dbKey) end
                         if itemID and itemID > 0 then
@@ -694,7 +701,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
                             if isNeutralPayload and MarketSync.UpdateLocalNeutralDB then
                                 MarketSync.UpdateLocalNeutralDB(link, price, day, quantity, senderName)
                             else
-                                MarketSync.UpdateLocalDB(link, price, day, quantity, senderName)
+                                -- Fallback for unsupported legacy sync attempts
+                                if MarketSync.UpdateLocalDB then
+                                    MarketSync.UpdateLocalDB(link, price, day, quantity, senderName)
+                                end
                             end
                         end
                     end

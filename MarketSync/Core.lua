@@ -228,6 +228,59 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end)
 
+        -- STAGE 4: Time-Series Purge (120s) â€” cleanly prune granular history older than PurgeCycle
+        C_Timer.After(120, function()
+            if not MarketSyncDB or type(MarketSyncDB.PurgeCycleDays) ~= "number" then return end
+            -- "Infinite" translates to e.g. 9999 or simply not pruning if set to 0. 
+            -- Let's say if it's 0, it means infinite.
+            if MarketSyncDB.PurgeCycleDays <= 0 then return end
+
+            local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+            if not realmDB or not realmDB.PersonalData then return end
+
+            local currentDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(time() / 86400)
+            local cutoffDay = currentDay - MarketSyncDB.PurgeCycleDays
+            local deletedStringCount = 0
+
+            if MarketSyncDB.DebugMode then
+                print("|cFF00FF00[MarketSync]|r Stage 4: Pruning History Strings older than Day " .. cutoffDay)
+            end
+
+            -- Coroutine to prevent execution stall when iterating thousands of items
+            local co = coroutine.create(function()
+                local i = 0
+                for _, data in pairs(realmDB.PersonalData) do
+                    if type(data) == "table" and data.h then
+                        for dayStr, _ in pairs(data.h) do
+                            local dayNum = tonumber(dayStr)
+                            if dayNum and dayNum < cutoffDay then
+                                data.h[dayStr] = nil
+                                deletedStringCount = deletedStringCount + 1
+                            end
+                        end
+                    end
+                    i = i + 1
+                    if i % 1000 == 0 then coroutine.yield() end
+                end
+
+                if MarketSyncDB.DebugMode and deletedStringCount > 0 then
+                    print("|cFF00FF00[MarketSync]|r Pruned " .. deletedStringCount .. " stale history string points.")
+                end
+            end)
+            
+            local function RunChunk()
+                if coroutine.status(co) ~= "dead" then
+                    local ok, err = coroutine.resume(co)
+                    if not ok then
+                        MarketSync.Debug("Error in Timeseries Purge coroutine: " .. tostring(err))
+                    else
+                        C_Timer.After(0.05, RunChunk)
+                    end
+                end
+            end
+            RunChunk()
+        end)
+
         -- Register for AH events so we can invalidate the scan cache dynamically
         self:RegisterEvent("AUCTION_HOUSE_CLOSED")
         self:RegisterEvent("AUCTION_HOUSE_SHOW")

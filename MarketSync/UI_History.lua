@@ -188,8 +188,8 @@ local function CreateGraph(parent, width, height)
             return
         end
 
-        -- Use up to 30 data points (most recent), reverse to oldest-left
-        local maxPoints = math.min(#history, 30)
+        -- Use up to 48 data points for granular resolution (most recent), reverse to oldest-left
+        local maxPoints = math.min(#history, 48)
         local plotData = {}
         for i = maxPoints, 1, -1 do
             table.insert(plotData, history[i])
@@ -235,6 +235,12 @@ local function CreateGraph(parent, width, height)
         local spacing = pw / math.max(numPoints - 1, 1)
         local prevX, prevY
 
+        -- Detect if we have a mix of granular vs daily to drive label formatting
+        local hasGranular = false
+        for _, d in ipairs(plotData) do
+            if d.isGranular then hasGranular = true; break end
+        end
+
         for i, d in ipairs(plotData) do
             local x = offsetX + ((i - 1) * spacing)
             local priceNorm = (d.price - padMin) / fullRange
@@ -252,13 +258,22 @@ local function CreateGraph(parent, width, height)
                 self:DrawLine(prevX, prevY, x, y, 0.2, 0.8, 0.2, 0.9, 2)
             end
 
-            -- Dot
-            self:DrawDot(x, y, 0.3, 1.0, 0.3, 5)
+            -- Dot — use different colors for granular vs daily
+            if d.isGranular then
+                self:DrawDot(x, y, 0.2, 0.7, 1.0, 4)  -- blue tint for intraday
+            else
+                self:DrawDot(x, y, 0.3, 1.0, 0.3, 5)  -- green for daily
+            end
 
-            -- X-axis date labels (spaced to avoid crowding)
+            -- X-axis labels (spaced to avoid crowding)
             local labelEvery = math.max(1, math.floor(numPoints / 6))
             if i == 1 or i == numPoints or (i % labelEvery == 0) then
-                self:AddLabel(x, offsetY - 12, ScanDayToDate(d.day), "TOP")
+                if d.isGranular and d.timeLabel then
+                    -- Show date + time for granular points
+                    self:AddLabel(x, offsetY - 12, ScanDayToDate(d.day) .. "\n" .. d.timeLabel, "TOP")
+                else
+                    self:AddLabel(x, offsetY - 12, ScanDayToDate(d.day), "TOP")
+                end
             end
 
             prevX, prevY = x, y
@@ -372,12 +387,12 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
 
     -- Column headers
     local scanColDefs = {
-        {name = "Date",   width = 45,  offset = 0},
-        {name = "High",   width = 100, offset = 45},
-        {name = "Low",    width = 100, offset = 145},
-        {name = "Qty",    width = 40,  offset = 245},
-        {name = "Source", width = 50,  offset = 285},
-        {name = "Age",    width = 55,  offset = 335},
+        {name = "Date",   width = 80,  offset = 0},
+        {name = "High",   width = 85,  offset = 80},
+        {name = "Low",    width = 85,  offset = 165},
+        {name = "Qty",    width = 40,  offset = 250},
+        {name = "Source", width = 50,  offset = 290},
+        {name = "Age",    width = 50,  offset = 340},
     }
 
     panel.scanHeaders = {}
@@ -404,22 +419,22 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
         row:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", LIST_START_X, CONTENT_TOP - 14 - ((i - 1) * ROW_HEIGHT))
 
         row.dateText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.dateText:SetPoint("LEFT", 0, 0); row.dateText:SetWidth(45); row.dateText:SetJustifyH("LEFT")
+        row.dateText:SetPoint("LEFT", 0, 0); row.dateText:SetWidth(80); row.dateText:SetJustifyH("LEFT")
 
         row.highText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.highText:SetPoint("LEFT", 45, 0); row.highText:SetWidth(100); row.highText:SetJustifyH("LEFT")
+        row.highText:SetPoint("LEFT", 80, 0); row.highText:SetWidth(85); row.highText:SetJustifyH("LEFT")
 
         row.lowText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.lowText:SetPoint("LEFT", 145, 0); row.lowText:SetWidth(100); row.lowText:SetJustifyH("LEFT")
+        row.lowText:SetPoint("LEFT", 165, 0); row.lowText:SetWidth(85); row.lowText:SetJustifyH("LEFT")
 
         row.qtyText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.qtyText:SetPoint("LEFT", 245, 0); row.qtyText:SetWidth(40); row.qtyText:SetJustifyH("LEFT")
+        row.qtyText:SetPoint("LEFT", 250, 0); row.qtyText:SetWidth(40); row.qtyText:SetJustifyH("LEFT")
 
         row.sourceText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.sourceText:SetPoint("LEFT", 285, 0); row.sourceText:SetWidth(50); row.sourceText:SetJustifyH("LEFT")
+        row.sourceText:SetPoint("LEFT", 290, 0); row.sourceText:SetWidth(50); row.sourceText:SetJustifyH("LEFT")
 
         row.ageText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.ageText:SetPoint("LEFT", 335, 0); row.ageText:SetWidth(55); row.ageText:SetJustifyH("LEFT")
+        row.ageText:SetPoint("LEFT", 340, 0); row.ageText:SetWidth(50); row.ageText:SetJustifyH("LEFT")
 
         -- Alternating row background
         if i % 2 == 0 then
@@ -658,12 +673,16 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
             local idx = offset + i
             if idx <= total then
                 local d = self.historyData[idx]
-                row.dateText:SetText(ScanDayToDate(d.day))
+                -- Show date + time for granular points
+                if d.isGranular and d.timeLabel then
+                    row.dateText:SetText(ScanDayToDate(d.day) .. " " .. d.timeLabel)
+                else
+                    row.dateText:SetText(ScanDayToDate(d.day))
+                end
                 row.highText:SetText(FormatMoney(d.high))
                 row.lowText:SetText(FormatMoney(d.low))
                 row.qtyText:SetText(d.quantity > 0 and d.quantity or "-")
                 row.ageText:SetText(ScanDayAge(d.day))
-                -- Source comes directly from the per-day attribution baked into historyData
                 row.sourceText:SetText(d.source or "Personal")
                 row:Show()
             else

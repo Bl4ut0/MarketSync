@@ -1645,6 +1645,17 @@ end
 -- ================================================================
 -- ITEM HISTORY DATA EXTRACTION
 -- ================================================================
+
+-- Convert a bucket offset (0-47) on a given scanDay to a human-readable time string
+function MarketSync.BucketOffsetToTime(bucketOffset)
+    local hours = math.floor(bucketOffset / 2)
+    local mins = (bucketOffset % 2 == 0) and "00" or "30"
+    return string.format("%d:%s", hours, mins)
+end
+
+-- Returns a flat list of data points for the graph and scan table.
+-- When granular PersonalData is available, each 30-min bucket becomes
+-- its own data point. Otherwise, falls back to daily Auctionator aggregates.
 function MarketSync.GetItemHistory(dbKey)
     if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return {} end
     local priceData = Auctionator.Database.db[dbKey]
@@ -1652,36 +1663,117 @@ function MarketSync.GetItemHistory(dbKey)
 
     local history = {}
     local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
+    local pData = MarketSyncDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+    local FromBase36 = MarketSync.FromBase36
 
+    -- Track which days have granular data so we don't double-count
+    local granularDays = {}
+
+    -- 1. Unpack granular timeseries strings from PersonalData
+    if pData and pData.h then
+        for dayStr, histStr in pairs(pData.h) do
+            local day = tonumber(dayStr)
+            if day and histStr and histStr ~= "" then
+                granularDays[dayStr] = true
+                for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                    local bucketOffset = tonumber(b_offs)
+                    local price = FromBase36(p_b36)
+                    local qty = FromBase36(q_b36)
+                    if price and price > 0 then
+                        -- Per-day source attribution
+                        local source = "Personal"
+                        if meta and meta.days and meta.days[dayStr] then
+                            local s = meta.days[dayStr].source
+                            if s then source = s:match("^([^%-]+)") or s end
+                        end
+
+                        table.insert(history, {
+                            day = day,
+                            bucketOffset = bucketOffset,
+                            -- sortKey: scanDay * 100 + bucketOffset gives chronological ordering
+                            sortKey = (day * 100) + bucketOffset,
+                            high = price,
+                            low = price,
+                            price = price,
+                            quantity = qty,
+                            source = source,
+                            timeLabel = MarketSync.BucketOffsetToTime(bucketOffset),
+                            isGranular = true,
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Fill any days that DON'T have granular data with daily aggregate fallback
     for dayStr, highPrice in pairs(priceData.h) do
         local day = tonumber(dayStr)
-        if day then
+        if day and not granularDays[dayStr] then
             local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
             local qty = priceData.a and priceData.a[dayStr] or 0
 
-            -- Per-day source attribution
             local source = "Personal"
             if meta and meta.days and meta.days[dayStr] then
                 local s = meta.days[dayStr].source
-                if s then
-                    source = s:match("^([^%-]+)") or s
-                end
+                if s then source = s:match("^([^%-]+)") or s end
             elseif day == MarketSync.GetCurrentScanDay() then
-                -- Today scan with no metadata = Personal
                 source = "Personal"
             end
 
             table.insert(history, {
                 day = day,
+                bucketOffset = nil,
+                sortKey = day * 100,
                 high = highPrice,
                 low = lowPrice,
                 price = highPrice,
                 quantity = qty,
                 source = source,
+                isGranular = false,
             })
         end
     end
 
-    table.sort(history, function(a, b) return a.day > b.day end)
+    -- Sort newest first (highest sortKey first)
+    table.sort(history, function(a, b) return a.sortKey > b.sortKey end)
     return history
+end
+
+-- Returns ONLY the granular 30-min data points for analytics algorithms.
+-- Each entry: { day, bucketOffset, price, quantity, timestamp }
+function MarketSync.GetGranularHistory(dbKey)
+    local pData = MarketSyncDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+    if not pData or not pData.h then return {} end
+
+    local FromBase36 = MarketSync.FromBase36
+    local points = {}
+
+    for dayStr, histStr in pairs(pData.h) do
+        local day = tonumber(dayStr)
+        if day and histStr and histStr ~= "" then
+            for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                local bucketOffset = tonumber(b_offs)
+                local price = FromBase36(p_b36)
+                local qty = FromBase36(q_b36)
+                if price and price > 0 then
+                    -- Reconstruct approximate UNIX timestamp for this data point
+                    local dayTimestamp = Auctionator.Constants.SCAN_DAY_0 + (day * 86400)
+                    local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
+
+                    table.insert(points, {
+                        day = day,
+                        bucketOffset = bucketOffset,
+                        price = price,
+                        quantity = qty,
+                        timestamp = pointTimestamp,
+                        timeLabel = MarketSync.BucketOffsetToTime(bucketOffset),
+                    })
+                end
+            end
+        end
+    end
+
+    table.sort(points, function(a, b) return a.timestamp < b.timestamp end)
+    return points
 end

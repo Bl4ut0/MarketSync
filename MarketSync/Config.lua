@@ -12,6 +12,52 @@ MarketSync.ADDON_NAME = ADDON_NAME
 MarketSync.PREFIX = PREFIX
 MarketSync.ICON_COIN = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
 
+-- Robust helper to get addon metadata across different WoW versions
+function MarketSync.GetAddOnMetadata(addon, field)
+    -- Modern WoW (10.0+)
+    if C_AddOns and C_AddOns.GetAddOnMetadata then
+        return C_AddOns.GetAddOnMetadata(addon, field)
+    -- Legacy WoW
+    elseif GetAddOnMetadata then
+        return GetAddOnMetadata(addon, field)
+    end
+    return nil
+end
+
+-- ================================================================
+-- BASE-36 ENCODING / DECODING
+-- Compresses numeric payloads by ~30% (e.g. "50000" -> "11cg")
+-- ================================================================
+local B36_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+function MarketSync.ToBase36(n)
+    n = math.floor(tonumber(n) or 0)
+    if n == 0 then return "0" end
+    local result = ""
+    local neg = n < 0
+    if neg then n = -n end
+    while n > 0 do
+        local rem = n % 36
+        result = string.sub(B36_CHARS, rem + 1, rem + 1) .. result
+        n = math.floor(n / 36)
+    end
+    return neg and ("-" .. result) or result
+end
+
+function MarketSync.FromBase36(s)
+    if not s or s == "" then return 0 end
+    return tonumber(s, 36) or 0
+end
+
+-- ================================================================
+-- GRANULAR TIME-SERIES
+-- Maps the current UNIX time into a 30-minute tracking bucket
+-- ================================================================
+function MarketSync.GetCurrentBucket()
+    -- 1800 seconds = 30 minutes. 48 buckets total per 24 hours.
+    return math.floor(time() / 1800)
+end
+
 -- Main prefix for control messages (ADV, PULL, ACCEPT, REQ, RES, ERR)
 C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
 
@@ -139,6 +185,7 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
     if not MarketSyncDB.PerNotificationSounds then MarketSyncDB.PerNotificationSounds = {} end
+    if MarketSyncDB.PurgeCycleDays == nil then MarketSyncDB.PurgeCycleDays = 30 end
     
     -- Persistent item info cache (global, not per-realm — item metadata is universal)
     -- Stores name/icon/rarity/classID so items only need to be fetched from WoW server once

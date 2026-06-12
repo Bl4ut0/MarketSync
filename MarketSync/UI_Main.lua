@@ -263,7 +263,7 @@ local function CreateMainFrame()
             "Configure MarketSync background settings, caches, and UI behaviors.",
         }
 
-        local versionStr = "v" .. tostring(C_AddOns and C_AddOns.GetAddOnMetadata("MarketSync", "Version") or GetAddOnMetadata("MarketSync", "Version") or "1.0")
+        local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
         local fullTitle = string.format("%s (%s) - %s", MarketSync.ADDON_NAME or "MarketSync", versionStr, titles[id] or "")
         titleText:SetText(fullTitle)
         titleText:Show()
@@ -403,7 +403,7 @@ local function CreateMainFrame()
             end
         end
 
-        local versionStr = "v" .. tostring(GetAddOnMetadata("MarketSync", "Version") or "1.0")
+        local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
         titleText:SetText(string.format("%s (%s) - Item History", MarketSync.ADDON_NAME or "MarketSync", versionStr))
         MainFrame.titleHitBox.tooltipText = nil -- No tooltip for history overlay
         ItemHistoryPanel:ShowItem(dbKey, itemLink, name, icon, price, sourceTab)
@@ -420,7 +420,7 @@ local function CreateMainFrame()
     local settingsTabTitle = SettingsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     settingsTabTitle:SetPoint("TOP", 0, -18)
     settingsTabTitle:SetTextColor(1, 0.82, 0)
-    settingsTabTitle:SetText(string.format("%s (v%s) - Settings", MarketSync.ADDON_NAME or "MarketSync", GetAddOnMetadata("MarketSync", "Version") or "1.0"))
+    settingsTabTitle:SetText(string.format("%s (v%s) - Settings", MarketSync.ADDON_NAME or "MarketSync", MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0"))
 
     -- Settings background (Bid tab parchment)
     local stl = SettingsContent:CreateTexture(nil, "BACKGROUND")

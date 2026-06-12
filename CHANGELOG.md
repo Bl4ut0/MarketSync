@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-02
+### Added
+- **Added**: **Granular Time-Series Tracking**: MarketSync now bypasses Auctionator's daily lock, enabling highly granular, 30-minute interval price tracking. Every local scan and guild sync packet now records the exact intraday bucket safely.
+- **Added**: **Guild Sync Bucket Merging**: The Swarm engine now successfully decodes and merges incoming 30-minute buckets from the guild, dynamically updating your local tracker to seamlessly fill in any missing data points throughout the day.
+- **Added**: **Outlier Rejection Filter (Anti-Pollution)**: Added strict price pollution prevention. The system evaluates ultra-high or ultra-low quantity-constrained spikes (under 2 quantity) and securely rejects them to prevent manipulation of the market history graphs.
+- **Added**: **Memory Safe String Compressions**: The core Timeseries architecture utilizes Base-36 compressed strings allowing tracking of tens of thousands of items' hourly changes across multiple months seamlessly, using a fraction of standard Lua table memory to protect client performance. 
+- **Added**: **Dynamic Purge Cycles**: A new user-controlled configuration allowing players to set automated pruning periods (e.g., 30 Days) for Intraday datasets, optimizing PC performance.
+
+### Improved
+- **Improved**: Full Backwards Compatibility: While MarketSync stores the highly granular Intraday data privately in its new arrays, it natively continues passing exactly the exact Daily Minimums to `Auctionator` unmodified natively. This ensures standard tooltips, crafting EV modules, and daily aggregates continue to perform without a hitch.
+- **Improved**: Swarm Protocol bump (`ADV`, `PULL`, `BRES`) to explicitly transmit and coordinate bucket-level timestamps.
+
 ## [0.6.0] - 2026-03-15
 ### Added
 - **Added**: **Item Detail Dashboard**: A new dedicated window for deep-dive inspection of item pricing trends, volume analysis, and historical scan attribution.

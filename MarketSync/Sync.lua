@@ -27,29 +27,8 @@ local GetCurrentScanDay = MarketSync.GetCurrentScanDay
 -- Compresses numeric payloads by ~30% (e.g. "50000" -> "11cg")
 -- Lua's tonumber(str, 36) handles decode natively.
 -- ================================================================
-local B36_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"
-
-local function ToBase36(n)
-    n = math.floor(tonumber(n) or 0)
-    if n == 0 then return "0" end
-    local result = ""
-    local neg = n < 0
-    if neg then n = -n end
-    while n > 0 do
-        local rem = n % 36
-        result = string.sub(B36_CHARS, rem + 1, rem + 1) .. result
-        n = math.floor(n / 36)
-    end
-    return neg and ("-" .. result) or result
-end
-
-local function FromBase36(s)
-    if not s or s == "" then return 0 end
-    return tonumber(s, 36) or 0
-end
-
--- Export for Chat.lua receiver
-MarketSync.FromBase36 = FromBase36
+local ToBase36 = MarketSync.ToBase36
+local FromBase36 = MarketSync.FromBase36
 
 MarketSync.myRealm = nil
 local myLatestScanDay = 0
@@ -249,16 +228,18 @@ function MarketSync.SnapshotPersonalScan()
     if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return 0, 0 end
     if not MarketSync.GetRealmDB().PersonalData then MarketSync.GetRealmDB().PersonalData = {} end
     
-    wipe(MarketSync.GetRealmDB().PersonalData)
-    
     local today = MarketSync.GetCurrentScanDay()
+    local todayStr = tostring(today)
+    local bucketID = MarketSync.GetCurrentBucket()
+    local bucketOffset = bucketID % 48
+    local pData = MarketSync.GetRealmDB().PersonalData
+    
     local count = 0
     local todayCount = 0
     local skipped = 0
     
     for dbKey, data in pairs(Auctionator.Database.db) do
         if type(data) == "table" then
-            -- Only snapshot items with parseable itemIDs (consistent with CountRecentItems/RespondToPull)
             local hasValidID = false
             if type(dbKey) == "number" or type(dbKey) == "string" then
                 hasValidID = true
@@ -272,87 +253,130 @@ function MarketSync.SnapshotPersonalScan()
                         if d and d > lastSeenDay then lastSeenDay = d end
                     end
                 end
-                MarketSync.GetRealmDB().PersonalData[dbKey] = { m = data.m, d = lastSeenDay }
-                count = count + 1
+                
+                if not pData[dbKey] then pData[dbKey] = { m = 0, d = 0, h = {} } end
+                if not pData[dbKey].h then pData[dbKey].h = {} end
+                
+                pData[dbKey].m = data.m
+                pData[dbKey].d = lastSeenDay
+                
+                -- Only write Timeseries buckets for data seen today
                 if lastSeenDay == today then
+                    local qty = 0
+                    if data.a and data.a[todayStr] then qty = tonumber(data.a[todayStr]) or 0 end
+                    
+                    local histStr = pData[dbKey].h[todayStr] or ""
+                    
+                    -- Read the last known point from the string to prevent redundant identical blobs
+                    local lastPrice, lastQty = nil, nil
+                    for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                        lastPrice = MarketSync.FromBase36(p_b36)
+                        lastQty = MarketSync.FromBase36(q_b36)
+                    end
+                    
+                    -- Only append if the item actually changed OR hasn't been logged today
+                    if not lastPrice or lastPrice ~= data.m or lastQty ~= qty then
+                        local newPoint = string.format("%d:%s:%s", bucketOffset, MarketSync.ToBase36(data.m), MarketSync.ToBase36(qty))
+                        
+                        -- Bucket Collision (Overwrite)
+                        local collisionPattern = "(,?" .. bucketOffset .. ":)([%w%-]+):([%w%-]+)"
+                        local matchPre, oldPriceB36, oldQtyB36 = string.match(histStr, collisionPattern)
+                        
+                        if matchPre then
+                            -- Outlier Rejection Filter
+                            local oldPrice = MarketSync.FromBase36(oldPriceB36)
+                            local isPollution = false
+                            if qty <= 2 and oldPrice > 0 then
+                                if data.m > (oldPrice * 3) or data.m < (oldPrice * 0.5) then
+                                    isPollution = true
+                                end
+                            end
+                            
+                            if not isPollution then
+                                histStr = string.gsub(histStr, collisionPattern, "%1" .. MarketSync.ToBase36(data.m) .. ":" .. MarketSync.ToBase36(qty))
+                            end
+                        else
+                            if histStr == "" then
+                                histStr = newPoint
+                            else
+                                histStr = histStr .. "," .. newPoint
+                            end
+                        end
+                        pData[dbKey].h[todayStr] = histStr
+                    end
+                    
+                    if not pData[dbKey].latestBucket or bucketID > pData[dbKey].latestBucket then
+                        pData[dbKey].latestBucket = bucketID
+                    end
+                    
+                    if not MarketSync.GetRealmDB().LatestBucket or bucketID > MarketSync.GetRealmDB().LatestBucket then
+                        MarketSync.GetRealmDB().LatestBucket = bucketID
+                    end
                     todayCount = todayCount + 1
                 end
+                count = count + 1
             else
                 skipped = skipped + 1
             end
         end
     end
     
-    Debug("SnapshotPersonalScan: Duplicated " .. count .. " items (" .. todayCount .. " from today, " .. skipped .. " skipped) into Personal storage.")
-    
     if MarketSyncDB and MarketSyncDB.DebugMode then
-        print("|cFF00FF00[MarketSync]|r Duplicated " .. count .. " items into Personal cache. (" .. skipped .. " unparseable keys skipped)")
+        print("|cFF00FF00[MarketSync]|r Synchronized " .. count .. " items into Personal Timeseries Array. (" .. skipped .. " skipped)")
     end
     
     return count, todayCount
 end
 
 -- ================================================================
--- SCAN DAY HELPERS
+-- SWARM BUCKET HELPERS
 -- ================================================================
-function MarketSync.GetMyLatestScanDay()
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return 0 end
-    
-    local today = MarketSync.GetCurrentScanDay()
-    
-    -- If we have a cached day and it is "today", trust the cache
-    if MarketSyncDB and MarketSync.GetRealmDB().CachedScanStats and MarketSync.GetRealmDB().CachedScanStats.day == today then
-        return MarketSync.GetRealmDB().CachedScanStats.day
+function MarketSync.GetMyLatestBucket()
+    if MarketSyncDB and MarketSync.GetRealmDB().LatestBucket then
+        return MarketSync.GetRealmDB().LatestBucket
     end
     
+    local pData = MarketSync.GetRealmDB().PersonalData
+    if not pData then return 0 end
+    
     local best = 0
-    for dbKey, data in pairs(Auctionator.Database.db) do
-        if type(data) == "table" and data.h then
-            for dayStr in pairs(data.h) do
-                local d = tonumber(dayStr)
-                if d and d > best then best = d end
-            end
+    for dbKey, data in pairs(pData) do
+        if data.latestBucket and data.latestBucket > best then
+            best = data.latestBucket
         end
+    end
+    
+    if MarketSyncDB then
+        MarketSync.GetRealmDB().LatestBucket = best
     end
     return best
 end
 
-function MarketSync.CountRecentItems(sinceDay)
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return 0 end
-    
-    local today = MarketSync.GetCurrentScanDay()
-    
-    -- If we have cached stats for the requested day, trust the cache
-    if MarketSyncDB and MarketSync.GetRealmDB().CachedScanStats and MarketSync.GetRealmDB().CachedScanStats.day == sinceDay then
-        return MarketSync.GetRealmDB().CachedScanStats.count
-    end
+function MarketSync.CountRecentItemsBucket(sinceBucket)
+    local pData = MarketSync.GetRealmDB().PersonalData
+    if not pData then return 0 end
     
     local count = 0
-    for dbKey, data in pairs(Auctionator.Database.db) do
-        if type(data) == "table" and data.h then
-            -- Only count items with parseable itemIDs (must match RespondToPull logic)
-            local hasValidID = false
-            if type(dbKey) == "number" or type(dbKey) == "string" then
-                hasValidID = true
-            end
-            if hasValidID then
-                for dayStr in pairs(data.h) do
-                    local d = tonumber(dayStr)
-                    if d and d >= sinceDay then 
-                        count = count + 1
-                        break 
-                    end
-                end
-            end
+    for dbKey, data in pairs(pData) do
+        if data.latestBucket and data.latestBucket >= sinceBucket then
+            count = count + 1
         end
     end
-    
-    -- Cache the result if we are checking "today" to save CPU on future ADVs
-    if MarketSyncDB and sinceDay == today then
-        MarketSync.GetRealmDB().CachedScanStats = { day = sinceDay, count = count }
-    end
-    
     return count
+end
+-- CountRecentItems was replaced by CountRecentItemsBucket above for Personal Data.
+function MarketSync.GetMyLatestScanDay()
+    local pData = MarketSync.GetRealmDB().PersonalData
+    if not pData then return 0 end
+    
+    local best = 0
+    for dbKey, data in pairs(pData) do
+        if type(data) == "table" then
+            local d = tonumber(data.d) or 0
+            if d > best then best = d end
+        end
+    end
+    return best
 end
 
 function MarketSync.GetMyLatestNeutralScanDay()
@@ -419,10 +443,10 @@ function MarketSync.SendAdvertisement()
     local isDisabled = (MarketSyncDB and MarketSyncDB.PassiveSync == false)
 
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-    myLatestScanDay = MarketSync.GetMyLatestScanDay()
-    myRecentItemCount = MarketSync.CountRecentItems(myLatestScanDay)
+    myLatestScanDay = MarketSync.GetMyLatestBucket()
+    myRecentItemCount = MarketSync.CountRecentItemsBucket(myLatestScanDay)
     
-    local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or "0.0.0"
+    local localVersion = MarketSync.GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or "0.0.0"
     
     if isDisabled then
         -- Send a heartbeat with TSF literally set to "DISABLED"
@@ -437,9 +461,9 @@ function MarketSync.SendAdvertisement()
         SendAddonMessage(PREFIX, payload, "GUILD")
         lastAdvertisementAt = now
         if MarketSync.LogNetworkEvent then
-            MarketSync.LogNetworkEvent(string.format("Outgoing |cff00ffff[ADV]|r to Guild (Day %d, %d items, TSF: %d, v%s)", myLatestScanDay, myRecentItemCount, myScanTime, localVersion))
+            MarketSync.LogNetworkEvent(string.format("Outgoing |cff00ffff[ADV]|r to Guild (Bucket %d, %d items, TSF: %d, v%s)", myLatestScanDay, myRecentItemCount, myScanTime, localVersion))
         end
-        Debug("Sent ADV: realm=" .. MarketSync.myRealm .. " day=" .. myLatestScanDay .. " items=" .. myRecentItemCount .. " tsf=" .. myScanTime .. " v=" .. localVersion)
+        Debug("Sent ADV: realm=" .. MarketSync.myRealm .. " bucket=" .. myLatestScanDay .. " items=" .. myRecentItemCount .. " tsf=" .. myScanTime .. " v=" .. localVersion)
     end
 end
 
@@ -465,7 +489,7 @@ function MarketSync.SendNeutralAdvertisement()
     myLatestNeutralScanDay = MarketSync.GetMyLatestNeutralScanDay()
     myRecentNeutralItemCount = MarketSync.CountNeutralRecentItems(myLatestNeutralScanDay)
     
-    local localVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or "0.0.0"
+    local localVersion = MarketSync.GetAddOnMetadata(MarketSync.ADDON_NAME, "Version") or "0.0.0"
 
     if isDisabled then
         local payload = string.format("NADV;%s;0;0;%s;DISABLED", MarketSync.myRealm, localVersion)
@@ -485,7 +509,7 @@ function MarketSync.SendNeutralAdvertisement()
     end
 end
 
-function MarketSync.SendPullRequest(sinceDay)
+function MarketSync.SendPullRequest(sinceBucket)
     if not MarketSync.CanSync() then return end
     if MarketSync.IsSyncBusy and MarketSync.IsSyncBusy() then
         if MarketSync.LogNetworkEvent then
@@ -495,7 +519,7 @@ function MarketSync.SendPullRequest(sinceDay)
         return
     end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-    local payload = string.format("PULL;%s;%d", MarketSync.myRealm, sinceDay)
+    local payload = string.format("PULL;%s;%d", MarketSync.myRealm, sinceBucket)
     SendAddonMessage(PREFIX, payload, "GUILD")
     if MarketSync.SetPullRequestPending then
         MarketSync.SetPullRequestPending(true)
@@ -504,9 +528,9 @@ function MarketSync.SendPullRequest(sinceDay)
         MarketSync.UpdateSwarmUI(UnitName("player"), "Awaiting Data")
     end
     if MarketSync.LogNetworkEvent then
-        MarketSync.LogNetworkEvent(string.format("Outgoing |cffff8800[PULL]|r to Guild (Since Day %d)", sinceDay))
+        MarketSync.LogNetworkEvent(string.format("Outgoing |cffff8800[PULL]|r to Guild (Since Bucket %d)", sinceBucket))
     end
-    Debug("Sent PULL: realm=" .. MarketSync.myRealm .. " sinceDay=" .. sinceDay)
+    Debug("Sent PULL: realm=" .. MarketSync.myRealm .. " sinceBucket=" .. sinceBucket)
 end
 
 function MarketSync.SendNeutralPullRequest(sinceDay)
@@ -831,7 +855,7 @@ function MarketSync.RespondToNeutralPull(sinceDay, requester)
     end)
 end
 
-function MarketSync.RespondToPull(sinceDay, requester)
+function MarketSync.RespondToPull(sinceBucket, requester)
     if pullInProgress then
         Debug("PULL response already in progress, ignoring request from " .. (requester or "unknown"))
         SetTransientBlockedState("active send")
@@ -846,72 +870,55 @@ function MarketSync.RespondToPull(sinceDay, requester)
         Debug("RespondToPull blocked by Smart Rules")
         return
     end
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return end
+    local pData = MarketSync.GetRealmDB().PersonalData
+    if not pData then return end
+    
     pullInProgress = true
-    SetClaim(MarketSync.PullQueue, sinceDay, UnitName("player") or "Unknown")
-    Debug("Responding to PULL from " .. (requester or "unknown") .. " (sinceDay=" .. sinceDay .. ")")
+    SetClaim(MarketSync.PullQueue, sinceBucket, UnitName("player") or "Unknown")
+    Debug("Responding to PULL from " .. (requester or "unknown") .. " (sinceBucket=" .. sinceBucket .. ")")
 
-    -- BRES v3: Base-36 encoded, multi-prefix parallel transfer
-    -- 3 data prefixes round-robin at 1 msg/sec each = 3 msg/sec sustained.
-    -- Each message packs ~16 base-36 items into 248 bytes.
-    -- Total throughput: ~48 items/sec. Full 2355-item sync in ~50 seconds.
     local MAX_PAYLOAD = 248  -- 255 minus "BRES;" prefix (5) minus safety margin (2)
     local numPrefixes = #DATA_PREFIXES
-    local prefixIndex = 0  -- round-robin counter shared between coroutine and ticker
+    local prefixIndex = 0
     
     local co = coroutine.create(function()
         local sent = 0
         local scanned = 0
-        local skipped = 0
         local messagesSent = 0
         local buffer = ""
         local bufferCount = 0
         
-        -- Store current key globally so the ticker can retrieve it on crash
         _G.MarketSyncActivePullKey = "Starting"
         local yieldCounter = 0
 
         -- Count total eligible items first for progress tracking
         local totalEligible = 0
-        for dbKey, data in pairs(Auctionator.Database.db) do
-            if type(data) == "table" and data.h then
-                for dayStr in pairs(data.h) do
-                    local d = tonumber(dayStr)
-                    if d and d >= sinceDay then
-                        totalEligible = totalEligible + 1
-                        break
-                    end
-                end
+        for dbKey, data in pairs(pData) do
+            if data.latestBucket and data.latestBucket >= sinceBucket then
+                totalEligible = totalEligible + 1
             end
         end
 
         if MarketSync.LogNetworkEvent then
-            MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Start]|r Sending %d items via %d parallel channels (base-36 encoded)", totalEligible, numPrefixes))
+            MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Start]|r Sending Timeseries Strings for %d items via %d parallel channels", totalEligible, numPrefixes))
         end
 
-        for dbKey, data in pairs(Auctionator.Database.db) do
+        local dayCutoff = math.floor(sinceBucket / 48)
+
+        for dbKey, data in pairs(pData) do
             scanned = scanned + 1
             _G.MarketSyncActivePullKey = tostring(dbKey)
-            if type(data) == "table" and data.h then
-                local lastSeenDay = -1
-                for dayStr in pairs(data.h) do
+            
+            if data.latestBucket and data.latestBucket >= sinceBucket and data.h then
+                for dayStr, histStr in pairs(data.h) do
                     local d = tonumber(dayStr)
-                    if d and d > lastSeenDay then lastSeenDay = d end
-                end
-                if lastSeenDay >= sinceDay then
-                    local itemID = dbKey
-
-                    if itemID then
-                        local price = tonumber(data.m) or 0
-                        local dateStr = tostring(lastSeenDay)
-                        local quantity = (data.a and data.a[dateStr]) or 0
-                        -- Base-36 encode numeric fields, dbKey as string
-                        local itemStr = tostring(itemID) .. "_" .. ToBase36(price) .. "_" .. ToBase36(quantity) .. "_" .. ToBase36(lastSeenDay)
+                    if d and d >= dayCutoff then
+                        -- Transmit natively. Replace commas with periods so we don't break BRES splitting
+                        local safeHistStr = string.gsub(histStr, ",", ".")
+                        local itemStr = tostring(dbKey) .. "_" .. MarketSync.ToBase36(d) .. "_" .. safeHistStr
                         
-                        -- Flush buffer if adding this item would exceed the wire limit
                         local currentLen = string.len(buffer)
                         if currentLen > 0 and currentLen + 1 + string.len(itemStr) > MAX_PAYLOAD then
-                            -- Send on the current round-robin prefix (injected by the outer ticker)
                             local dp = DATA_PREFIXES[prefixIndex]
                             MarketSync.SendBulkSyncResponse(buffer, dp, "GUILD")
                             MarketSync.TxCount = MarketSync.TxCount + bufferCount
@@ -921,13 +928,11 @@ function MarketSync.RespondToPull(sinceDay, requester)
                             bufferCount = 0
                             yieldCounter = 0
                             
-                            -- Checkpoint every 100 items
                             if sent % 100 < 16 then
                                 if MarketSync.LogNetworkEvent then
                                     MarketSync.LogNetworkEvent(string.format("|cffff8800[Checkpoint]|r Sent %d / %d items (%d msgs, %d scanned)", sent, totalEligible, messagesSent, scanned))
                                 end
                             end
-                            
                             coroutine.yield()
                         end
                         
@@ -937,20 +942,17 @@ function MarketSync.RespondToPull(sinceDay, requester)
                             buffer = buffer .. "," .. itemStr
                         end
                         bufferCount = bufferCount + 1
-                    else
-                        skipped = skipped + 1
                     end
                 end
             end
             
-            -- Safety yield: prevent WoW from killing the coroutine if we scan too many
-            -- items without a buffer flush (e.g. many skipped/ineligible items in a row)
             yieldCounter = yieldCounter + 1
             if yieldCounter >= 500 then
                 yieldCounter = 0
                 coroutine.yield()
             end
         end
+
         -- Flush remaining buffer
         if buffer ~= "" then
             local dp = DATA_PREFIXES[prefixIndex]
@@ -959,17 +961,18 @@ function MarketSync.RespondToPull(sinceDay, requester)
             sent = sent + bufferCount
             messagesSent = messagesSent + 1
         end
-        Debug("PULL response complete: sent " .. sent .. " items in " .. messagesSent .. " messages")
+
+        Debug("PULL response complete: sent " .. sent .. " timeseries arrays in " .. messagesSent .. " messages")
         if MarketSync.LogNetworkEvent then
-            MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Complete]|r Sent %d items in %d messages via %d channels. (%d scanned, %d skipped)", sent, messagesSent, numPrefixes, scanned, skipped))
+            MarketSync.LogNetworkEvent(string.format("|cff00ff00[Sync Complete]|r Sent %d timeseries arrays in %d messages via %d channels. (%d items scanned)", sent, messagesSent, numPrefixes, scanned))
         end
+
         if requester and IsInGuild() then
-            -- Send an explicit END signal including our SwarmTSF so the receiver
-            -- stamps the SAME time as us (prevents ping-pong re-sync loops)
             local myScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
             SendAddonMessage(PREFIX, string.format("END;%d;%d;%s", sent, messagesSent, tostring(myScanTime)), "GUILD")
         end
-        ClearClaim(MarketSync.PullQueue, sinceDay)
+
+        ClearClaim(MarketSync.PullQueue, sinceBucket)
         pullInProgress = false
         if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
         ScheduleDeferredADVProcessing()
@@ -987,7 +990,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
                 MarketSync.UpdateSwarmUI(UnitName("player"), nil)
             end
             ticker:Cancel()
-            ClearClaim(MarketSync.PullQueue, sinceDay)
+            ClearClaim(MarketSync.PullQueue, sinceBucket)
             pullInProgress = false
             ScheduleDeferredADVProcessing()
             return
@@ -1014,7 +1017,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
 
         if coroutine.status(co) == "dead" then
             ticker:Cancel()
-            ClearClaim(MarketSync.PullQueue, sinceDay)
+            ClearClaim(MarketSync.PullQueue, sinceBucket)
             pullInProgress = false
             ScheduleDeferredADVProcessing()
             return
@@ -1035,7 +1038,7 @@ function MarketSync.RespondToPull(sinceDay, requester)
                 SendAddonMessage(PREFIX, string.format("ERR;%s;%s", requester, crashKey), "GUILD")
             end
             ticker:Cancel()
-            ClearClaim(MarketSync.PullQueue, sinceDay)
+            ClearClaim(MarketSync.PullQueue, sinceBucket)
             pullInProgress = false
             ScheduleDeferredADVProcessing()
         end
@@ -1045,33 +1048,145 @@ end
 -- ================================================================
 -- UPDATE LOCAL DATABASE (Smart Merge)
 -- ================================================================
-function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
+function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or_sender, legacySender)
+    local isGranular = type(day_or_histStr) == "string"
+    local sender = isGranular and qty_or_sender or legacySender
+    
     if sender and IsBlocked(sender) then return end
 
     local realmDB = MarketSync.GetRealmDB() -- Cache once per call (hot path during sync)
     local itemLink = "item:" .. tostring(key) -- Fallback for logs
 
-        local currentPrice = Auctionator.Database:GetPrice(key)
-        local currentAge = Auctionator.Database:GetPriceAge(key)
+    -- DIRECT INSERTION to ensure persistence
+    local priceData = Auctionator.Database.db[key]
+    if not priceData then
+        priceData = { l={}, h={}, m=0, a={} }
+        Auctionator.Database.db[key] = priceData
+        Debug("Creating new DB entry for " .. key)
+    end
+    if not priceData.a then priceData.a = {} end
 
-        local currentScanDay = GetCurrentScanDay()
-        local incomingScanDay = day
-
-        -- DIRECT INSERTION to ensure persistence
-        local priceData = Auctionator.Database.db[key]
-        if not priceData then
-            priceData = { l={}, h={}, m=0, a={} }
-            Auctionator.Database.db[key] = priceData
-            Debug("Creating new DB entry for " .. key)
+    if isGranular then
+        -- ==========================================
+        -- NEW GRANULAR PATH (Timeseries History Str)
+        -- ==========================================
+        local incomingDay = tonumber(price_or_day) or 0
+        local histStr = day_or_histStr
+        
+        if not realmDB.PersonalData then realmDB.PersonalData = {} end
+        local pData = realmDB.PersonalData
+        if not pData[key] then pData[key] = { m=0, d=0, h={} } end
+        if not pData[key].h then pData[key].h = {} end
+        
+        local dayStr = tostring(incomingDay)
+        local mergedStr = pData[key].h[dayStr] or ""
+        local historyUpdated = false
+        
+        local latestIncomingPrice = nil
+        local maxIncomingBucketOffset = -1
+        
+        -- Parse the incoming CSV-separated bucket array
+        for incPoint in string.gmatch(histStr, "([^,]+)") do
+            local b_offs, p_b36, q_b36 = string.match(incPoint, "(%d+):([%w%-]+):([%w%-]+)")
+            if b_offs and p_b36 and q_b36 then
+                local b_num = tonumber(b_offs)
+                local newPrice = MarketSync.FromBase36(p_b36)
+                local newQty = MarketSync.FromBase36(q_b36)
+                
+                if b_num > maxIncomingBucketOffset then
+                    maxIncomingBucketOffset = b_num
+                    latestIncomingPrice = newPrice
+                end
+                
+                local collisionPattern = "(,?" .. b_offs .. ":)([%w%-]+):([%w%-]+)"
+                local matchPre, oldPriceB36, oldQtyB36 = string.match(mergedStr, collisionPattern)
+                
+                if matchPre then
+                    local oldPrice = MarketSync.FromBase36(oldPriceB36)
+                    -- Collision -> Outlier Rejection Filter
+                    local isPollution = false
+                    if newQty <= 2 and oldPrice > 0 then
+                        if newPrice > (oldPrice * 3) or newPrice < (oldPrice * 0.5) then
+                            isPollution = true
+                        end
+                    end
+                    
+                    if not isPollution and newPrice ~= oldPrice then
+                        mergedStr = string.gsub(mergedStr, collisionPattern, "%1" .. p_b36 .. ":" .. q_b36)
+                        historyUpdated = true
+                    end
+                else
+                    if mergedStr == "" then
+                        mergedStr = incPoint
+                    else
+                        mergedStr = mergedStr .. "," .. incPoint
+                    end
+                    historyUpdated = true
+                end
+            end
+        end
+        
+        pData[key].h[dayStr] = mergedStr
+        
+        if historyUpdated then
+            -- Re-aggregate the day to update Auctionator backwards-compat tooltips
+            local minPriceDaily = 9999999999
+            local maxQtyDaily = 0
+            
+            for b_offs, p_b36, q_b36 in string.gmatch(mergedStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                local p = MarketSync.FromBase36(p_b36)
+                local q = MarketSync.FromBase36(q_b36)
+                if p > 0 and p < minPriceDaily then minPriceDaily = p end
+                if q > maxQtyDaily then maxQtyDaily = q end
+            end
+            
+            if minPriceDaily ~= 9999999999 then
+                priceData.h[dayStr] = minPriceDaily
+                priceData.a[dayStr] = maxQtyDaily
+                
+                local maxDay = 0
+                for d, _ in pairs(priceData.h) do
+                    local dayNum = tonumber(d)
+                    if dayNum and dayNum > maxDay then maxDay = dayNum end
+                end
+                
+                if incomingDay >= maxDay or priceData.m == 0 then
+                    priceData.m = latestIncomingPrice or minPriceDaily
+                end
+            end
+            
+            TrackSync(sender, 1)
+            if not realmDB.ItemMetadata then realmDB.ItemMetadata = {} end
+            local meta = realmDB.ItemMetadata[key]
+            if not meta then
+                meta = { days = {}, lastSource = sender, lastTime = time() }
+                realmDB.ItemMetadata[key] = meta
+            end
+            if not meta.days then meta.days = {} end
+            meta.days[dayStr] = { source = sender, time = time() }
+            meta.lastSource = sender
+            meta.lastTime = time()
+            
+            if MarketSync.InvalidateSyncContributorCache then MarketSync.InvalidateSyncContributorCache() end
+            if MarketSync.AddToGuildIncoming then MarketSync.AddToGuildIncoming(key) end
+            
+            if not realmDB.HistoryLog then realmDB.HistoryLog = {} end
+            table.insert(realmDB.HistoryLog, 1, { link = itemLink, price = latestIncomingPrice or priceData.m, sender = sender or "Swarm", time = time() })
+            if #realmDB.HistoryLog > 100 then table.remove(realmDB.HistoryLog) end
         end
 
-        if not priceData.a then priceData.a = {} end
-
+    else
+        -- ==========================================
+        -- LEGACY PATH (Flat Daily Minimums)
+        -- ==========================================
+        local price = tonumber(price_or_day) or 0
+        local incomingScanDay = tonumber(day_or_histStr) or 0
+        local quantity = tonumber(qty_or_sender) or 0
+        
         local scanDayStr = tostring(incomingScanDay)
         local currentHigh = priceData.h[scanDayStr]
         local currentLow = priceData.l[scanDayStr]
 
-        -- 1. SMART MERGE HISTORY
         local historyUpdated = false
 
         if currentHigh == nil or price > currentHigh then
@@ -1085,7 +1200,6 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
             historyUpdated = true
         end
 
-        -- Merge Quantity
         if quantity and quantity > 0 then
             local currentQty = priceData.a[scanDayStr]
             if not currentQty or quantity > currentQty then
@@ -1094,7 +1208,6 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
             end
         end
 
-        -- 2. UPDATE LATEST PRICE ('m')
         local maxDay = 0
         for d, _ in pairs(priceData.h) do
             local dayNum = tonumber(d)
@@ -1112,7 +1225,6 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
             TrackSync(sender, 1)
             if not realmDB.ItemMetadata then realmDB.ItemMetadata = {} end
             
-            -- Per-day attribution: each scan day credits the actual sender
             local meta = realmDB.ItemMetadata[key]
             if not meta then
                 meta = { days = {}, lastSource = sender, lastTime = time() }
@@ -1120,28 +1232,22 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
             end
             if not meta.days then meta.days = {} end
             
-            local dayStr = tostring(incomingScanDay)
-            -- Only attribute to sender if they actually provided new/better data
-            -- If we already had the exact same price for this day, don't overwrite the source
-            local isNewData = historyUpdated or (not priceData.h[dayStr])
+            local isNewData = historyUpdated or (not priceData.h[scanDayStr])
             
-            if not meta.days[dayStr] or isNewData then
-                meta.days[dayStr] = { source = sender, time = time() }
+            if not meta.days[scanDayStr] or isNewData then
+                meta.days[scanDayStr] = { source = sender, time = time() }
             end
-            -- Always track the most recent contributor
             meta.lastSource = sender
             meta.lastTime = time()
             if MarketSync.InvalidateSyncContributorCache then
                 MarketSync.InvalidateSyncContributorCache()
             end
 
-            -- Route to guild incoming buffer (won't disrupt live browsing)
             if MarketSync.AddToGuildIncoming then
                 MarketSync.AddToGuildIncoming(key)
             end
         end
 
-        -- Log to History
         if not realmDB.HistoryLog then realmDB.HistoryLog = {} end
         table.insert(realmDB.HistoryLog, 1, { link = itemLink, price = price, sender = sender or "Self", time = time() })
         if #realmDB.HistoryLog > 100 then table.remove(realmDB.HistoryLog) end
@@ -1149,6 +1255,7 @@ function MarketSync.UpdateLocalDBByKey(key, price, day, quantity, sender)
         if MarketSync.EvaluateNotificationsForRecord then
             MarketSync.EvaluateNotificationsForRecord(key, price, "main", sender)
         end
+    end
 end
 
 function MarketSync.UpdateLocalNeutralDBByKey(key, price, day, quantity, sender, isLocalCapture)

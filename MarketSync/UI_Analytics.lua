@@ -136,7 +136,7 @@ local function CreateGraph(parent, width, height)
         end
 
         local plotData = {}
-        local maxPoints = math.min(#history, 14)
+        local maxPoints = math.min(#history, 48)
         for i = maxPoints, 1, -1 do table.insert(plotData, history[i]) end
 
         local minPrice, maxPrice = math.huge, 0
@@ -168,9 +168,18 @@ local function CreateGraph(parent, width, height)
             local x = ox + ((i - 1) * spacing)
             local y = oy + (((d.price - padMin) / fullRange) * ph)
             if px then self:DrawLine(px, py, x, y, 0.2, 0.8, 0.2, 1, 2) end
-            self:DrawDot(x, y, 0.3, 1, 0.3)
-            if i == 1 or i == #plotData or (i % 3 == 0) then
-                self:AddLabel(x, oy - 12, ScanDayToDate(d.day), "TOP")
+            -- Blue dots for granular, green for daily
+            if d.isGranular then
+                self:DrawDot(x, y, 0.2, 0.7, 1.0)
+            else
+                self:DrawDot(x, y, 0.3, 1, 0.3)
+            end
+            if i == 1 or i == #plotData or (i % math.max(1, math.floor(#plotData / 6)) == 0) then
+                if d.isGranular and d.timeLabel then
+                    self:AddLabel(x, oy - 12, ScanDayToDate(d.day) .. "\n" .. d.timeLabel, "TOP")
+                else
+                    self:AddLabel(x, oy - 12, ScanDayToDate(d.day), "TOP")
+                end
             end
             px, py = x, y
         end
@@ -226,7 +235,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     local graphTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     graphTitle:SetPoint("TOP", graph, "TOP", 0, 15)
-    graphTitle:SetText("|cffffd700Historical Trend (14 Days)|r")
+    graphTitle:SetText("|cffffd700Historical Trend (Granular)|r")
 
     -- Metrics Side Panel
     local metricsBox = CreateFrame("Frame", nil, panel, "BackdropTemplate")
@@ -264,10 +273,22 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     panel.mPersonal = CreateMetric(-135, "Personal Scan Contribution")
     panel.mGuild = CreateMetric(-155, "Guild Data Contribution")
+
+    -- Granular Analytics Section
+    local div2 = metricsBox:CreateTexture(nil, "ARTWORK")
+    div2:SetColorTexture(0.2, 0.6, 1, 0.25); div2:SetSize(320, 1); div2:SetPoint("TOP", 0, -175)
+
+    local intradayTitle = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    intradayTitle:SetPoint("TOPLEFT", 15, -185)
+    intradayTitle:SetText("|cff4499ffIntraday Analytics (30-min Buckets)|r")
+
+    panel.mBestTime = CreateMetric(-205, "Best Time to Buy")
+    panel.mVolatility = CreateMetric(-225, "Intraday Volatility")
+    panel.mDataPoints = CreateMetric(-245, "Granular Data Points")
     
     local debugNote = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
-    debugNote:SetPoint("BOTTOMLEFT", 15, 15); debugNote:SetWidth(320); debugNote:SetJustifyH("LEFT")
-    debugNote:SetText("|cff888888Note: 'Stale' records are automatically ignored by arbitrage calculators to protect profit margins from outdated data spikes.|r")
+    debugNote:SetPoint("BOTTOMLEFT", 15, 10); debugNote:SetWidth(320); debugNote:SetJustifyH("LEFT")
+    debugNote:SetText("|cff888888Note: Intraday analytics require multiple scan snapshots across different times of day. More scans = higher fidelity.|r")
 
     -- Footer Buttons
     local backBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -308,6 +329,58 @@ function MarketSync.CreateAnalyticsPanel(parent)
         local isStale = (latestAge > 3)
         self.mAge:SetText((isStale and "|cffff4444" or "|cff00ff00") .. ageStr .. "|r")
         self.mStatus:SetText(isStale and "|cffff4444STALE|r" or "|cff00ff00GOOD|r")
+
+        -- =============================================
+        -- INTRADAY ANALYTICS (Best Time to Buy + Volatility)
+        -- =============================================
+        local granular = MarketSync.GetGranularHistory and MarketSync.GetGranularHistory(dbKey) or {}
+        self.mDataPoints:SetText(#granular > 0 and tostring(#granular) or "|cff888888None|r")
+
+        if #granular >= 3 then
+            -- Best Time to Buy: Average price per bucket offset across all days
+            local bucketPrices = {}  -- [offset] = { sum, count }
+            for _, pt in ipairs(granular) do
+                local offs = pt.bucketOffset
+                if not bucketPrices[offs] then bucketPrices[offs] = { sum = 0, count = 0 } end
+                bucketPrices[offs].sum = bucketPrices[offs].sum + pt.price
+                bucketPrices[offs].count = bucketPrices[offs].count + 1
+            end
+
+            local bestOffset, bestAvg = nil, math.huge
+            for offs, data in pairs(bucketPrices) do
+                local avg = data.sum / data.count
+                if avg < bestAvg then
+                    bestAvg = avg
+                    bestOffset = offs
+                end
+            end
+
+            if bestOffset then
+                local timeStr = MarketSync.BucketOffsetToTime(bestOffset)
+                self.mBestTime:SetText("|cff00ff00" .. timeStr .. "|r (avg " .. FormatMoneyPlain(math.floor(bestAvg)) .. ")")
+            else
+                self.mBestTime:SetText("|cff888888Insufficient data|r")
+            end
+
+            -- Intraday Volatility: (max - min) / mean across all granular points
+            local allSum, allMin, allMax = 0, math.huge, 0
+            for _, pt in ipairs(granular) do
+                allSum = allSum + pt.price
+                if pt.price < allMin then allMin = pt.price end
+                if pt.price > allMax then allMax = pt.price end
+            end
+            local mean = allSum / #granular
+            if mean > 0 then
+                local volatility = ((allMax - allMin) / mean) * 100
+                local volColor = volatility > 25 and "|cffff4444" or (volatility > 10 and "|cffffd700" or "|cff00ff00")
+                self.mVolatility:SetText(volColor .. string.format("%.1f%%", volatility) .. "|r")
+            else
+                self.mVolatility:SetText("|cff888888N/A|r")
+            end
+        else
+            self.mBestTime:SetText("|cff888888Need 3+ data points|r")
+            self.mVolatility:SetText("|cff888888Need 3+ data points|r")
+        end
 
         self:Show()
     end
