@@ -177,10 +177,10 @@ function MarketSync.CreateAHSidecar(parent)
     local ahFrame = parent or AuctionHouseFrame
     if not ahFrame then return nil end
 
-    -- 1. Slim pull-tab toggle on AH right edge
+    -- 1. Drawer Toggle Tab on AH right edge (shown ONLY when sidecar is closed)
     local toggleBtn = CreateFrame("Button", "MarketSyncAHSidecarToggleBtn", ahFrame, "BackdropTemplate")
-    toggleBtn:SetSize(24, 80)
-    toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -1, -60)
+    toggleBtn:SetSize(22, 70)
+    toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -60)
     toggleBtn:SetFrameLevel(ahFrame:GetFrameLevel() + 5)
     toggleBtn:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -188,140 +188,127 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    toggleBtn:SetBackdropColor(0.12, 0.14, 0.18, 0.95)
-    toggleBtn:SetBackdropBorderColor(0.4, 0.35, 0.2, 0.8)
+    toggleBtn:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
+    toggleBtn:SetBackdropBorderColor(0.5, 0.42, 0.25, 0.9)
     toggleBtn:EnableMouse(true)
     toggleBtn:RegisterForClicks("LeftButtonUp")
 
-    local toggleArrow = toggleBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local toggleArrow = toggleBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     toggleArrow:SetPoint("CENTER", 0, 0)
-    toggleArrow:SetText("|cFFFFD100▶|r")
+    toggleArrow:SetText("|cFFFFD100>|r")
 
     toggleBtn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(0.2, 0.22, 0.28, 0.95)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("MarketSync Sidecar", 1, 0.82, 0)
-        GameTooltip:AddLine("Click to toggle shopping lists & bag selling", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Click to open Shopping Lists & Bag Selling", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     toggleBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.12, 0.14, 0.18, 0.95)
+        self:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
         GameTooltip:Hide()
     end)
 
-    -- 2. Breakout Sidecar Frame — flush against AH, matching backdrop
+    -- 2. Breakout Sidecar Frame -- aligned neatly with AH frame inset
     local frame = CreateFrame("Frame", "MarketSyncAHSidecarFrame", ahFrame, "BackdropTemplate")
     frame:SetWidth(SIDECAR_WIDTH)
-    frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 0, 0)
-    frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", 0, 0)
+    frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -28)
+    frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", -2, 28)
     frame:SetFrameStrata(ahFrame:GetFrameStrata())
     frame:SetFrameLevel(ahFrame:GetFrameLevel() + 1)
     frame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(0.06, 0.07, 0.09, 0.96)
-    frame:SetBackdropBorderColor(0.4, 0.35, 0.2, 0.9)
+    frame:SetBackdropColor(0.06, 0.07, 0.09, 0.98)
+    frame:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.95)
     Sidecar.Frame = frame
 
-    -- Top Header Container with inline tab switchers
+    -- Top Header Container
     local header = CreateFrame("Frame", nil, frame)
     header:SetPoint("TOPLEFT", 6, -6)
     header:SetPoint("TOPRIGHT", -6, -6)
-    header:SetHeight(32)
+    header:SetHeight(28)
 
     local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("LEFT", 8, 0)
     title:SetText("|cFFFFD100MarketSync|r")
 
-    -- Compact inline tab buttons: [Lists] [Bags]
-    local function CreateModeTab(label, anchorFrame, anchorPoint, offsetX)
-        local btn = CreateFrame("Button", nil, header, "BackdropTemplate")
-        btn:SetSize(56, 20)
-        btn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-        btn:SetBackdropColor(0, 0, 0, 0)
-        btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        btn.label:SetPoint("CENTER")
-        btn.label:SetText(label)
-        btn:SetScript("OnEnter", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(0.25, 0.25, 0.3, 0.5)
-            end
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(0, 0, 0, 0)
-            end
-        end)
-        return btn
-    end
-
-    local tabLists = CreateModeTab("Lists", title, "RIGHT", 6)
-    tabLists:SetPoint("LEFT", title, "RIGHT", 10, 0)
-
-    local tabBags = CreateModeTab("Bags", tabLists, "RIGHT", 2)
-    tabBags:SetPoint("LEFT", tabLists, "RIGHT", 2, 0)
-
-    local collapseBtn = CreateFrame("Button", nil, header, "BackdropTemplate")
-    collapseBtn:SetSize(20, 20)
-    collapseBtn:SetPoint("TOPRIGHT", -2, -2)
-    collapseBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-    collapseBtn:SetBackdropColor(0, 0, 0, 0)
-    local collapseText = collapseBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    collapseText:SetPoint("CENTER")
-    collapseText:SetText("|cFFFFD100◀|r")
-    collapseBtn:SetScript("OnClick", function()
+    local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
+    closeBtn:SetSize(24, 24)
+    closeBtn:SetPoint("TOPRIGHT", 2, 2)
+    closeBtn:SetScript("OnClick", function()
         Sidecar.SetExpanded(false)
-    end)
-    collapseBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.3, 0.3, 0.3, 0.5)
-    end)
-    collapseBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0, 0, 0, 0)
     end)
 
     -- Separator line under header
     local headerSep = frame:CreateTexture(nil, "ARTWORK")
     headerSep:SetHeight(1)
-    headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -1)
-    headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -4, -1)
+    headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -2)
+    headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -4, -2)
     headerSep:SetColorTexture(0.4, 0.35, 0.2, 0.5)
+
+    -- Mode Switcher Tabs: [ Shopping Lists ]  [ Bag Selling ]
+    local tabLists = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    tabLists:SetSize(152, 24)
+    tabLists:SetPoint("TOPLEFT", headerSep, "BOTTOMLEFT", 2, -6)
+    tabLists:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    tabLists.label = tabLists:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    tabLists.label:SetPoint("CENTER")
+    tabLists.label:SetText("Shopping Lists")
+
+    local tabBags = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    tabBags:SetSize(152, 24)
+    tabBags:SetPoint("LEFT", tabLists, "RIGHT", 4, 0)
+    tabBags:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    tabBags.label = tabBags:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    tabBags.label:SetPoint("CENTER")
+    tabBags.label:SetText("Bag Selling")
 
     -- Content Containers
     local listsContainer = CreateFrame("Frame", nil, frame)
-    listsContainer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
-    listsContainer:SetPoint("BOTTOMRIGHT", -4, 6)
+    listsContainer:SetPoint("TOPLEFT", tabLists, "BOTTOMLEFT", -2, -6)
+    listsContainer:SetPoint("BOTTOMRIGHT", -6, 6)
 
     local sellContainer = CreateFrame("Frame", nil, frame)
-    sellContainer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
-    sellContainer:SetPoint("BOTTOMRIGHT", -4, 6)
+    sellContainer:SetPoint("TOPLEFT", tabLists, "BOTTOMLEFT", -2, -6)
+    sellContainer:SetPoint("BOTTOMRIGHT", -6, 6)
     sellContainer:Hide()
 
-    -- Mode switching — auto-driven by AH tab, but also manually switchable
     local activeMode = "lists"
     local function SetMode(mode)
         activeMode = mode
         if mode == "lists" then
             listsContainer:Show()
             sellContainer:Hide()
-            tabLists.isActive = true
-            tabBags.isActive = false
-            tabLists:SetBackdropColor(0.2, 0.25, 0.35, 0.7)
-            tabLists.label:SetText("|cFFFFD100Lists|r")
-            tabBags:SetBackdropColor(0, 0, 0, 0)
-            tabBags.label:SetText("|cFF999999Bags|r")
+            tabLists:SetBackdropColor(0.20, 0.24, 0.32, 0.95)
+            tabLists:SetBackdropBorderColor(0.6, 0.5, 0.25, 0.9)
+            tabLists.label:SetText("|cFFFFD100Shopping Lists|r")
+            tabBags:SetBackdropColor(0.08, 0.09, 0.12, 0.6)
+            tabBags:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+            tabBags.label:SetText("|cFF888888Bag Selling|r")
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         else
             listsContainer:Hide()
             sellContainer:Show()
-            tabBags.isActive = true
-            tabLists.isActive = false
-            tabBags:SetBackdropColor(0.2, 0.25, 0.35, 0.7)
-            tabBags.label:SetText("|cFFFFD100Bags|r")
-            tabLists:SetBackdropColor(0, 0, 0, 0)
-            tabLists.label:SetText("|cFF999999Lists|r")
+            tabBags:SetBackdropColor(0.20, 0.24, 0.32, 0.95)
+            tabBags:SetBackdropBorderColor(0.6, 0.5, 0.25, 0.9)
+            tabBags.label:SetText("|cFFFFD100Bag Selling|r")
+            tabLists:SetBackdropColor(0.08, 0.09, 0.12, 0.6)
+            tabLists:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+            tabLists.label:SetText("|cFF888888Shopping Lists|r")
             if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
         end
     end
@@ -336,7 +323,7 @@ function MarketSync.CreateAHSidecar(parent)
         MarketSyncDB.AHSidecarExpanded = (expanded == true)
         if expanded then
             frame:Show()
-            toggleArrow:SetText("|cFFFFD100◀|r")
+            toggleBtn:Hide()
             if activeMode == "lists" and Sidecar.UpdateListsView then
                 Sidecar.UpdateListsView()
             elseif activeMode == "sell" and Sidecar.UpdateSellView then
@@ -344,13 +331,12 @@ function MarketSync.CreateAHSidecar(parent)
             end
         else
             frame:Hide()
-            toggleArrow:SetText("|cFFFFD100▶|r")
+            toggleBtn:Show()
         end
     end
 
     toggleBtn:SetScript("OnClick", function()
-        local isShown = frame:IsShown()
-        Sidecar.SetExpanded(not isShown)
+        Sidecar.SetExpanded(true)
     end)
 
     -- ================================================================
@@ -359,39 +345,47 @@ function MarketSync.CreateAHSidecar(parent)
     local currentListName = "Favorites"
 
     local listControlBar = CreateFrame("Frame", nil, listsContainer)
-    listControlBar:SetPoint("TOPLEFT", 6, 0)
-    listControlBar:SetPoint("TOPRIGHT", -6, 0)
-    listControlBar:SetHeight(58)
+    listControlBar:SetPoint("TOPLEFT", 0, 0)
+    listControlBar:SetPoint("TOPRIGHT", 0, 0)
+    listControlBar:SetHeight(48)
 
     local listLabel = listControlBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    listLabel:SetPoint("TOPLEFT", 4, -4)
-    listLabel:SetText("Active List:")
+    listLabel:SetPoint("TOPLEFT", 4, -2)
+    listLabel:SetText("List:")
 
-    -- List Selection Dropdown
-    local listDropdown = CreateFrame("Frame", "MarketSyncSidecarListDropdown", listControlBar, "UIDropDownMenuTemplate")
-    listDropdown:SetPoint("TOPLEFT", listLabel, "BOTTOMLEFT", -16, -2)
-    UIDropDownMenu_SetWidth(listDropdown, 140)
+    -- Custom styled Dropdown Button
+    local dropdownBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
+    dropdownBtn:SetSize(160, 22)
+    dropdownBtn:SetPoint("TOPLEFT", 4, -18)
+    dropdownBtn:SetText(currentListName .. "  |cFFFFD100v|r")
+
+    local hiddenDropdown = CreateFrame("Frame", "MarketSyncSidecarListHiddenDropdown", listControlBar, "UIDropDownMenuTemplate")
+    hiddenDropdown:Hide()
 
     local function InitListDropdown(self, level)
         local lists = MarketSync.Favorites and MarketSync.Favorites.GetLists() or { "Favorites" }
         for _, lName in ipairs(lists) do
             local opt = UIDropDownMenu_CreateInfo()
             opt.text = lName
+            opt.checked = (lName == currentListName)
             opt.func = function()
                 currentListName = lName
-                UIDropDownMenu_SetText(listDropdown, lName)
+                dropdownBtn:SetText(lName .. "  |cFFFFD100v|r")
                 if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
             end
             UIDropDownMenu_AddButton(opt, level)
         end
     end
-    UIDropDownMenu_Initialize(listDropdown, InitListDropdown)
-    UIDropDownMenu_SetText(listDropdown, currentListName)
+    UIDropDownMenu_Initialize(hiddenDropdown, InitListDropdown)
+
+    dropdownBtn:SetScript("OnClick", function()
+        ToggleDropDownMenu(1, nil, hiddenDropdown, dropdownBtn, 0, 0)
+    end)
 
     -- New List Button
     local newListBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
     newListBtn:SetSize(62, 22)
-    newListBtn:SetPoint("LEFT", listDropdown, "RIGHT", -8, 2)
+    newListBtn:SetPoint("LEFT", dropdownBtn, "RIGHT", 4, 0)
     newListBtn:SetText("+ New")
     newListBtn:SetScript("OnClick", function()
         StaticPopupDialogs["MARKETSYNC_SIDECAR_NEW_LIST"] = {
@@ -405,8 +399,7 @@ function MarketSync.CreateAHSidecar(parent)
                     local ok = MarketSync.Favorites.CreateList(text)
                     if ok then
                         currentListName = text
-                        UIDropDownMenu_Initialize(listDropdown, InitListDropdown)
-                        UIDropDownMenu_SetText(listDropdown, text)
+                        dropdownBtn:SetText(text .. "  |cFFFFD100v|r")
                         if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
                     end
                 end
@@ -420,9 +413,9 @@ function MarketSync.CreateAHSidecar(parent)
 
     -- Delete List Button
     local delListBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
-    delListBtn:SetSize(42, 22)
+    delListBtn:SetSize(52, 22)
     delListBtn:SetPoint("LEFT", newListBtn, "RIGHT", 4, 0)
-    delListBtn:SetText("Del")
+    delListBtn:SetText("Delete")
     delListBtn:SetScript("OnClick", function()
         if currentListName == "Favorites" then
             print("|cFFFF4444[MarketSync]|r Cannot delete the default Favorites list.")
@@ -431,17 +424,16 @@ function MarketSync.CreateAHSidecar(parent)
         if MarketSync.Favorites then
             MarketSync.Favorites.DeleteList(currentListName)
             currentListName = "Favorites"
-            UIDropDownMenu_Initialize(listDropdown, InitListDropdown)
-            UIDropDownMenu_SetText(listDropdown, "Favorites")
+            dropdownBtn:SetText("Favorites  |cFFFFD100v|r")
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         end
     end)
 
     -- Search Entire List Button
     local searchAllBtn = CreateFrame("Button", nil, listsContainer, "UIPanelButtonTemplate")
-    searchAllBtn:SetSize(306, 24)
-    searchAllBtn:SetPoint("TOPLEFT", listControlBar, "BOTTOMLEFT", 4, 0)
-    searchAllBtn:SetText("▶ Search / Scan Entire List")
+    searchAllBtn:SetSize(298, 24)
+    searchAllBtn:SetPoint("TOPLEFT", listControlBar, "BOTTOMLEFT", 4, -2)
+    searchAllBtn:SetText("Scan Entire List")
     searchAllBtn:SetScript("OnClick", function()
         if MarketSync.Scanner then
             if MarketSync.Scanner.Active then
@@ -460,12 +452,12 @@ function MarketSync.CreateAHSidecar(parent)
     addBox:SetText("Drop item or enter name/ID...")
     addBox:SetFontObject("GameFontHighlightSmall")
 
-    addBox:SetScript("OnFocusGained", function(self)
+    addBox:SetScript("OnEditFocusGained", function(self)
         if self:GetText() == "Drop item or enter name/ID..." then
             self:SetText("")
         end
     end)
-    addBox:SetScript("OnFocusLost", function(self)
+    addBox:SetScript("OnEditFocusLost", function(self)
         if self:GetText() == "" then
             self:SetText("Drop item or enter name/ID...")
         end
@@ -488,19 +480,42 @@ function MarketSync.CreateAHSidecar(parent)
         end
     end)
 
+    -- Recessed Inset for List Items
+    local listInset = CreateFrame("Frame", nil, listsContainer, "BackdropTemplate")
+    listInset:SetPoint("TOPLEFT", addBox, "BOTTOMLEFT", -6, -6)
+    listInset:SetPoint("BOTTOMRIGHT", 0, 0)
+    listInset:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    listInset:SetBackdropColor(0.04, 0.05, 0.07, 0.90)
+    listInset:SetBackdropBorderColor(0.3, 0.26, 0.15, 0.7)
+
     -- Scrollable List Items Table
-    local listScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarListScroll", listsContainer, "UIPanelScrollFrameTemplate")
-    listScroll:SetPoint("TOPLEFT", addBox, "BOTTOMLEFT", -6, -8)
-    listScroll:SetPoint("BOTTOMRIGHT", -24, 6)
+    local listScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarListScroll", listInset, "UIPanelScrollFrameTemplate")
+    listScroll:SetPoint("TOPLEFT", 2, -3)
+    listScroll:SetPoint("BOTTOMRIGHT", -22, 3)
 
     local listScrollContent = CreateFrame("Frame", nil, listScroll)
-    listScrollContent:SetSize(286, 1)
+    listScrollContent:SetSize(280, 1)
     listScroll:SetScrollChild(listScrollContent)
+
+    local listEmptyText = listInset:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    listEmptyText:SetPoint("CENTER", 0, 20)
+    listEmptyText:SetText("No items in this list.\n\nDrag an item here or type\nits name above to add.")
 
     local listRows = {}
     local function UpdateListsView()
         local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(currentListName) or {}
         local rowH = 26
+
+        if #items == 0 then
+            listEmptyText:Show()
+        else
+            listEmptyText:Hide()
+        end
 
         for i = 1, math.max(#items, #listRows) do
             local row = listRows[i]
@@ -520,18 +535,18 @@ function MarketSync.CreateAHSidecar(parent)
 
                     row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                     row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-                    row.name:SetPoint("RIGHT", -80, 0)
+                    row.name:SetPoint("RIGHT", -76, 0)
                     row.name:SetJustifyH("LEFT")
 
                     row.price = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    row.price:SetPoint("RIGHT", -22, 0)
+                    row.price:SetPoint("RIGHT", -20, 0)
 
                     row.delBtn = CreateFrame("Button", nil, row)
                     row.delBtn:SetSize(16, 16)
                     row.delBtn:SetPoint("RIGHT", -2, 0)
                     row.delBtn.text = row.delBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                     row.delBtn.text:SetPoint("CENTER")
-                    row.delBtn.text:SetText("|cFFFF4444×|r")
+                    row.delBtn.text:SetText("|cFFFF4444x|r")
 
                     listRows[i] = row
                 end
@@ -540,9 +555,9 @@ function MarketSync.CreateAHSidecar(parent)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
                 if i % 2 == 0 then
-                    row:SetBackdropColor(0.1, 0.12, 0.15, 0.6)
+                    row:SetBackdropColor(0.09, 0.11, 0.14, 0.7)
                 else
-                    row:SetBackdropColor(0.06, 0.08, 0.1, 0.6)
+                    row:SetBackdropColor(0.05, 0.06, 0.08, 0.7)
                 end
 
                 row.icon:SetTexture(item.icon)
@@ -553,14 +568,12 @@ function MarketSync.CreateAHSidecar(parent)
                 row.name:SetText(string.format("|c%s%s|r", colorHex, item.name))
                 row.price:SetText(GetPriceText(item.itemID))
 
-                -- Clicking row searches in Auction House!
                 row:SetScript("OnClick", function()
                     MarketSync.SearchInAuctionHouse(item.name or item.itemID)
                 end)
 
-                -- Tooltip
                 row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.2, 0.25, 0.35, 0.8)
+                    self:SetBackdropColor(0.18, 0.22, 0.30, 0.9)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     if item.link and GameTooltip.SetHyperlink then
                         pcall(GameTooltip.SetHyperlink, GameTooltip, item.link)
@@ -573,14 +586,13 @@ function MarketSync.CreateAHSidecar(parent)
                 end)
                 row:SetScript("OnLeave", function(self)
                     if i % 2 == 0 then
-                        self:SetBackdropColor(0.1, 0.12, 0.15, 0.6)
+                        self:SetBackdropColor(0.09, 0.11, 0.14, 0.7)
                     else
-                        self:SetBackdropColor(0.06, 0.08, 0.1, 0.6)
+                        self:SetBackdropColor(0.05, 0.06, 0.08, 0.7)
                     end
                     GameTooltip:Hide()
                 end)
 
-                -- Delete Button
                 row.delBtn:SetScript("OnClick", function()
                     if MarketSync.Favorites then
                         MarketSync.Favorites.RemoveFromList(currentListName, item.itemID)
@@ -601,16 +613,16 @@ function MarketSync.CreateAHSidecar(parent)
     -- 2. INVENTORY-BASED BAG SELLING VIEW
     -- ================================================================
     local sellFilterBox = CreateFrame("EditBox", nil, sellContainer, "InputBoxTemplate")
-    sellFilterBox:SetSize(220, 20)
-    sellFilterBox:SetPoint("TOPLEFT", 10, -4)
+    sellFilterBox:SetSize(210, 20)
+    sellFilterBox:SetPoint("TOPLEFT", 4, -4)
     sellFilterBox:SetAutoFocus(false)
     sellFilterBox:SetFontObject("GameFontHighlightSmall")
     sellFilterBox:SetText("Filter inventory...")
 
-    sellFilterBox:SetScript("OnFocusGained", function(self)
+    sellFilterBox:SetScript("OnEditFocusGained", function(self)
         if self:GetText() == "Filter inventory..." then self:SetText("") end
     end)
-    sellFilterBox:SetScript("OnFocusLost", function(self)
+    sellFilterBox:SetScript("OnEditFocusLost", function(self)
         if self:GetText() == "" then self:SetText("Filter inventory...") end
     end)
     sellFilterBox:SetScript("OnTextChanged", function()
@@ -618,20 +630,37 @@ function MarketSync.CreateAHSidecar(parent)
     end)
 
     local refreshBagsBtn = CreateFrame("Button", nil, sellContainer, "UIPanelButtonTemplate")
-    refreshBagsBtn:SetSize(80, 22)
+    refreshBagsBtn:SetSize(78, 22)
     refreshBagsBtn:SetPoint("LEFT", sellFilterBox, "RIGHT", 6, 0)
-    refreshBagsBtn:SetText("🔄 Refresh")
+    refreshBagsBtn:SetText("Refresh")
     refreshBagsBtn:SetScript("OnClick", function()
         if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
     end)
 
-    local sellScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarSellScroll", sellContainer, "UIPanelScrollFrameTemplate")
-    sellScroll:SetPoint("TOPLEFT", sellFilterBox, "BOTTOMLEFT", -6, -8)
-    sellScroll:SetPoint("BOTTOMRIGHT", -24, 6)
+    -- Recessed Inset for Bag Selling
+    local sellInset = CreateFrame("Frame", nil, sellContainer, "BackdropTemplate")
+    sellInset:SetPoint("TOPLEFT", sellFilterBox, "BOTTOMLEFT", -4, -6)
+    sellInset:SetPoint("BOTTOMRIGHT", 0, 0)
+    sellInset:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    sellInset:SetBackdropColor(0.04, 0.05, 0.07, 0.90)
+    sellInset:SetBackdropBorderColor(0.3, 0.26, 0.15, 0.7)
+
+    local sellScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarSellScroll", sellInset, "UIPanelScrollFrameTemplate")
+    sellScroll:SetPoint("TOPLEFT", 2, -3)
+    sellScroll:SetPoint("BOTTOMRIGHT", -22, 3)
 
     local sellScrollContent = CreateFrame("Frame", nil, sellScroll)
-    sellScrollContent:SetSize(286, 1)
+    sellScrollContent:SetSize(280, 1)
     sellScroll:SetScrollChild(sellScrollContent)
+
+    local sellEmptyText = sellInset:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    sellEmptyText:SetPoint("CENTER", 0, 20)
+    sellEmptyText:SetText("No auctionable items found in bags.")
 
     local sellRows = {}
     local function UpdateSellView()
@@ -774,7 +803,7 @@ function MarketSync.CreateAHSidecar(parent)
     if MarketSync.Favorites then
         MarketSync.Favorites.RegisterCallback(function()
             if frame:IsShown() and activeMode == "lists" and Sidecar.UpdateListsView then
-                UIDropDownMenu_Initialize(listDropdown, InitListDropdown)
+                dropdownBtn:SetText(currentListName .. "  |cFFFFD100v|r")
                 Sidecar.UpdateListsView()
             end
         end)
@@ -788,9 +817,9 @@ function MarketSync.CreateAHSidecar(parent)
                 if MarketSync.Scanner.Active then
                     local cur = (MarketSync.Scanner.Progress and MarketSync.Scanner.Progress.current) or 0
                     local tot = (MarketSync.Scanner.Progress and MarketSync.Scanner.Progress.total) or 0
-                    searchAllBtn:SetText(string.format("⏹ Scanning (%d/%d) - Stop", cur, tot))
+                    searchAllBtn:SetText(string.format("Scanning (%d/%d)... Stop", cur, tot))
                 else
-                    searchAllBtn:SetText("▶ Search / Scan Entire List")
+                    searchAllBtn:SetText("Scan Entire List")
                 end
                 if Sidecar.UpdateListsView then
                     Sidecar.UpdateListsView()
