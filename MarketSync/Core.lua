@@ -206,6 +206,7 @@ local function RegisterAuctionatorHooks()
     auctionatorHooksInstalled = true
 end
 
+local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
 eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
