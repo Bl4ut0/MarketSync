@@ -49,8 +49,8 @@ function Provider.Select(preferred)
         return Provider.Active
     end
 
-    -- 1. Check for Forever native scanner or modern C_AuctionHouse with camelot
-    if MarketSyncForeverScanner or (C_AuctionHouse and type(C_AuctionHouse.SendBrowseQuery) == "function" and not Auctionator) then
+    -- 1. Check for Forever native scanner or modern C_AuctionHouse
+    if MarketSync.Scanner or MarketSyncForeverScanner or (C_AuctionHouse and (type(C_AuctionHouse.SendSearchQuery) == "function" or type(C_AuctionHouse.SendBrowseQuery) == "function")) then
         if Provider.Registry["forever"] then
             Provider.Active = Provider.Registry["forever"]
             Provider.ActiveName = "forever"

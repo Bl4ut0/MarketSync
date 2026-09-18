@@ -268,12 +268,16 @@ function MarketSync.InitializeDB()
             }
         end
     end
+
+    if MarketSync.Favorites and MarketSync.Favorites.Initialize then
+        MarketSync.Favorites.Initialize()
+    end
 end
 
 -- Fast helper function to get the partitioned database for the current realm
 function MarketSync.GetRealmDB()
     local realm = GetNormalizedRealmName() or GetRealmName()
-    if not realm then return {} end
+    if not realm or not MarketSyncDB or not MarketSyncDB.RealmData then return {} end
     if not MarketSyncDB.RealmData[realm] then
         MarketSyncDB.RealmData[realm] = {
             PersonalData = {},

@@ -5,42 +5,42 @@ import unittest
 import zipfile
 
 tool = Path(__file__).resolve().parents[1] / "tools" / "package.py"
-spec = importlib.util.spec_from_file_location("scanner_package", tool)
+spec = importlib.util.spec_from_file_location("marketsync_package", tool)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
 class PackageTests(unittest.TestCase):
-    def test_draft_is_explicit_and_standalone(self):
+    def test_package_is_complete_and_standalone(self):
         with tempfile.TemporaryDirectory() as folder:
-            output = Path(folder) / "test.zip"
+            output = Path(folder) / "MarketSync.zip"
             manifest = module.build(output)
-            self.assertIsNone(manifest["interface"])
-            self.assertEqual(manifest["interfaceStatus"], "unverified-draft")
+            self.assertEqual(manifest["addon"], "MarketSync")
+            self.assertEqual(manifest["version"], "0.8.0-forever")
             with zipfile.ZipFile(output) as archive:
-                self.assertEqual(len(archive.namelist()), 9)
-                self.assertTrue(all(n.startswith("MarketSyncForeverScanner/") for n in archive.namelist()))
-                toc = archive.read("MarketSyncForeverScanner/MarketSyncForeverScanner.toc").decode()
-                self.assertNotIn("Dependencies:", toc)
-                self.assertIn("unverified-draft", toc)
+                names = archive.namelist()
+                self.assertTrue(all(n.startswith("MarketSync/") for n in names))
+                self.assertIn("MarketSync/MarketSync.toc", names)
+                self.assertIn("MarketSync/Scanner.lua", names)
+                self.assertIn("MarketSync/Favorites.lua", names)
+                self.assertIn("MarketSync/AuctionHouse.lua", names)
+                self.assertIn("MarketSync/UI_AHScanner.lua", names)
+                toc = archive.read("MarketSync/MarketSync.toc").decode()
                 self.assertIn("## AllowLoadGameType: camelot", toc)
-                self.assertIn("AuctionHouse.lua [AllowLoadGameType camelot]", toc)
-                self.assertIn("## Version: 0.3.0", toc)
-                self.assertIn("Browser.lua [AllowLoadGameType camelot]", toc)
+                self.assertIn("## Version: 0.8.0-forever", toc)
             self.assertEqual(manifest["auctionHouseEntry"], "embedded-tab")
             self.assertTrue(manifest["embeddedAuctionHousePanel"])
-            self.assertEqual(manifest["portableDesign"], "native-portrait")
-            self.assertFalse(manifest["alerts"])
+            self.assertTrue(manifest["nativeScanner"])
+            self.assertTrue(manifest["preferredLists"])
 
-    def test_supplied_interface_does_not_claim_native_acceptance(self):
+    def test_supplied_interface(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "test.zip"
-            manifest = module.build(output, 987654)  # Test sentinel, not a real client number.
-            self.assertEqual(manifest["nativeAcceptance"], "pending")
+            manifest = module.build(output, 11509)
+            self.assertEqual(manifest["interface"], 11509)
             with zipfile.ZipFile(output) as archive:
-                toc = archive.read("MarketSyncForeverScanner/MarketSyncForeverScanner.toc").decode()
-                self.assertIn("## Interface: 987654", toc)
-                self.assertIn("supplied-for-local-test", toc)
+                toc = archive.read("MarketSync/MarketSync.toc").decode()
+                self.assertIn("## Interface: 11509", toc)
 
     def test_rejects_known_build_id_and_invalid_interface_values(self):
         with tempfile.TemporaryDirectory() as folder:

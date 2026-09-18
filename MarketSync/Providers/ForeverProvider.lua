@@ -4,7 +4,6 @@
 -- ================================================================
 
 MarketSync = MarketSync or {}
-local S = MarketSyncForeverScanner
 
 local ForeverProvider = {}
 
@@ -89,52 +88,49 @@ function ForeverProvider.ToKeyID(keyOrLink)
 end
 
 function ForeverProvider.GetSnapshot(keyOrLink)
-    local scanner = MarketSyncForeverScanner
-    if not scanner then return nil end
-
     local key = ForeverProvider.ToItemKey(keyOrLink)
     if not key then return nil end
 
-    -- Check if this is an item-ID-only lookup without specified variants
-    local isGenericItemID = (type(keyOrLink) == "number") or (type(keyOrLink) == "string" and keyOrLink:match("^%d+$"))
-    if isGenericItemID and scanner.Store and scanner.Store.records then
-        local matches = {}
-        for id, rec in pairs(scanner.Store.records) do
-            if rec.key and rec.key.itemID == key.itemID then
-                table.insert(matches, rec)
+    -- 1. Check external scanner or test mock if present
+    local scanner = MarketSyncForeverScanner
+    if scanner then
+        if scanner.Provider and type(scanner.Provider.GetSnapshot) == "function" then
+            return scanner.Provider.GetSnapshot(key)
+        end
+        if scanner.Store and scanner.Store.records then
+            local keyID = ForeverProvider.ToKeyID(key)
+            local rec = scanner.Store.records[keyID]
+            if rec and rec.latest then
+                return rec.latest
             end
         end
-        if #matches == 0 then
-            return nil
-        elseif #matches > 1 then
-            -- Multiple variants exist for this item ID.
-            -- Rule: Check if exact base variant (0:0:0) exists.
-            local baseID = table.concat({key.itemID, 0, 0, 0}, ":")
-            if scanner.Store.records[baseID] and scanner.Store.records[baseID].latest then
-                local snap = scanner.Store.records[baseID].latest
-                if snap.complete then return scanner.CopySnapshot and scanner.CopySnapshot(snap) or snap end
-            end
-            -- Ambiguous variants: do not guess.
-            return nil
-        end
-        -- Exactly one record for this itemID
-        local snap = matches[1].latest
-        if snap and snap.complete then
-            return scanner.CopySnapshot and scanner.CopySnapshot(snap) or snap
-        end
-        return nil
     end
 
-    if scanner.Provider and type(scanner.Provider.GetSnapshot) == "function" then
-        return scanner.Provider.GetSnapshot(key)
+    -- 2. Check native PersonalData
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and realmDB.PersonalData then
+        local dbKey = tostring(key.itemID)
+        if key.itemSuffix and key.itemSuffix ~= 0 then
+            dbKey = "p:" .. key.itemID .. ":" .. key.itemSuffix
+        end
+        local entry = realmDB.PersonalData[dbKey]
+        if entry and entry.m and entry.m > 0 then
+            local seenAt = realmDB.PersonalScanTime or time()
+            return {
+                seenAt = seenAt,
+                complete = true,
+                minUnitPrice = entry.m,
+                available = 1,
+                source = "native-personal",
+            }
+        end
     end
+
     return nil
 end
 
 function ForeverProvider.GetPrice(keyOrLink)
     local snapshot = ForeverProvider.GetSnapshot(keyOrLink)
-    -- Complete quote check: browse-only observations have a separate advertised price
-    -- and cannot produce a fresh usable buyout quote.
     if snapshot and snapshot.complete and snapshot.minUnitPrice and snapshot.minUnitPrice > 0 then
         return snapshot.minUnitPrice
     end
@@ -166,6 +162,10 @@ function ForeverProvider.GetMarketID()
 end
 
 function ForeverProvider.GetLiveStore()
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and realmDB.PersonalData then
+        return realmDB.PersonalData
+    end
     local scanner = MarketSyncForeverScanner
     if scanner and scanner.Store then
         return scanner.Store.records
@@ -183,14 +183,40 @@ function ForeverProvider.ToggleWatch(keyID)
         local resolved = ForeverProvider.ToKeyID(keyID) or keyID
         return scanner.ToggleWatch(resolved)
     end
+
+    local itemID = tonumber(keyID) or tonumber(tostring(keyID):match("(%d+)"))
+    if not itemID then return false end
+    if MarketSyncDB then
+        if not MarketSyncDB.WatchList then MarketSyncDB.WatchList = {} end
+        if MarketSyncDB.WatchList[itemID] then
+            MarketSyncDB.WatchList[itemID] = nil
+            if MarketSync.Favorites then MarketSync.Favorites.RemoveFromList("Favorites", itemID) end
+            return false
+        else
+            MarketSyncDB.WatchList[itemID] = true
+            if MarketSync.Favorites then MarketSync.Favorites.AddToList("Favorites", itemID) end
+            return true
+        end
+    end
     return false
 end
 
 function ForeverProvider.IsWatched(keyID)
     local scanner = MarketSyncForeverScanner
     if scanner and scanner.Store and scanner.Store.watched then
-        local resolved = ForeverProvider.ToKeyID(keyID) or keyID
-        return scanner.Store.watched[resolved] == true
+        local resolved = ForeverProvider.ToKeyID(keyID) or tostring(keyID)
+        if scanner.Store.watched[resolved] == true or scanner.Store.watched[tostring(keyID)] == true then
+            return true
+        end
+    end
+
+    local itemID = tonumber(keyID) or tonumber(tostring(keyID):match("(%d+)"))
+    if not itemID then return false end
+    if MarketSyncDB and MarketSyncDB.WatchList then
+        return MarketSyncDB.WatchList[itemID] == true
+    end
+    if MarketSync.Favorites then
+        return MarketSync.Favorites.IsItemInList("Favorites", itemID)
     end
     return false
 end
@@ -204,11 +230,17 @@ function ForeverProvider.ExportShoppingList()
 end
 
 function ForeverProvider.IsScanActive()
+    if MarketSync.Scanner then
+        return MarketSync.Scanner.Active == true
+    end
     local scanner = MarketSyncForeverScanner
     return scanner and scanner.Active == true or false
 end
 
 function ForeverProvider.StartScan()
+    if MarketSync.Scanner then
+        return MarketSync.Scanner.ScanWatched()
+    end
     local scanner = MarketSyncForeverScanner
     if scanner and type(scanner.StartWatched) == "function" then
         return scanner.StartWatched()
@@ -217,6 +249,10 @@ function ForeverProvider.StartScan()
 end
 
 function ForeverProvider.StopScan()
+    if MarketSync.Scanner and MarketSync.Scanner.Active then
+        MarketSync.Scanner.Cancel("Stopped by user")
+        return true
+    end
     local scanner = MarketSyncForeverScanner
     if scanner and type(scanner.Cancel) == "function" then
         scanner.Cancel("Scan stopped by user")
@@ -226,8 +262,8 @@ function ForeverProvider.StopScan()
 end
 
 function ForeverProvider.Initialize()
-    if MarketSyncForeverScanner and type(MarketSyncForeverScanner.RegisterListener) == "function" then
-        MarketSyncForeverScanner.RegisterListener(function()
+    if MarketSync.Scanner and MarketSync.Scanner.RegisterCallback then
+        MarketSync.Scanner.RegisterCallback(function()
             if MarketSync.Provider and MarketSync.Provider.TriggerChangeCallbacks then
                 MarketSync.Provider.TriggerChangeCallbacks()
             end

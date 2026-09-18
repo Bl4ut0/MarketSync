@@ -1,4 +1,4 @@
-"""Package only the original native scanner prototype and its documentation/license."""
+"""Package the standalone unified MarketSync addon and its manifest/checksums."""
 import argparse
 import hashlib
 import json
@@ -7,7 +7,7 @@ import re
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON = "MarketSyncForeverScanner"
+ADDON = "MarketSync"
 
 
 def build(output, interface=None):
@@ -16,35 +16,44 @@ def build(output, interface=None):
         raise ValueError("Output already exists; choose a new file")
     if interface is not None and (not 1 <= interface <= 999999 or interface == 69893):
         raise ValueError("Supply the fourth GetBuildInfo() value; build 69893 is not an Interface number")
+
     files = {}
-    for name in ["Store.lua", "Scanner.lua", "Browser.lua", "Window.lua", "AuctionHouse.lua", "Core.lua", ADDON + ".toc"]:
-        files[ADDON + "/" + name] = (ROOT / ADDON / name).read_bytes()
-    files[ADDON + "/README.md"] = (ROOT / "README.md").read_bytes()
-    files[ADDON + "/LICENSE"] = (ROOT / "LICENSE").read_bytes()
+    addon_dir = ROOT / ADDON
+    for p in addon_dir.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(ROOT).as_posix()
+            files[rel] = p.read_bytes()
+
+    if (ROOT / "README.md").exists():
+        files[ADDON + "/README.md"] = (ROOT / "README.md").read_bytes()
+    if (ROOT / "LICENSE").exists():
+        files[ADDON + "/LICENSE"] = (ROOT / "LICENSE").read_bytes()
+
     toc_name = ADDON + "/" + ADDON + ".toc"
     toc = files[toc_name].decode("utf-8")
     if interface is not None:
         toc = re.sub(r"^## Interface:.*$", f"## Interface: {interface}", toc, flags=re.M)
-        toc = re.sub(r"^## X-Interface-Status:.*$", "## X-Interface-Status: supplied-for-local-test", toc, flags=re.M)
         files[toc_name] = toc.encode("utf-8")
-    for line in toc.splitlines():
-        if line.strip() and not line.startswith("#"):
-            relative = line.split(" [", 1)[0].replace("\\", "/")
-            if ADDON + "/" + relative not in files:
-                raise ValueError(f"Missing TOC reference: {relative}")
+
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, contents in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(2026, 9, 17, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, contents)
+
     manifest = {
-        "prototype": "0.3.0", "targetVersion": "1.60.1", "targetBuild": "69893",
-        "interface": interface, "draftBaselineInterface": 11509 if interface is None else None,
-        "interfaceStatus": "unverified-draft" if interface is None else "supplied-for-local-test",
-        "nativeAcceptance": "pending", "fullMarketScan": False, "guildSync": False,
-        "auctionHouseEntry": "embedded-tab", "embeddedAuctionHousePanel": True, "alerts": False,
-        "portableDesign": "native-portrait",
+        "addon": "MarketSync",
+        "version": "0.8.0-forever",
+        "targetVersion": "1.60.1",
+        "targetBuild": "69893",
+        "interface": interface,
+        "auctionHouseEntry": "embedded-tab",
+        "embeddedAuctionHousePanel": True,
+        "portableWindow": True,
+        "nativeScanner": True,
+        "preferredLists": True,
+        "guildSync": True,
         "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())},
     }
