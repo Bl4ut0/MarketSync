@@ -612,15 +612,18 @@ function MarketSync.CreateAHSidecar(parent)
                 end
 
                 row.icon:SetTexture(item.icon)
-                local colorHex = "ffffffff"
-                if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] then
-                    colorHex = ITEM_QUALITY_COLORS[item.quality].hex or "ffffffff"
-                end
-                row.name:SetText(string.format("|c%s%s|r", colorHex, item.name))
+                row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name)
                 row.price:SetText(GetPriceText(item.itemID))
 
-                row:SetScript("OnClick", function()
-                    MarketSync.SearchInAuctionHouse(item.name or item.itemID)
+                row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                row:SetScript("OnClick", function(self, mouseButton)
+                    if mouseButton == "RightButton" then
+                        if MarketSync.ShowAnalytics and item.itemID then
+                            MarketSync.ShowAnalytics(tostring(item.itemID), item.link, item.name, item.icon, MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(item.itemID))
+                        end
+                    else
+                        MarketSync.SearchInAuctionHouse(item.name or item.itemID)
+                    end
                 end)
 
                 row:SetScript("OnEnter", function(self)
@@ -632,7 +635,8 @@ function MarketSync.CreateAHSidecar(parent)
                         GameTooltip:SetText(item.name, 1, 1, 1)
                     end
                     GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("|cFF00FF00Click|r to search in Auction House", 0.8, 0.8, 0.8)
+                    GameTooltip:AddLine("|cFF00FF00Left-Click|r: Search in Auction House", 0.8, 0.8, 0.8)
+                    GameTooltip:AddLine("|cFF00FF00Right-Click|r: View Analytics & Tracking", 0.8, 0.8, 0.8)
                     GameTooltip:Show()
                 end)
                 row:SetScript("OnLeave", function(self)

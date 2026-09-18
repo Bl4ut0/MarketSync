@@ -437,6 +437,195 @@ test('Modern Dialog Helpers and Task Manager / Rate Monitor update logic', () =>
   }
 });
 
+test('FormatColoredItemName handles quality colors cleanly without duplicate |c prefixes', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const testScript = `
+    MarketSync = MarketSync or {}
+    UnitName = function() return "Player" end
+    IsInGuild = function() return true end
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() return true end }
+    CreateFrame = function() return { SetBackdrop = function() end, SetBackdropColor = function() end, SetBackdropBorderColor = function() end, CreateTexture = function() return { SetHeight = function() end, SetPoint = function() end, SetColorTexture = function() end } end } end
+    ITEM_QUALITY_COLORS = {
+      [0] = { hex = "|cff9d9d9d", colorStr = "ff9d9d9d" },
+      [1] = { hex = "|cffffffff", colorStr = "ffffffff" },
+      [2] = { hex = "|cff1eff00", colorStr = "ff1eff00" },
+      [3] = { hex = "|cff0070dd", colorStr = "ff0070dd" },
+      [4] = { hex = "|cffa335ee", colorStr = "ffa335ee" },
+    }
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(testScript));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    local f = MarketSync.FormatColoredItemName
+    assert(type(f) == "function", "FormatColoredItemName should be a function")
+
+    -- 1. Plain item name
+    local r1 = f("Flint and Tinder", 1)
+    assert(r1 == "|cffffffffFlint and Tinder|r", "expected |cffffffffFlint and Tinder|r, got " .. tostring(r1))
+    assert(not r1:find("|c|c"), "should never produce double |c prefix")
+
+    -- 2. Uncommon (green) item
+    local r2 = f("Native Pants", 2)
+    assert(r2 == "|cff1eff00Native Pants|r", "expected |cff1eff00Native Pants|r, got " .. tostring(r2))
+
+    -- 3. String that already has |c formatting
+    local alreadyColored = "|cff1eff00Native Pants|r"
+    local r3 = f(alreadyColored, 2)
+    assert(r3 == alreadyColored, "pre-colored string should be returned unmodified")
+    assert(not r3:find("|c|c"), "should never prepend |c to already colored string")
+
+    -- 4. Nil and empty string
+    assert(f(nil, 1) == "", "nil name should return empty string")
+    assert(f("", 1) == "", "empty name should return empty string")
+
+    -- 5. Fallback without quality
+    local r5 = f("Mystery Item", nil)
+    assert(r5 == "|cffffffffMystery Item|r", "fallback should use white")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('FormatColoredItemName validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
+test('AuctionHouse.lua registers 4 embedded tabs including Analytics', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const setupMock = `
+    MarketSync = MarketSync or {}
+    CreateFrame = function(frameType, name, parent, template)
+      local f = {
+        name = name,
+        shown = false,
+        scripts = {},
+        points = {},
+        Show = function(self) self.shown = true end,
+        Hide = function(self) self.shown = false end,
+        IsShown = function(self) return self.shown end,
+        SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        SetAllPoints = function(self) end,
+        SetSize = function(self, w, h) self.width = w self.height = h end,
+        SetWidth = function(self, w) self.width = w end,
+        SetHeight = function(self, h) self.height = h end,
+        SetScript = function(self, name, fn) self.scripts[name] = fn end,
+        HookScript = function(self, name, fn)
+          local old = self.scripts[name]
+          self.scripts[name] = function(...) if old then old(...) end fn(...) end
+        end,
+        CreateTexture = function(self)
+          return {
+            SetColorTexture = function() end,
+            SetTexture = function() end,
+            SetSize = function() end,
+            SetPoint = function() end,
+            SetAllPoints = function() end,
+            Show = function() end,
+            Hide = function() end,
+          }
+        end,
+        CreateFontString = function(self)
+          return {
+            SetPoint = function() end,
+            SetText = function(self, t) self.text = t end,
+            GetText = function(self) return self.text or "" end,
+            SetFontObject = function() end,
+            SetJustifyH = function() end,
+            SetWordWrap = function() end,
+            Show = function() end,
+            Hide = function() end,
+          }
+        end,
+      }
+      if name then _G[name] = f end
+      return f
+    end
+
+    hooksecurefunc = function(t, k, hookFn)
+      local orig = t[k]
+      t[k] = function(...)
+        if orig then orig(...) end
+        hookFn(...)
+      end
+    end
+
+    AuctionHouseFrame = CreateFrame("Frame", "AuctionHouseFrame")
+    AuctionHouseFrame.Tabs = { { displayMode = "buy" }, { displayMode = "sell" } }
+    AuctionHouseFrame.AuctionsTab = { displayMode = "auctions" }
+    AuctionHouseFrame.displayMode = "buy"
+    AuctionHouseFrame.GetDisplayMode = function(self) return self.displayMode end
+    AuctionHouseFrame.SetDisplayMode = function(self, mode) self.displayMode = mode end
+    AuctionHouseFrame.SetTitle = function(self, title) self.title = title end
+
+    local createdTabs = {}
+    local selectedTab = nil
+    local mockLibAHTab = {
+      DoesIDExist = function(self, id) return createdTabs[id] ~= nil end,
+      CreateTab = function(self, id, frameRef, text, header)
+        createdTabs[id] = { id = id, frameRef = frameRef, text = text, header = header }
+      end,
+      GetButton = function(self, id) return createdTabs[id] end,
+      SetSelected = function(self, id)
+        selectedTab = id
+        if createdTabs[id] and createdTabs[id].frameRef then
+          createdTabs[id].frameRef:Show()
+        end
+      end,
+    }
+
+    LibStub = function(libName, silent)
+      if libName == "LibAHTab-1-0" then return mockLibAHTab end
+      return nil
+    end
+
+    MarketSync.CreateAHScannerPanel = function(parent) return { frame = parent } end
+    MarketSync.CreateProcessingPanel = function(parent) return { frame = parent } end
+    MarketSync.CreateNotificationsPanel = function(parent) return { frame = parent } end
+    MarketSync.CreateAnalyticsPanel = function(parent) return { frame = parent } end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(setupMock));
+
+  const ahLua = fs.readFileSync(path.join(marketSyncDir, 'AuctionHouse.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(ahLua)) !== 0) {
+    throw new Error('Failed to load AuctionHouse.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    local AH = MarketSync.AuctionHouse
+    local ok = AH.Attach()
+    assert(ok == true, "AH.Attach should succeed")
+    assert(AH.ScannerPanel ~= nil, "ScannerPanel should exist")
+    assert(AH.ProcessingPanel ~= nil, "ProcessingPanel should exist")
+    assert(AH.AlertsPanel ~= nil, "AlertsPanel should exist")
+    assert(AH.AnalyticsPanel ~= nil, "AnalyticsPanel should exist")
+
+    -- Check all 4 tabs
+    local lib = LibStub("LibAHTab-1-0")
+    assert(lib:DoesIDExist("MarketSyncScanner"), "MarketSyncScanner tab should be registered")
+    assert(lib:DoesIDExist("MarketSyncProcessing"), "MarketSyncProcessing tab should be registered")
+    assert(lib:DoesIDExist("MarketSyncAlerts"), "MarketSyncAlerts tab should be registered")
+    assert(lib:DoesIDExist("MarketSyncAnalytics"), "MarketSyncAnalytics tab should be registered")
+
+    -- Test switching to analytics
+    AuctionHouseFrame:Show()
+    AH.ShowAuctionHousePanel("analytics")
+    assert(AH.AnalyticsPanel:IsShown(), "AnalyticsPanel should be shown after ShowAuctionHousePanel('analytics')")
+
+    -- Test hiding panels
+    AH.HideAuctionHousePanel()
+    assert(not AH.AnalyticsPanel:IsShown(), "AnalyticsPanel should be hidden after HideAuctionHousePanel")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('AH tabs validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {

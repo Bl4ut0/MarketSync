@@ -1,15 +1,29 @@
 -- =============================================================
 -- MarketSync - Analytics & Historiography Panel
 -- Detailed breakdown of status, trends, and data sources
+-- Matches Blizzard Auction House sleek dark metallic slate design
 -- =============================================================
 
-local AnalyticsPanel
-local LEFT_MARGIN = 25
-local CONTENT_TOP = -75
-local GRAPH_WIDTH = 370
-local INFO_START_X = 410
+MarketSync = MarketSync or {}
 
--- Ref reused from UI_History
+local registeredPanels = {}
+
+local function SafeGetItemInfo(idOrLink)
+    if not idOrLink then return nil end
+    if MarketSync and MarketSync.SafeGetItemInfo then
+        return MarketSync.SafeGetItemInfo(idOrLink)
+    end
+    if C_Item and C_Item.GetItemInfo then
+        local res = { pcall(C_Item.GetItemInfo, idOrLink) }
+        if res[1] and res[2] then return select(2, unpack(res)) end
+    end
+    if GetItemInfo then
+        local res = { pcall(GetItemInfo, idOrLink) }
+        if res[1] and res[2] then return select(2, unpack(res)) end
+    end
+    return nil
+end
+
 local function FormatMoneyPlain(copper)
     if not copper or copper == 0 then return "0c" end
     local g = math.floor(copper / 10000)
@@ -33,28 +47,97 @@ local function FormatMoney(copper)
 end
 
 local function ScanDayToDate(scanDay)
-    if not Auctionator or not Auctionator.Constants or not Auctionator.Constants.SCAN_DAY_0 then
-        return "Day " .. scanDay
+    local scan0 = 1577836800 -- Jan 1, 2020 UTC
+    if Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 then
+        scan0 = Auctionator.Constants.SCAN_DAY_0
+    elseif MarketSync and MarketSync.SCAN_DAY_0 then
+        scan0 = MarketSync.SCAN_DAY_0
     end
-    local timestamp = Auctionator.Constants.SCAN_DAY_0 + (scanDay * 86400)
+    local timestamp = scan0 + (scanDay * 86400)
     return date("%b %d", timestamp)
 end
 
+local function ResolveItem(input)
+    if not input then return nil end
+    local itemID = tonumber(input)
+    if not itemID and type(input) == "string" then
+        local linkID = input:match("item:(%d+)")
+        if linkID then
+            itemID = tonumber(linkID)
+        end
+    end
+
+    local name, link, quality, icon
+    if itemID then
+        name, link, quality, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
+        if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
+            local c = MarketSyncDB.ItemInfoCache[itemID]
+            name = c.n
+            icon = c.ic
+            quality = c.r
+            link = "item:" .. itemID
+        end
+    else
+        name = input
+        if MarketSyncDB and MarketSyncDB.ItemInfoCache then
+            local lowerInput = input:lower()
+            for id, c in pairs(MarketSyncDB.ItemInfoCache) do
+                if c.n and c.n:lower() == lowerInput then
+                    itemID = id
+                    name = c.n
+                    icon = c.ic
+                    quality = c.r
+                    link = "item:" .. id
+                    break
+                end
+            end
+        end
+        if not itemID then
+            local n, l, q, _, _, _, _, _, _, ic = SafeGetItemInfo(input)
+            if n then
+                name = n
+                link = l
+                quality = q
+                icon = ic
+                local foundID = l and l:match("item:(%d+)")
+                if foundID then itemID = tonumber(foundID) end
+            end
+        end
+    end
+
+    if not itemID and not name then return nil end
+    local dbKey = itemID and tostring(itemID) or input
+    local price = 0
+    if itemID and MarketSync.GetAuctionPrice then
+        price = MarketSync.GetAuctionPrice(itemID) or 0
+    end
+
+    return {
+        dbKey = dbKey,
+        itemID = itemID,
+        itemLink = link,
+        name = name or ("Item #" .. tostring(itemID)),
+        icon = icon or 134400,
+        quality = quality or 1,
+        price = price,
+    }
+end
+
 -- ================================================================
--- GRAPH RENDERER (Simplified port from UI_History)
+-- GRAPH RENDERER
+-- Dynamic width/height historical price chart
 -- ================================================================
-local function CreateGraph(parent, width, height)
+local function CreateGraph(parent)
     local graph = CreateFrame("Frame", nil, parent)
-    graph:SetSize(width, height)
     graph.lines = {}
     graph.dots = {}
     graph.gridLines = {}
     graph.labels = {}
-    graph.plotWidth = width
-    graph.plotHeight = height
+    graph.plotWidth = 500
+    graph.plotHeight = 180
 
     local bg = graph:CreateTexture(nil, "BACKGROUND", nil, 2)
-    bg:SetColorTexture(0, 0, 0, 0.35)
+    bg:SetColorTexture(0, 0, 0, 0.40)
     bg:SetAllPoints()
 
     graph.lineCursor = 0
@@ -87,14 +170,15 @@ local function CreateGraph(parent, width, height)
         line:Show()
     end
 
-    function graph:DrawDot(x, y, r, g, b)
+    function graph:DrawDot(x, y, r, g, b, size)
         self.dotCursor = self.dotCursor + 1
         local dot = self.dots[self.dotCursor]
         if not dot then
             dot = self:CreateTexture(nil, "OVERLAY")
             table.insert(self.dots, dot)
         end
-        dot:SetSize(5, 5)
+        local s = size or 5
+        dot:SetSize(s, s)
         dot:SetColorTexture(r or 1, g or 1, b or 1, 1)
         dot:ClearAllPoints()
         dot:SetPoint("CENTER", self, "BOTTOMLEFT", x, y)
@@ -109,7 +193,7 @@ local function CreateGraph(parent, width, height)
             table.insert(self.gridLines, gl)
         end
         gl:SetColorTexture(0.5, 0.5, 0.5, 0.15)
-        gl:SetSize(self.plotWidth - 2, 1)
+        gl:SetSize(math.max(10, self.plotWidth - 2), 1)
         gl:ClearAllPoints()
         gl:SetPoint("LEFT", self, "BOTTOMLEFT", 1, y)
         gl:Show()
@@ -130,14 +214,36 @@ local function CreateGraph(parent, width, height)
 
     function graph:Plot(history)
         self:Clear()
-        if not history or #history < 2 then
-            self:AddLabel(self.plotWidth/2, self.plotHeight/2, "Insufficient data for trend", "CENTER")
+        local curW = self:GetWidth()
+        local curH = self:GetHeight()
+        if curW and curW > 100 then self.plotWidth = curW end
+        if curH and curH > 60 then self.plotHeight = curH end
+
+        if not history or #history == 0 then
+            self:AddLabel(self.plotWidth / 2, self.plotHeight / 2, "|cFF888888Insufficient historical scan data|r", "CENTER")
+            return
+        end
+
+        if #history == 1 then
+            local d = history[1]
+            local pw = self.plotWidth - 55
+            local ph = self.plotHeight - 40
+            local ox, oy = 50, 25
+            local y = oy + (ph / 2)
+            self:DrawGridLine(y)
+            self:AddLabel(ox - 5, y, FormatMoneyPlain(d.price), "RIGHT")
+            local x = ox + (pw / 2)
+            self:DrawDot(x, y, 0.3, 1, 0.3, 7)
+            local label = ScanDayToDate(d.day) .. (d.timeLabel and ("\n" .. d.timeLabel) or "")
+            self:AddLabel(x, oy - 12, label, "TOP")
             return
         end
 
         local plotData = {}
         local maxPoints = math.min(#history, 48)
-        for i = maxPoints, 1, -1 do table.insert(plotData, history[i]) end
+        for i = maxPoints, 1, -1 do
+            table.insert(plotData, history[i])
+        end
 
         local minPrice, maxPrice = math.huge, 0
         for _, d in ipairs(plotData) do
@@ -151,10 +257,11 @@ local function CreateGraph(parent, width, height)
         local padMax = maxPrice + (range * 0.15)
         local fullRange = padMax - padMin
 
-        local pw, ph = self.plotWidth - 50, self.plotHeight - 40
-        local ox, oy = 45, 25
+        local pw = self.plotWidth - 55
+        local ph = self.plotHeight - 40
+        local ox, oy = 50, 25
 
-        -- Y-axis
+        -- Y-axis grid & labels (5 tiers)
         for i = 0, 4 do
             local f = i / 4
             local y = oy + (f * ph)
@@ -168,12 +275,13 @@ local function CreateGraph(parent, width, height)
             local x = ox + ((i - 1) * spacing)
             local y = oy + (((d.price - padMin) / fullRange) * ph)
             if px then self:DrawLine(px, py, x, y, 0.2, 0.8, 0.2, 1, 2) end
-            -- Blue dots for granular, green for daily
+
             if d.isGranular then
-                self:DrawDot(x, y, 0.2, 0.7, 1.0)
+                self:DrawDot(x, y, 0.2, 0.7, 1.0, 5)
             else
-                self:DrawDot(x, y, 0.3, 1, 0.3)
+                self:DrawDot(x, y, 0.3, 1, 0.3, 6)
             end
+
             if i == 1 or i == #plotData or (i % math.max(1, math.floor(#plotData / 6)) == 0) then
                 if d.isGranular and d.timeLabel then
                     self:AddLabel(x, oy - 12, ScanDayToDate(d.day) .. "\n" .. d.timeLabel, "TOP")
@@ -189,127 +297,538 @@ local function CreateGraph(parent, width, height)
 end
 
 -- ================================================================
--- ANALYTICS PANEL
+-- ANALYTICS PANEL CONSTRUCTOR
 -- ================================================================
 function MarketSync.CreateAnalyticsPanel(parent)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
-    panel:Hide()
 
-    -- Background textures
+    -- Left Inset: Search, Item Drop & List of Recent/Tracked Items (240px)
+    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, 240, nil)
+    if not leftInset then
+        leftInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+        leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
+        leftInset:SetWidth(240)
+    end
+    leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
+    leftInset:SetWidth(240)
 
+    -- Right Inset: Detail Banner, Historical Graph & Intraday Metrics
+    local rightInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel)
+    if not rightInset then
+        rightInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    end
+    rightInset:SetPoint("TOPLEFT", leftInset, "TOPRIGHT", 6, 0)
+    rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
 
-    -- Header info
-    local icon = panel:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(48, 48); icon:SetPoint("TOPLEFT", 30, -25)
+    -- ================================================================
+    -- LEFT INSET: ITEM SELECTION & QUICK SEARCH
+    -- ================================================================
+    local leftHeader = CreateFrame("Frame", nil, leftInset)
+    leftHeader:SetPoint("TOPLEFT", 6, -6)
+    leftHeader:SetPoint("TOPRIGHT", -6, -6)
+    leftHeader:SetHeight(26)
+
+    local listTitle = leftHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    listTitle:SetPoint("LEFT", 4, 0)
+    listTitle:SetText("|cFFFFD100Tracked Items|r")
+
+    -- Mode Switcher: [ Recent ] [ Favorites ]
+    local recentBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
+    recentBtn:SetSize(62, 20)
+    recentBtn:SetPoint("RIGHT", -66, 0)
+    recentBtn:SetText("Recent")
+
+    local favBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
+    favBtn:SetSize(64, 20)
+    favBtn:SetPoint("RIGHT", 0, 0)
+    favBtn:SetText("Favorites")
+
+    -- Quick Search & Drop EditBox
+    local searchBox = CreateFrame("EditBox", nil, leftInset, "InputBoxTemplate")
+    searchBox:SetPoint("TOPLEFT", leftHeader, "BOTTOMLEFT", 4, -6)
+    searchBox:SetPoint("TOPRIGHT", leftHeader, "BOTTOMRIGHT", -4, -6)
+    searchBox:SetHeight(20)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetFontObject("GameFontHighlightSmall")
+    searchBox:SetText("Drop item or enter name/ID...")
+
+    searchBox:SetScript("OnEditFocusGained", function(self)
+        if self:GetText() == "Drop item or enter name/ID..." then self:SetText("") end
+    end)
+    searchBox:SetScript("OnEditFocusLost", function(self)
+        if self:GetText() == "" then self:SetText("Drop item or enter name/ID...") end
+    end)
+
+    local currentMode = "recent"
+    local selectedDBKey = nil
+    local itemsList = {}
+    local itemRows = {}
+    local rowH = 24
+
+    local function HandleItemDrop()
+        local infoType, itemID, itemLink = GetCursorInfo()
+        if infoType == "item" and (itemID or itemLink) then
+            ClearCursor()
+            local itemInfo = ResolveItem(itemID or itemLink)
+            if itemInfo then
+                panel:ShowItem(itemInfo.dbKey, itemInfo.itemLink, itemInfo.name, itemInfo.icon, itemInfo.price)
+            end
+            return true
+        end
+        return false
+    end
+
+    searchBox:SetScript("OnReceiveDrag", HandleItemDrop)
+    searchBox:SetScript("OnMouseUp", function(self)
+        if HandleItemDrop() then self:ClearFocus() end
+    end)
+
+    searchBox:SetScript("OnEnterPressed", function(self)
+        local text = self:GetText()
+        if text and text ~= "" and text ~= "Drop item or enter name/ID..." then
+            local itemInfo = ResolveItem(text)
+            if itemInfo then
+                panel:ShowItem(itemInfo.dbKey, itemInfo.itemLink, itemInfo.name, itemInfo.icon, itemInfo.price)
+                self:SetText("")
+                self:ClearFocus()
+            end
+        end
+    end)
+
+    -- Item List ScrollFrame
+    local itemsScroll = CreateFrame("ScrollFrame", "MarketSyncAnalyticsItemsScroll", leftInset, "UIPanelScrollFrameTemplate")
+    itemsScroll:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -2, -6)
+    itemsScroll:SetPoint("BOTTOMRIGHT", -22, 6)
+    itemsScroll:EnableMouse(true)
+    itemsScroll:SetScript("OnReceiveDrag", HandleItemDrop)
+    itemsScroll:SetScript("OnMouseUp", function() HandleItemDrop() end)
+
+    local itemsContent = CreateFrame("Frame", nil, itemsScroll)
+    itemsContent:SetSize(210, 1)
+    itemsScroll:SetScrollChild(itemsContent)
+    itemsContent:EnableMouse(true)
+    itemsContent:SetScript("OnReceiveDrag", HandleItemDrop)
+    itemsContent:SetScript("OnMouseUp", function() HandleItemDrop() end)
+
+    local emptyListText = itemsScroll:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    emptyListText:SetPoint("CENTER", 0, 0)
+    emptyListText:SetText("No items recorded.\nScan or drop an item above.")
+
+    local function RefreshItemsList()
+        itemsList = {}
+        if currentMode == "recent" then
+            recentBtn:Disable()
+            favBtn:Enable()
+            local seen = {}
+            -- From live Scanner results
+            local recent = (MarketSync.Scanner and MarketSync.Scanner.RecentResults) or {}
+            for _, r in ipairs(recent) do
+                if r.itemID and not seen[r.itemID] then
+                    seen[r.itemID] = true
+                    table.insert(itemsList, {
+                        itemID = r.itemID,
+                        name = r.name,
+                        icon = r.icon,
+                        quality = r.quality,
+                        price = r.unitPrice,
+                    })
+                end
+            end
+            -- From PersonalData DB if recent is small
+            if #itemsList < 20 and MarketSyncDB and MarketSync.GetRealmDB then
+                local pData = MarketSync.GetRealmDB().PersonalData or {}
+                for k, v in pairs(pData) do
+                    local id = tonumber(k)
+                    if id and not seen[id] then
+                        seen[id] = true
+                        local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
+                        if not name and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
+                            name = MarketSyncDB.ItemInfoCache[id].n
+                            icon = MarketSyncDB.ItemInfoCache[id].ic
+                            qual = MarketSyncDB.ItemInfoCache[id].r
+                        end
+                        local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(id) or 0
+                        table.insert(itemsList, {
+                            itemID = id,
+                            name = name or ("Item #" .. id),
+                            icon = icon or 134400,
+                            quality = qual or 1,
+                            price = p,
+                        })
+                        if #itemsList >= 40 then break end
+                    end
+                end
+            end
+        else
+            recentBtn:Enable()
+            favBtn:Disable()
+            if MarketSync.Favorites and MarketSync.Favorites.GetList then
+                local favs = MarketSync.Favorites.GetList("Favorites") or {}
+                for _, id in ipairs(favs) do
+                    local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
+                    if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
+                        name = MarketSyncDB.ItemInfoCache[id].n
+                        icon = MarketSyncDB.ItemInfoCache[id].ic
+                        qual = MarketSyncDB.ItemInfoCache[id].r
+                    end
+                    local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(id) or 0
+                    table.insert(itemsList, {
+                        itemID = id,
+                        name = name or ("Item #" .. id),
+                        icon = icon or 134400,
+                        quality = qual or 1,
+                        price = p,
+                    })
+                end
+            end
+        end
+
+        if #itemsList == 0 then
+            emptyListText:Show()
+        else
+            emptyListText:Hide()
+        end
+
+        for i = 1, math.max(#itemsList, #itemRows) do
+            local item = itemsList[i]
+            local row = itemRows[i]
+            if item then
+                if not row then
+                    row = CreateFrame("Button", nil, itemsContent, "BackdropTemplate")
+                    row:SetHeight(rowH)
+                    row:SetBackdrop({
+                        bgFile = "Interface\Buttons\WHITE8X8",
+                        edgeFile = "Interface\Buttons\WHITE8X8",
+                        edgeSize = 1,
+                        insets = { left = 0, right = 0, top = 0, bottom = 0 }
+                    })
+                    row:SetBackdropBorderColor(0, 0, 0, 0)
+
+                    local rIcon = row:CreateTexture(nil, "ARTWORK")
+                    rIcon:SetSize(18, 18)
+                    rIcon:SetPoint("LEFT", 3, 0)
+                    rIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    row.icon = rIcon
+
+                    local rPrice = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
+                    rPrice:SetPoint("RIGHT", -4, 0)
+                    rPrice:SetJustifyH("RIGHT")
+                    row.price = rPrice
+
+                    local rName = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                    rName:SetPoint("LEFT", rIcon, "RIGHT", 4, 0)
+                    rName:SetPoint("RIGHT", rPrice, "LEFT", -4, 0)
+                    rName:SetJustifyH("LEFT")
+                    rName:SetWordWrap(false)
+                    row.name = rName
+
+                    itemRows[i] = row
+                end
+
+                row:SetPoint("TOPLEFT", 0, -(i - 1) * rowH)
+                row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
+
+                local isSelected = (selectedDBKey and selectedDBKey == tostring(item.itemID))
+                if isSelected then
+                    row:SetBackdropColor(0.18, 0.28, 0.42, 0.85)
+                    row:SetBackdropBorderColor(0.35, 0.60, 0.90, 0.80)
+                elseif i % 2 == 0 then
+                    row:SetBackdropColor(0.08, 0.09, 0.12, 0.50)
+                    row:SetBackdropBorderColor(0, 0, 0, 0)
+                else
+                    row:SetBackdropColor(0.04, 0.05, 0.07, 0.50)
+                    row:SetBackdropBorderColor(0, 0, 0, 0)
+                end
+
+                row.icon:SetTexture(item.icon)
+                row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name)
+                row.price:SetText(FormatMoneyPlain(item.price))
+
+                row:SetScript("OnClick", function()
+                    selectedDBKey = tostring(item.itemID)
+                    panel:ShowItem(selectedDBKey, nil, item.name, item.icon, item.price)
+                    RefreshItemsList()
+                end)
+
+                row:SetScript("OnEnter", function(self)
+                    if not isSelected then
+                        self:SetBackdropColor(0.15, 0.18, 0.24, 0.80)
+                    end
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    local link = select(2, SafeGetItemInfo(item.itemID))
+                    if link and GameTooltip.SetHyperlink then
+                        pcall(GameTooltip.SetHyperlink, GameTooltip, link)
+                    else
+                        GameTooltip:SetText(item.name, 1, 1, 1)
+                    end
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine("|cFF00FF00Click|r: View price analytics & trends", 0.8, 0.8, 0.8)
+                    GameTooltip:Show()
+                end)
+
+                row:SetScript("OnLeave", function(self)
+                    if isSelected then
+                        self:SetBackdropColor(0.18, 0.28, 0.42, 0.85)
+                    elseif i % 2 == 0 then
+                        self:SetBackdropColor(0.08, 0.09, 0.12, 0.50)
+                    else
+                        self:SetBackdropColor(0.04, 0.05, 0.07, 0.50)
+                    end
+                    GameTooltip:Hide()
+                end)
+
+                row:Show()
+            elseif row then
+                row:Hide()
+            end
+        end
+
+        itemsContent:SetHeight(math.max(1, #itemsList * rowH))
+    end
+
+    recentBtn:SetScript("OnClick", function()
+        currentMode = "recent"
+        RefreshItemsList()
+    end)
+    favBtn:SetScript("OnClick", function()
+        currentMode = "favorites"
+        RefreshItemsList()
+    end)
+
+    -- ================================================================
+    -- RIGHT INSET: DETAIL BANNER, GRAPH & METRICS
+    -- ================================================================
+    -- 1. Top Detail Banner (Icon, Name, Subtitle, Search in AH button)
+    local banner = CreateFrame("Frame", nil, rightInset)
+    banner:SetPoint("TOPLEFT", 10, -8)
+    banner:SetPoint("TOPRIGHT", -10, -8)
+    banner:SetHeight(46)
+
+    local icon = banner:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(40, 40)
+    icon:SetPoint("LEFT", 2, 0)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     panel.icon = icon
 
-    local iconBorder = panel:CreateTexture(nil, "OVERLAY")
+    local iconBorder = banner:CreateTexture(nil, "OVERLAY")
     iconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-    iconBorder:SetSize(80, 80); iconBorder:SetPoint("CENTER", icon)
+    iconBorder:SetSize(68, 68)
+    iconBorder:SetPoint("CENTER", icon, "CENTER", 0, 0)
 
-    local name = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    name:SetPoint("TOPLEFT", icon, "TOPRIGHT", 15, -2)
-    panel.name = name
+    local itemName = banner:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    itemName:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -2)
+    itemName:SetPoint("RIGHT", -120, 0)
+    itemName:SetJustifyH("LEFT")
+    panel.name = itemName
 
-    local subtitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    subtitle:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -4)
-    subtitle:SetText("Price Analytics & Data Historiography")
+    local itemSub = banner:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    itemSub:SetPoint("TOPLEFT", itemName, "BOTTOMLEFT", 0, -4)
+    itemSub:SetPoint("RIGHT", -120, 0)
+    itemSub:SetJustifyH("LEFT")
+    itemSub:SetText("Price Analytics & Historiography")
+    panel.subtitle = itemSub
 
-    -- Main Graph
-    local graph = CreateGraph(panel, GRAPH_WIDTH, 280)
-    graph:SetPoint("TOPLEFT", LEFT_MARGIN, CONTENT_TOP)
+    local searchAHBtn = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
+    searchAHBtn:SetSize(110, 22)
+    searchAHBtn:SetPoint("RIGHT", -2, 0)
+    searchAHBtn:SetText("Search in AH")
+    searchAHBtn:SetScript("OnClick", function()
+        if panel.currentItem and MarketSync.SearchInAuctionHouse then
+            MarketSync.SearchInAuctionHouse(panel.currentItem.itemID or panel.currentItem.name)
+        end
+    end)
+    searchAHBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Search in Auction House", 1, 1, 1)
+        GameTooltip:AddLine("Switches to the native AH Buy tab and queries this item directly.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    searchAHBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- 2. Historical Trend Card
+    local graphCard = MarketSync.CreateModernInset and MarketSync.CreateModernInset(rightInset)
+    if not graphCard then
+        graphCard = CreateFrame("Frame", nil, rightInset, "BackdropTemplate")
+    end
+    graphCard:SetPoint("TOPLEFT", banner, "BOTTOMLEFT", 0, -6)
+    graphCard:SetPoint("TOPRIGHT", banner, "BOTTOMRIGHT", 0, -6)
+    graphCard:SetHeight(230)
+
+    local graphHeader = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    graphHeader:SetPoint("TOPLEFT", 10, -8)
+    graphHeader:SetText("|cFFFFD100Historical Price Trend|r")
+
+    local graphLegend = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
+    graphLegend:SetPoint("TOPRIGHT", -10, -8)
+    graphLegend:SetText("|cFF33FF33— Daily Price|r    |cFF33B2FF● Granular 30-Min Snapshot|r")
+
+    local graph = CreateGraph(graphCard)
+    graph:SetPoint("TOPLEFT", 10, -26)
+    graph:SetPoint("BOTTOMRIGHT", -10, 8)
     panel.graph = graph
 
-    local graphTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    graphTitle:SetPoint("TOP", graph, "TOP", 0, 15)
-    graphTitle:SetText("|cffffd700Historical Trend (Granular)|r")
+    -- 3. Metrics & Insights Card
+    local metricsCard = MarketSync.CreateModernInset and MarketSync.CreateModernInset(rightInset)
+    if not metricsCard then
+        metricsCard = CreateFrame("Frame", nil, rightInset, "BackdropTemplate")
+    end
+    metricsCard:SetPoint("TOPLEFT", graphCard, "BOTTOMLEFT", 0, -6)
+    metricsCard:SetPoint("BOTTOMRIGHT", -10, 10)
 
-    -- Metrics Side Panel
-    local metricsBox = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    metricsBox:SetSize(350, 280); metricsBox:SetPoint("TOPLEFT", INFO_START_X, CONTENT_TOP)
-    metricsBox:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
-    metricsBox:SetBackdropColor(0, 0, 0, 0.45)
+    -- Left Column: Market Value & Freshness
+    local leftMetricsTitle = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    leftMetricsTitle:SetPoint("TOPLEFT", 14, -8)
+    leftMetricsTitle:SetText("|cFFFFD100Market Value & Freshness|r")
 
-    local function CreateMetric(y, label)
-        local lbl = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("TOPLEFT", 15, y)
+    local function CreateMetricRow(parent, anchor, yOff, label)
+        local row = CreateFrame("Frame", nil, parent)
+        row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff)
+        row:SetPoint("RIGHT", parent, "CENTER", -15, 0)
+        row:SetHeight(18)
+
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT", 0, 0)
         lbl:SetText(label)
-        local val = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        val:SetPoint("TOPRIGHT", -15, y)
+
+        local val = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        val:SetPoint("RIGHT", 0, 0)
+        row.val = val
         return val
     end
 
-    panel.mPrice = CreateMetric(-15, "Current Market Value")
-    panel.mStatus = CreateMetric(-40, "Status Confidence")
-    panel.mAge = CreateMetric(-65, "Data Age (Last Scanned)")
-    panel.mThreshold = CreateMetric(-80, "Global Freshness Limit")
-    panel.mThreshold:SetText("3 Days")
+    panel.mPrice = CreateMetricRow(metricsCard, leftMetricsTitle, -6, "Current Market Value")
+    panel.mStatus = CreateMetricRow(metricsCard, leftMetricsTitle, -26, "Data Health / Confidence")
+    panel.mAge = CreateMetricRow(metricsCard, leftMetricsTitle, -46, "Data Age (Last Scanned)")
+    panel.mSource = CreateMetricRow(metricsCard, leftMetricsTitle, -66, "Source Distribution")
 
-    -- Divider
-    local div = metricsBox:CreateTexture(nil, "ARTWORK")
-    div:SetColorTexture(1, 0.82, 0, 0.2); div:SetSize(320, 1); div:SetPoint("TOP", 0, -105)
+    -- Subtle vertical divider in metrics card
+    local vDivider = metricsCard:CreateTexture(nil, "BORDER")
+    vDivider:SetWidth(1)
+    vDivider:SetPoint("TOP", metricsCard, "TOP", 0, -8)
+    vDivider:SetPoint("BOTTOM", metricsCard, "BOTTOM", 0, 8)
+    vDivider:SetColorTexture(0.20, 0.22, 0.26, 0.70)
 
-    local srcTitle = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    srcTitle:SetPoint("TOPLEFT", 15, -115)
-    srcTitle:SetText("Source Distribution (Last 30 Scans)")
+    -- Right Column: Intraday Analytics (30-Minute Buckets)
+    local rightMetricsTitle = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    rightMetricsTitle:SetPoint("TOPLEFT", metricsCard, "TOP", 15, -8)
+    rightMetricsTitle:SetText("|cFF4499FFIntraday Analytics (30-min Buckets)|r")
 
-    panel.mPersonal = CreateMetric(-135, "Personal Scan Contribution")
-    panel.mGuild = CreateMetric(-155, "Guild Data Contribution")
+    local function CreateRightMetricRow(parent, anchor, yOff, label)
+        local row = CreateFrame("Frame", nil, parent)
+        row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff)
+        row:SetPoint("RIGHT", parent, "RIGHT", -14, 0)
+        row:SetHeight(18)
 
-    -- Granular Analytics Section
-    local div2 = metricsBox:CreateTexture(nil, "ARTWORK")
-    div2:SetColorTexture(0.2, 0.6, 1, 0.25); div2:SetSize(320, 1); div2:SetPoint("TOP", 0, -175)
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT", 0, 0)
+        lbl:SetText(label)
 
-    local intradayTitle = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    intradayTitle:SetPoint("TOPLEFT", 15, -185)
-    intradayTitle:SetText("|cff4499ffIntraday Analytics (30-min Buckets)|r")
+        local val = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        val:SetPoint("RIGHT", 0, 0)
+        row.val = val
+        return val
+    end
 
-    panel.mBestTime = CreateMetric(-205, "Best Time to Buy")
-    panel.mVolatility = CreateMetric(-225, "Intraday Volatility")
-    panel.mDataPoints = CreateMetric(-245, "Granular Data Points")
-    
-    local debugNote = metricsBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
-    debugNote:SetPoint("BOTTOMLEFT", 15, 10); debugNote:SetWidth(320); debugNote:SetJustifyH("LEFT")
-    debugNote:SetText("|cff888888Note: Intraday analytics require multiple scan snapshots across different times of day. More scans = higher fidelity.|r")
+    panel.mBestTime = CreateRightMetricRow(metricsCard, rightMetricsTitle, -6, "Best Time to Buy")
+    panel.mVolatility = CreateRightMetricRow(metricsCard, rightMetricsTitle, -26, "Intraday Price Volatility")
+    panel.mDataPoints = CreateRightMetricRow(metricsCard, rightMetricsTitle, -46, "Granular Snapshots")
 
-    -- Footer Buttons
-    local backBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    backBtn:SetSize(75, 19); backBtn:SetPoint("BOTTOMRIGHT", -170, 14)
-    backBtn:SetText("Back")
-    backBtn:SetScript("OnClick", function() panel:Hide() end)
+    local debugNote = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
+    debugNote:SetPoint("BOTTOMLEFT", metricsCard, "BOTTOM", 15, 8)
+    debugNote:SetPoint("RIGHT", -14, 0)
+    debugNote:SetJustifyH("LEFT")
+    debugNote:SetText("|cFF888888Intraday analytics compute cyclical price dips based on 30-minute scan snapshots across sessions.|r")
 
+    -- 4. Empty State Placeholder (Visible when no item is selected)
+    local emptyState = CreateFrame("Frame", nil, rightInset)
+    emptyState:SetAllPoints(rightInset)
+    emptyState:EnableMouse(true)
+    emptyState:SetScript("OnReceiveDrag", HandleItemDrop)
+    emptyState:SetScript("OnMouseUp", function() HandleItemDrop() end)
+
+    local emptyTitle = emptyState:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    emptyTitle:SetPoint("CENTER", 0, 40)
+    emptyTitle:SetText("|cFFFFD100Price Analytics & Historiography|r")
+
+    local emptyMsg = emptyState:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    emptyMsg:SetPoint("TOP", emptyTitle, "BOTTOM", 0, -12)
+    emptyMsg:SetText("No Item Selected")
+
+    local emptyDesc = emptyState:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    emptyDesc:SetPoint("TOP", emptyMsg, "BOTTOM", 0, -8)
+    emptyDesc:SetWidth(440)
+    emptyDesc:SetJustifyH("CENTER")
+    emptyDesc:SetText("|cFF888888Drop an item from your bags, enter a name or ID on the left,\nor pick an item from Recent Scans to view historical price charts and intraday purchasing patterns.|r")
+
+    -- ================================================================
+    -- SHOW ITEM DATA METHOD
+    -- ================================================================
     function panel:ShowItem(dbKey, itemLink, itemName, iconTex, price)
-        self.icon:SetTexture(iconTex or "Interface\\Icons\\INV_Misc_QuestionMark")
-        self.name:SetText(itemLink or itemName or "Unknown")
-        self.mPrice:SetText(FormatMoney(price))
+        if not dbKey and not itemLink and not itemName then return end
 
-        -- Data retrieval
-        local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(dbKey) or {}
+        local itemInfo = ResolveItem(dbKey or itemLink or itemName)
+        local key = (itemInfo and itemInfo.dbKey) or (dbKey and tostring(dbKey)) or "0"
+        local nameStr = (itemInfo and itemInfo.name) or itemName or "Unknown Item"
+        local iconPath = (itemInfo and itemInfo.icon) or iconTex or 134400
+        local qual = (itemInfo and itemInfo.quality) or 1
+        local marketPrice = (price and price > 0 and price) or (itemInfo and itemInfo.price) or 0
+        local resolvedLink = (itemInfo and itemInfo.itemLink) or itemLink
+
+        selectedDBKey = key
+        panel.currentItem = {
+            dbKey = key,
+            itemID = itemInfo and itemInfo.itemID,
+            name = nameStr,
+            icon = iconPath,
+            quality = qual,
+            price = marketPrice,
+            link = resolvedLink,
+        }
+
+        emptyState:Hide()
+        self.icon:SetTexture(iconPath)
+        self.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(nameStr, qual) or nameStr)
+
+        local subText = "Item ID: " .. tostring(key)
+        if resolvedLink then
+            local _, _, _, _, _, itemType, itemSubType = SafeGetItemInfo(resolvedLink)
+            if itemType and itemSubType then
+                subText = subText .. " | " .. itemType .. " (" .. itemSubType .. ")"
+            end
+        end
+        self.subtitle:SetText(subText)
+
+        self.mPrice:SetText(FormatMoney(marketPrice))
+
+        -- Retrieve History Data
+        local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key) or {}
         self.graph:Plot(history)
 
+        -- Evaluate Data Freshness & Source Distribution
         local latestAge = 0
         local personal, guild = 0, 0
         if #history > 0 then
-            latestAge = MarketSync.GetCurrentScanDay() - history[1].day
-            for i=1, math.min(#history, 30) do
-                if history[i].source == "Personal" then personal = personal + 1 else guild = guild + 1 end
+            local curDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0
+            latestAge = math.max(0, curDay - (history[1].day or curDay))
+            for i = 1, math.min(#history, 30) do
+                if history[i].source == "Personal" then
+                    personal = personal + 1
+                else
+                    guild = guild + 1
+                end
             end
         end
 
         local total = personal + guild
-        self.mPersonal:SetText(total > 0 and (math.floor(personal/total*100).."%") or "0%")
-        self.mGuild:SetText(total > 0 and (math.floor(guild/total*100).."%") or "0%")
+        local pPct = total > 0 and math.floor(personal / total * 100) or 0
+        local gPct = total > 0 and (100 - pPct) or 0
+        self.mSource:SetText(string.format("Personal: %d%% | Guild: %d%%", pPct, gPct))
 
         local ageStr = (latestAge == 0) and "Today" or (latestAge .. "d ago")
         if latestAge == 0 and history[1] and history[1].source == "Personal" then
-            local pTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime
-            if pTime and pTime > 0 then
+            local pTime = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalScanTime
+            if pTime and pTime > 0 and MarketSync.FormatRealmTime then
                 ageStr = "Today (" .. MarketSync.FormatRealmTime(pTime) .. ")"
             end
         end
@@ -318,20 +837,19 @@ function MarketSync.CreateAnalyticsPanel(parent)
         self.mAge:SetText((isStale and "|cffff4444" or "|cff00ff00") .. ageStr .. "|r")
         self.mStatus:SetText(isStale and "|cffff4444STALE|r" or "|cff00ff00GOOD|r")
 
-        -- =============================================
-        -- INTRADAY ANALYTICS (Best Time to Buy + Volatility)
-        -- =============================================
-        local granular = MarketSync.GetGranularHistory and MarketSync.GetGranularHistory(dbKey) or {}
-        self.mDataPoints:SetText(#granular > 0 and tostring(#granular) or "|cff888888None|r")
+        -- Evaluate Intraday Analytics (30-Minute Buckets)
+        local granular = MarketSync.GetGranularHistory and MarketSync.GetGranularHistory(key) or {}
+        self.mDataPoints:SetText(#granular > 0 and (#granular .. " snapshots") or "|cff888888None|r")
 
         if #granular >= 3 then
-            -- Best Time to Buy: Average price per bucket offset across all days
-            local bucketPrices = {}  -- [offset] = { sum, count }
+            local bucketPrices = {}
             for _, pt in ipairs(granular) do
                 local offs = pt.bucketOffset
-                if not bucketPrices[offs] then bucketPrices[offs] = { sum = 0, count = 0 } end
-                bucketPrices[offs].sum = bucketPrices[offs].sum + pt.price
-                bucketPrices[offs].count = bucketPrices[offs].count + 1
+                if offs then
+                    if not bucketPrices[offs] then bucketPrices[offs] = { sum = 0, count = 0 } end
+                    bucketPrices[offs].sum = bucketPrices[offs].sum + pt.price
+                    bucketPrices[offs].count = bucketPrices[offs].count + 1
+                end
             end
 
             local bestOffset, bestAvg = nil, math.huge
@@ -343,14 +861,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 end
             end
 
-            if bestOffset then
+            if bestOffset and MarketSync.BucketOffsetToTime then
                 local timeStr = MarketSync.BucketOffsetToTime(bestOffset)
                 self.mBestTime:SetText("|cff00ff00" .. timeStr .. "|r (avg " .. FormatMoneyPlain(math.floor(bestAvg)) .. ")")
             else
                 self.mBestTime:SetText("|cff888888Insufficient data|r")
             end
 
-            -- Intraday Volatility: (max - min) / mean across all granular points
             local allSum, allMin, allMax = 0, math.huge, 0
             for _, pt in ipairs(granular) do
                 allSum = allSum + pt.price
@@ -370,20 +887,49 @@ function MarketSync.CreateAnalyticsPanel(parent)
             self.mVolatility:SetText("|cff888888Need 3+ data points|r")
         end
 
+        RefreshItemsList()
         self:Show()
     end
 
-    AnalyticsPanel = panel
+    function panel:OnShow()
+        RefreshItemsList()
+        if panel.currentItem then
+            panel:ShowItem(panel.currentItem.dbKey, panel.currentItem.link, panel.currentItem.name, panel.currentItem.icon, panel.currentItem.price)
+        elseif #itemsList > 0 then
+            local first = itemsList[1]
+            panel:ShowItem(tostring(first.itemID), nil, first.name, first.icon, first.price)
+        else
+            emptyState:Show()
+        end
+    end
+
+    panel:SetScript("OnShow", panel.OnShow)
+
+    table.insert(registeredPanels, panel)
     return panel
 end
 
+-- ================================================================
+-- GLOBAL ENTRY POINT: MarketSync.ShowAnalytics
+-- Switches to AH Analytics tab if AH is open, or MainFrame if standalone
+-- ================================================================
 function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price)
-    if not AnalyticsPanel then return end
-
-    -- Hide all tab content frames to prevent bleeds/overlaps
-    if MarketSync.HideAllTabContent then
-        MarketSync.HideAllTabContent()
+    -- 1. If native AH is open, activate AH Analytics tab
+    if AuctionHouseFrame and AuctionHouseFrame:IsShown() and MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
+        MarketSync.AuctionHouse.ShowAuctionHousePanel("analytics")
+    elseif MarketSync.MainFrame then
+        if MarketSync.HideAllTabContent then
+            MarketSync.HideAllTabContent()
+        end
+        if not MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Show()
+        end
     end
 
-    AnalyticsPanel:ShowItem(dbKey, itemLink, name, icon, price)
+    -- 2. Dispatch to all registered analytics panels
+    for _, p in ipairs(registeredPanels) do
+        if p.ShowItem then
+            p:ShowItem(dbKey, itemLink, name, icon, price)
+        end
+    end
 end

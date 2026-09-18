@@ -399,11 +399,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
                 row.icon:SetTexture(item.icon)
-                local colorHex = "ffffffff"
-                if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] then
-                    colorHex = ITEM_QUALITY_COLORS[item.quality].hex or "ffffffff"
-                end
-                row.name:SetText(string.format("|c%s%s|r", colorHex, item.name))
+                row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name)
 
                 row.delBtn:SetScript("OnClick", function()
                     if MarketSync.Favorites then
@@ -480,6 +476,26 @@ function MarketSync.CreateAHScannerPanel(parent)
     scanAllBtn:SetSize(136, 22)
     scanAllBtn:SetPoint("RIGHT", scanWatchedBtn, "LEFT", -5, 0)
     scanAllBtn:SetText("Scan All (Full AH)")
+
+    -- Analytics Button
+    local analyticsBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
+    analyticsBtn:SetSize(80, 22)
+    analyticsBtn:SetPoint("RIGHT", scanAllBtn, "LEFT", -5, 0)
+    analyticsBtn:SetText("Analytics")
+    analyticsBtn:SetScript("OnClick", function()
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
+            MarketSync.AuctionHouse.ShowAuctionHousePanel("analytics")
+        elseif MarketSync.ShowAnalytics then
+            MarketSync.ShowAnalytics()
+        end
+    end)
+    analyticsBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Price Analytics & Historiography", 1, 1, 1)
+        GameTooltip:AddLine("Open the Analytics tab to view historical price charts, volatility, and intraday purchasing patterns.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    analyticsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Row 2: Status Text (Full width across header below buttons)
     local statusText = rightHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -614,11 +630,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                 end
 
                 row.icon:SetTexture(data.icon)
-                local colorHex = "ffffffff"
-                if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[data.quality] then
-                    colorHex = ITEM_QUALITY_COLORS[data.quality].hex or "ffffffff"
-                end
-                row.name:SetText(string.format("|c%s%s|r", colorHex, data.name))
+                row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(data.name, data.quality) or data.name)
                 row.price:SetText(MarketSync.FormatMoney and MarketSync.FormatMoney(data.unitPrice) or tostring(data.unitPrice))
                 row.qty:SetText(tostring(data.available or 1))
                 row.time:SetText(date("%H:%M:%S", data.time))
@@ -638,6 +650,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                     end
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddLine("|cFF00FF00Left-Click|r: Search in Auction House", 0.8, 0.8, 0.8)
+                    GameTooltip:AddLine("|cFF00FF00Right-Click|r: View Analytics & Tracking", 0.8, 0.8, 0.8)
                     GameTooltip:Show()
                 end)
 
@@ -650,9 +663,18 @@ function MarketSync.CreateAHScannerPanel(parent)
                     GameTooltip:Hide()
                 end)
 
+                row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                 row:SetScript("OnClick", function(self, mouseButton)
-                    if MarketSync.SearchInAuctionHouse and data.itemID then
-                        MarketSync.SearchInAuctionHouse(data.itemID)
+                    if mouseButton == "RightButton" then
+                        if MarketSync.ShowAnalytics and data.itemID then
+                            local dbKey = tostring(data.itemID)
+                            local link = select(2, SafeGetItemInfo(data.itemID)) or data.name
+                            MarketSync.ShowAnalytics(dbKey, link, data.name, data.icon, data.unitPrice)
+                        end
+                    else
+                        if MarketSync.SearchInAuctionHouse and data.itemID then
+                            MarketSync.SearchInAuctionHouse(data.itemID)
+                        end
                     end
                 end)
 

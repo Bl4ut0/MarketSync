@@ -1013,5 +1013,20 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     return hdr
 end
 
-
-
+-- ================================================================
+-- UI HELPER: FormatColoredItemName
+-- Properly colors item names based on quality without prefixing literal |c
+-- ================================================================
+function MarketSync.FormatColoredItemName(name, quality)
+    if not name or name == "" then return "" end
+    -- If already contains color formatting code, return as-is
+    if name:find("|c") then
+        return name
+    end
+    local colorHex = "ffffffff"
+    if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality] then
+        local qCol = ITEM_QUALITY_COLORS[quality]
+        colorHex = qCol.colorStr or (qCol.hex and qCol.hex:gsub("^|c", "")) or "ffffffff"
+    end
+    return string.format("|c%s%s|r", colorHex, name)
+end
