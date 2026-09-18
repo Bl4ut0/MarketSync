@@ -735,10 +735,11 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
 
     -- 2. Check Provider / LiveStore / Synced Guild Data
     if not price and MarketSync.Provider and MarketSync.Provider.GetPrice then
-        local provPrice = MarketSync.Provider.GetPrice(suffixKey or keyOrLink or itemKey)
+        local lookupKey = suffixKey or (keyOrLink and tostring(keyOrLink):match("item:%d+") and keyOrLink) or itemKey
+        local provPrice = MarketSync.Provider.GetPrice(lookupKey)
         if provPrice and provPrice > 0 then
             price = provPrice
-            local provAge = MarketSync.Provider.GetPriceAge and MarketSync.Provider.GetPriceAge(suffixKey or keyOrLink or itemKey)
+            local provAge = MarketSync.Provider.GetPriceAge and MarketSync.Provider.GetPriceAge(lookupKey)
             if provAge ~= nil then
                 ageDays = math.max(0, math.floor(provAge))
             end

@@ -1605,15 +1605,27 @@ local function OnTooltipSetItem(tooltip, data)
     end
     
     local itemID = nil
-    if link then
+    if link and link:match("item:(%d+)") then
+        itemID = tonumber(link:match("item:(%d+)"))
+    elseif link then
         itemID = MarketSync.ParseItemIDFromDBKey(link)
     end
     if not itemID and data and data.id then
         itemID = data.id
     end
+    if not itemID and name then
+        local cleanName = name:match("%[(.-)%]") or name
+        if C_Item and C_Item.GetItemInfoInstant then
+            local ok, id = pcall(C_Item.GetItemInfoInstant, cleanName)
+            if ok and tonumber(id) then itemID = tonumber(id) end
+        elseif GetItemInfoInstant then
+            local ok, id = pcall(GetItemInfoInstant, cleanName)
+            if ok and tonumber(id) then itemID = tonumber(id) end
+        end
+    end
     if not itemID then return end
 
-    if not link and itemID then
+    if (not link or not link:match("item:%d+")) and itemID then
         local _, resolvedLink = SafeGetItemInfo(itemID)
         link = resolvedLink or ("item:" .. itemID)
     end

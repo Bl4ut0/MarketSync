@@ -42,22 +42,10 @@ function ForeverProvider.ToItemKey(keyOrLink)
             }
         end
 
-        -- Try Blizzard C_AuctionHouse native helper if present
-        if C_AuctionHouse and type(C_AuctionHouse.GetItemKeyFromItem) == "function" then
-            local ok, itemKey = pcall(C_AuctionHouse.GetItemKeyFromItem, ItemLocation:CreateFromItemLink(keyOrLink))
-            if ok and itemKey and itemKey.itemID then
-                return {
-                    itemID = itemKey.itemID,
-                    itemLevel = itemKey.itemLevel or 0,
-                    itemSuffix = itemKey.itemSuffix or 0,
-                    battlePetSpeciesID = itemKey.battlePetSpeciesID or 0,
-                }
-            end
-        end
-
         -- Parse item link: item:itemID:enchantID:gemID1:gemID2:gemID3:gemID4:suffixID:...
-        local itemID, _, _, _, _, _, suffixID = keyOrLink:match("item:(%d+):(%-?%d*):(%-?%d*):(%-?%d*):(%-?%d*):(%-?%d*):(%-?%d*)")
+        local itemID = keyOrLink:match("item:(%d+)")
         if itemID then
+            local suffixID = keyOrLink:match("item:%d+:[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:(%-?%d+)")
             return {
                 itemID = tonumber(itemID),
                 itemLevel = 0,
@@ -75,6 +63,27 @@ function ForeverProvider.ToItemKey(keyOrLink)
                 itemSuffix = 0,
                 battlePetSpeciesID = tonumber(speciesID) or 0,
             }
+        end
+
+        -- Fallback: If keyOrLink is an item name or bracketed name, resolve via C_Item
+        local cleanName = keyOrLink:match("%[(.-)%]") or keyOrLink
+        if cleanName and cleanName ~= "" then
+            local resolvedID = nil
+            if C_Item and C_Item.GetItemInfoInstant then
+                local ok, res = pcall(C_Item.GetItemInfoInstant, cleanName)
+                if ok and tonumber(res) then resolvedID = tonumber(res) end
+            elseif GetItemInfoInstant then
+                local ok, res = pcall(GetItemInfoInstant, cleanName)
+                if ok and tonumber(res) then resolvedID = tonumber(res) end
+            end
+            if resolvedID and resolvedID > 0 then
+                return {
+                    itemID = resolvedID,
+                    itemLevel = 0,
+                    itemSuffix = 0,
+                    battlePetSpeciesID = 0,
+                }
+            end
         end
     end
 
