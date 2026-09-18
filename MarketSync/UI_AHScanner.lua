@@ -435,34 +435,39 @@ function MarketSync.CreateAHScannerPanel(parent)
     local rightHeader = CreateFrame("Frame", nil, rightInset)
     rightHeader:SetPoint("TOPLEFT", 10, -10)
     rightHeader:SetPoint("TOPRIGHT", -10, -10)
-    rightHeader:SetHeight(48)
+    rightHeader:SetHeight(52)
 
+    -- Row 1: Section Title (Left) and Scan Action Buttons (Right)
     local feedTitle = rightHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    feedTitle:SetPoint("TOPLEFT", 2, 0)
-    feedTitle:SetText("|cFF00FF00MarketSync|r |cFFFFD100Scanner Feed|r")
+    feedTitle:SetPoint("TOPLEFT", 2, -2)
+    feedTitle:SetText("|cFFFFD100Scanner Feed|r")
 
-    local statusText = rightHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", feedTitle, "BOTTOMLEFT", 0, -4)
-    statusText:SetText("Ready to scan")
-
-    -- Scan All (Full AH) Button
-    local scanAllBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
-    scanAllBtn:SetSize(148, 26)
-    scanAllBtn:SetPoint("TOPRIGHT", -206, 0)
-    scanAllBtn:SetText("Scan All (Full AH)")
+    -- Stop Scan Button (Anchored from TOPRIGHT)
+    local stopBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
+    stopBtn:SetSize(62, 22)
+    stopBtn:SetPoint("TOPRIGHT", rightHeader, "TOPRIGHT", 0, 0)
+    stopBtn:SetText("Stop")
+    stopBtn:Disable()
 
     -- Scan Watched Button
     local scanWatchedBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
-    scanWatchedBtn:SetSize(116, 26)
-    scanWatchedBtn:SetPoint("LEFT", scanAllBtn, "RIGHT", 6, 0)
+    scanWatchedBtn:SetSize(102, 22)
+    scanWatchedBtn:SetPoint("RIGHT", stopBtn, "LEFT", -5, 0)
     scanWatchedBtn:SetText("Scan Watched")
 
-    -- Stop Scan Button
-    local stopBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
-    stopBtn:SetSize(76, 26)
-    stopBtn:SetPoint("LEFT", scanWatchedBtn, "RIGHT", 6, 0)
-    stopBtn:SetText("Stop")
-    stopBtn:Disable()
+    -- Scan All (Full AH) Button
+    local scanAllBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
+    scanAllBtn:SetSize(136, 22)
+    scanAllBtn:SetPoint("RIGHT", scanWatchedBtn, "LEFT", -5, 0)
+    scanAllBtn:SetText("Scan All (Full AH)")
+
+    -- Row 2: Status Text (Full width across header below buttons)
+    local statusText = rightHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    statusText:SetPoint("TOPLEFT", rightHeader, "TOPLEFT", 2, -28)
+    statusText:SetPoint("RIGHT", rightHeader, "RIGHT", -2, 0)
+    statusText:SetJustifyH("LEFT")
+    statusText:SetWordWrap(false)
+    statusText:SetText("Ready to scan")
 
     scanAllBtn:SetScript("OnClick", function()
         if MarketSync.Scanner and MarketSync.Scanner.StartFullScan then
@@ -679,7 +684,12 @@ function MarketSync.CreateAHScannerPanel(parent)
                 scanAllBtn:SetText("Scan All (Full AH)")
             end
 
-            progressBar:SetValue(progressBar:GetMinMaxValues())
+            if scanner.Progress and scanner.Progress.total and scanner.Progress.total > 0 then
+                local _, maxVal = progressBar:GetMinMaxValues()
+                progressBar:SetValue(maxVal or scanner.Progress.total)
+            else
+                progressBar:SetValue(0)
+            end
             progressLabel:SetText(scanner.Status or "Ready")
         end
 

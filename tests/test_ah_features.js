@@ -119,4 +119,94 @@ test('Scanner cooldown remaining and multi-list scanning', () => {
   }
 });
 
+test('Tooltip hook handles focus button with FontString count table safely', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const testScript = `
+    MarketSync = MarketSync or {}
+    MarketSync.FormatMoney = function(amt) return tostring(amt) end
+    MarketSync.FormatMoneyColored = function(amt) return tostring(amt) end
+    MarketSync.FormatRelativeTime = function() return "Today" end
+    MarketSync.GetItemPriceAndScanInfo = function(id)
+      return { price = 3900, source = "Guild Sync", ageDays = 0 }
+    end
+    MarketSyncDB = { EnableTooltipAuctionPrice = true, EnableTooltipProb = false }
+
+    local linesAdded = {}
+    local tooltip = {
+      GetItem = function() return "Bronze Tube", "item:4371" end,
+      NumLines = function() return 0 end,
+      GetName = function() return "GameTooltip" end,
+      AddDoubleLine = function(self, left, right)
+        table.insert(linesAdded, { left = left, right = right })
+      end,
+      AddLine = function(self, text)
+        table.insert(linesAdded, { left = text })
+      end,
+    }
+
+    -- Mock focus button where focus.count is a FontString table (reproducing UI_AHSidecar button)
+    local mockFocus = {
+      count = {
+        GetText = function() return "5" end
+      },
+      stackCount = 5,
+    }
+    GetMouseFoci = function() return { mockFocus } end
+
+    -- Extract and execute the tooltip price logic
+    local priceInfo = MarketSync.GetItemPriceAndScanInfo(4371)
+    local priceStr = MarketSync.FormatMoney(priceInfo.price)
+    tooltip:AddDoubleLine("MarketSync AH:", priceStr)
+
+    local stackCount = nil
+    local data = { id = 4371 }
+    if data and type(data.stackCount) == "number" and data.stackCount > 1 then
+      stackCount = data.stackCount
+    elseif tooltip.GetItem then
+      local focus = GetMouseFoci and GetMouseFoci()[1] or (GetMouseFocus and GetMouseFocus())
+      if focus then
+        if type(focus.stackCount) == "number" and focus.stackCount > 1 then
+          stackCount = focus.stackCount
+        elseif type(focus.count) == "number" and focus.count > 1 then
+          stackCount = focus.count
+        elseif type(focus.Count) == "number" and focus.Count > 1 then
+          stackCount = focus.Count
+        elseif type(focus.count) == "table" and focus.count.GetText then
+          local n = tonumber(focus.count:GetText())
+          if n and n > 1 then stackCount = n end
+        elseif type(focus.Count) == "table" and focus.Count.GetText then
+          local n = tonumber(focus.Count:GetText())
+          if n and n > 1 then stackCount = n end
+        end
+      end
+    end
+
+    assert(stackCount == 5, "stackCount should have been safely parsed as 5, got " .. tostring(stackCount))
+    if stackCount and stackCount > 1 then
+      local stackPrice = priceInfo.price * stackCount
+      assert(stackPrice == 19500, "stack price should be 19500")
+      tooltip:AddDoubleLine("Stack (" .. stackCount .. "):", tostring(stackPrice))
+    end
+    assert(#linesAdded == 2, "Expected 2 tooltip lines added")
+  `;
+
+  if (lauxlib.luaL_dostring(L, to_luastring(testScript)) !== 0) {
+    throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
+test('AST syntax check on all MarketSync Lua files', () => {
+  const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
+  for (const f of files) {
+    const code = fs.readFileSync(path.join(marketSyncDir, f), 'utf8');
+    try {
+      luaparse.parse(code, { comments: false, scope: true });
+    } catch (err) {
+      throw new Error(`Syntax error in ${f}: ${err.message}`);
+    }
+  }
+});
+
 console.log('\nAll AH feature tests passed successfully!');

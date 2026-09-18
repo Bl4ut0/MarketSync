@@ -784,6 +784,8 @@ function MarketSync.CreateAHSidecar(parent)
                     btn:SetPoint("TOPLEFT", sellScrollContent, "TOPLEFT", x, y)
                     btn.icon:SetTexture(item.icon)
                     btn.count:SetText(item.stackCount > 1 and tostring(item.stackCount) or "")
+                    btn.stackCount = item.stackCount
+                    btn.item = item
 
                     local qColor = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] or { r = 0.4, g = 0.4, b = 0.4 }
                     btn:SetBackdropColor(0.06, 0.08, 0.10, 0.95)

@@ -1999,12 +1999,24 @@ local function OnTooltipSetItem(tooltip, data)
                 tooltip:AddDoubleLine("|cffffd700MarketSync AH:|r", priceStr)
                 
                 local stackCount = nil
-                if data and data.stackCount and data.stackCount > 1 then
+                if data and type(data.stackCount) == "number" and data.stackCount > 1 then
                     stackCount = data.stackCount
                 elseif tooltip.GetItem then
                     local focus = GetMouseFoci and GetMouseFoci()[1] or (GetMouseFocus and GetMouseFocus())
-                    if focus and focus.count and focus.count > 1 then
-                        stackCount = focus.count
+                    if focus then
+                        if type(focus.stackCount) == "number" and focus.stackCount > 1 then
+                            stackCount = focus.stackCount
+                        elseif type(focus.count) == "number" and focus.count > 1 then
+                            stackCount = focus.count
+                        elseif type(focus.Count) == "number" and focus.Count > 1 then
+                            stackCount = focus.Count
+                        elseif type(focus.count) == "table" and focus.count.GetText then
+                            local n = tonumber(focus.count:GetText())
+                            if n and n > 1 then stackCount = n end
+                        elseif type(focus.Count) == "table" and focus.Count.GetText then
+                            local n = tonumber(focus.Count:GetText())
+                            if n and n > 1 then stackCount = n end
+                        end
                     end
                 end
                 if stackCount and stackCount > 1 then
