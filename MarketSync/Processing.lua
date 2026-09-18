@@ -2155,8 +2155,10 @@ end
 if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, OnTooltipSetItem)
 else
-    GameTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
-    if ItemRefTooltip then
+    if GameTooltip and GameTooltip.HookScript then
+        GameTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+    end
+    if ItemRefTooltip and ItemRefTooltip.HookScript then
         ItemRefTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
     end
 end
@@ -2175,13 +2177,12 @@ end
 -- When granular PersonalData is available, each 30-min bucket becomes
 -- its own data point. Otherwise, falls back to daily Auctionator aggregates.
 function MarketSync.GetItemHistory(dbKey)
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return {} end
-    local priceData = Auctionator.Database.db[dbKey]
-    if not priceData or not priceData.h then return {} end
+    local pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+    local priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
+    if (not priceData or not priceData.h) and (not pData or not pData.h) then return {} end
 
     local history = {}
-    local meta = MarketSyncDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
-    local pData = MarketSyncDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+    local meta = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
     local FromBase36 = MarketSync.FromBase36
 
     -- Track which days have granular data so we don't double-count
@@ -2215,7 +2216,7 @@ function MarketSync.GetItemHistory(dbKey)
                             price = price,
                             quantity = qty,
                             source = source,
-                            timeLabel = MarketSync.BucketOffsetToTime(bucketOffset),
+                            timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
                             isGranular = true,
                         })
                     end
@@ -2225,31 +2226,33 @@ function MarketSync.GetItemHistory(dbKey)
     end
 
     -- 2. Fill any days that DON'T have granular data with daily aggregate fallback
-    for dayStr, highPrice in pairs(priceData.h) do
-        local day = tonumber(dayStr)
-        if day and not granularDays[dayStr] then
-            local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
-            local qty = priceData.a and priceData.a[dayStr] or 0
+    if priceData and priceData.h then
+        for dayStr, highPrice in pairs(priceData.h) do
+            local day = tonumber(dayStr)
+            if day and not granularDays[dayStr] then
+                local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
+                local qty = priceData.a and priceData.a[dayStr] or 0
 
-            local source = "Personal"
-            if meta and meta.days and meta.days[dayStr] then
-                local s = meta.days[dayStr].source
-                if s then source = s:match("^([^%-]+)") or s end
-            elseif day == MarketSync.GetCurrentScanDay() then
-                source = "Personal"
+                local source = "Personal"
+                if meta and meta.days and meta.days[dayStr] then
+                    local s = meta.days[dayStr].source
+                    if s then source = s:match("^([^%-]+)") or s end
+                elseif day == (MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0) then
+                    source = "Personal"
+                end
+
+                table.insert(history, {
+                    day = day,
+                    bucketOffset = nil,
+                    sortKey = day * 100,
+                    high = highPrice,
+                    low = lowPrice,
+                    price = highPrice,
+                    quantity = qty,
+                    source = source,
+                    isGranular = false,
+                })
             end
-
-            table.insert(history, {
-                day = day,
-                bucketOffset = nil,
-                sortKey = day * 100,
-                high = highPrice,
-                low = lowPrice,
-                price = highPrice,
-                quantity = qty,
-                source = source,
-                isGranular = false,
-            })
         end
     end
 
@@ -2261,7 +2264,8 @@ end
 -- Returns ONLY the granular 30-min data points for analytics algorithms.
 -- Each entry: { day, bucketOffset, price, quantity, timestamp }
 function MarketSync.GetGranularHistory(dbKey)
-    local pData = MarketSyncDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    local pData = realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey]
     if not pData or not pData.h then return {} end
 
     local FromBase36 = MarketSync.FromBase36
@@ -2276,7 +2280,13 @@ function MarketSync.GetGranularHistory(dbKey)
                 local qty = FromBase36(q_b36)
                 if price and price > 0 then
                     -- Reconstruct approximate UNIX timestamp for this data point
-                    local dayTimestamp = Auctionator.Constants.SCAN_DAY_0 + (day * 86400)
+                    local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
+                    if not dayTimestamp then
+                        local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
+                            or (MarketSync and MarketSync.SCAN_DAY_0)
+                            or 1577836800
+                        dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
+                    end
                     local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
 
                     table.insert(points, {
@@ -2285,7 +2295,7 @@ function MarketSync.GetGranularHistory(dbKey)
                         price = price,
                         quantity = qty,
                         timestamp = pointTimestamp,
-                        timeLabel = MarketSync.BucketOffsetToTime(bucketOffset),
+                        timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
                     })
                 end
             end

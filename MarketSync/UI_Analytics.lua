@@ -47,13 +47,17 @@ local function FormatMoney(copper)
 end
 
 local function ScanDayToDate(scanDay)
-    local scan0 = 1577836800 -- Jan 1, 2020 UTC
-    if Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 then
-        scan0 = Auctionator.Constants.SCAN_DAY_0
-    elseif MarketSync and MarketSync.SCAN_DAY_0 then
-        scan0 = MarketSync.SCAN_DAY_0
+    if MarketSync and MarketSync.ScanDayToDate then
+        return MarketSync.ScanDayToDate(scanDay)
     end
-    local timestamp = scan0 + (scanDay * 86400)
+    local day = tonumber(scanDay) or 0
+    if day > 10000 then
+        return date("%b %d", day * 86400)
+    end
+    local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
+        or (MarketSync and MarketSync.SCAN_DAY_0)
+        or 1577836800
+    local timestamp = scan0 + (day * 86400)
     return date("%b %d", timestamp)
 end
 

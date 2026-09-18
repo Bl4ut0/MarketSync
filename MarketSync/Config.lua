@@ -643,11 +643,33 @@ function MarketSync.GetAuctionAge(itemLink)
     return nil
 end
 
+MarketSync.SCAN_DAY_0 = 1577836800 -- Jan 1, 2020 UTC
+
 function MarketSync.GetCurrentScanDay()
     if Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 then
         return math.floor((time() - Auctionator.Constants.SCAN_DAY_0) / 86400)
     end
     return math.floor(time() / 86400)
+end
+
+function MarketSync.ScanDayToTimestamp(scanDay)
+    if not scanDay then return time() end
+    local day = tonumber(scanDay) or 0
+    if day <= 0 then return time() end
+    -- If day > 10000, it represents elapsed days since the standard UNIX epoch (Jan 1, 1970)
+    if day > 10000 then
+        return day * 86400
+    end
+    -- Otherwise, it represents days since Auctionator epoch (Jan 1, 2020)
+    local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
+        or MarketSync.SCAN_DAY_0
+        or 1577836800
+    return scan0 + (day * 86400)
+end
+
+function MarketSync.ScanDayToDate(scanDay)
+    local ts = MarketSync.ScanDayToTimestamp(scanDay)
+    return date("%b %d", ts)
 end
 
 -- ================================================================

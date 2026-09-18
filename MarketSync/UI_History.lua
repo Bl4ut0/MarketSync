@@ -44,11 +44,13 @@ end
 
 -- Convert scan day number to a readable date string
 local function ScanDayToDate(scanDay)
-    if not Auctionator or not Auctionator.Constants or not Auctionator.Constants.SCAN_DAY_0 then
-        return "Day " .. scanDay
+    if MarketSync and MarketSync.ScanDayToDate then
+        return MarketSync.ScanDayToDate(scanDay)
     end
-    local timestamp = Auctionator.Constants.SCAN_DAY_0 + (scanDay * 86400)
-    return date("%b %d", timestamp)
+    local day = tonumber(scanDay) or 0
+    if day > 10000 then return date("%b %d", day * 86400) end
+    local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0) or (MarketSync and MarketSync.SCAN_DAY_0) or 1577836800
+    return date("%b %d", scan0 + (day * 86400))
 end
 
 -- Get age in days from scan day

@@ -626,6 +626,86 @@ test('AuctionHouse.lua registers 4 embedded tabs including Analytics', () => {
   }
 });
 
+test('Analytics and Processing history decoupling from Auctionator', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mock = `
+    time = function() return 1789756200 end -- Sep 18, 2026
+    date = os.date
+    GetTime = function() return 1000 end
+    GetBuildInfo = function() return "1.15.5", "57361", "Oct 15 2024", 11505 end
+    GetNormalizedRealmName = function() return "Faerlina" end
+    GetRealmName = function() return "Faerlina" end
+    UnitFactionGroup = function() return "Horde" end
+    Auctionator = nil -- Ensure Auctionator is strictly nil!
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    CreateFrame = function() return { SetScript = function() end, RegisterEvent = function() end } end
+    MarketSyncDB = {
+      RealmData = {
+        ["Faerlina"] = {
+          PersonalData = {
+            ["4471"] = {
+              m = 400,
+              d = 20714,
+              latestBucket = 994309,
+              h = {
+                ["20714"] = "37:b4:a" -- offset 37 (18:30), price 400 (b4), qty 10 (a)
+              }
+            }
+          },
+          ItemMetadata = {}
+        }
+      }
+    }
+    MarketSync = {
+      FromBase36 = function(s)
+        if not s then return 0 end
+        return tonumber(s, 36) or 0
+      end
+    }
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mock));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const processingLua = fs.readFileSync(path.join(marketSyncDir, 'Processing.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(processingLua)) !== 0) {
+    throw new Error('Failed to load Processing.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    assert(Auctionator == nil, "Auctionator must be nil")
+
+    -- Check ScanDayToTimestamp and ScanDayToDate
+    local ts = MarketSync.ScanDayToTimestamp(20714)
+    assert(ts == 20714 * 86400, "Unix day 20714 should convert to 20714 * 86400")
+    local dStr = MarketSync.ScanDayToDate(20714)
+    assert(type(dStr) == "string" and #dStr > 0, "ScanDayToDate should return valid string")
+
+    -- Check GetGranularHistory with Auctionator nil
+    local points = MarketSync.GetGranularHistory("4471")
+    assert(#points == 1, "Expected 1 granular point, got " .. tostring(#points))
+    assert(points[1].day == 20714, "Expected day 20714")
+    assert(points[1].bucketOffset == 37, "Expected offset 37")
+    assert(points[1].price == 400, "Expected price 400")
+    assert(points[1].quantity == 10, "Expected qty 10")
+    assert(points[1].timestamp == (20714 * 86400) + (37 * 1800), "Timestamp calculation mismatch")
+
+    -- Check GetItemHistory with Auctionator nil
+    local history = MarketSync.GetItemHistory("4471")
+    assert(#history == 1, "Expected 1 history point, got " .. tostring(#history))
+    assert(history[1].price == 400, "Expected price 400 in history")
+    assert(history[1].isGranular == true, "Expected isGranular == true")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('History decoupling validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {
