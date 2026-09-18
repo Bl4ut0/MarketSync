@@ -1595,7 +1595,8 @@ end
 -- TOOLTIP HOOKS (Disenchanting, Milling, Prospecting)
 -- ================================================================
 local function OnTooltipSetItem(tooltip, data)
-    if not MarketSyncDB or not MarketSyncDB.EnableTooltipProb then return end
+    if not MarketSyncDB then return end
+    if not MarketSyncDB.EnableTooltipAuctionPrice and not MarketSyncDB.EnableTooltipProb then return end
     if not tooltip then return end
 
     local name, link
@@ -1616,6 +1617,59 @@ local function OnTooltipSetItem(tooltip, data)
         local _, resolvedLink = SafeGetItemInfo(itemID)
         link = resolvedLink or ("item:" .. itemID)
     end
+
+    -- 0. Native MarketSync AH Price & Scan Freshness (for Standalone or unhooked items)
+    if MarketSyncDB.EnableTooltipAuctionPrice ~= false then
+        local priceInfo = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(link or itemID)
+        if priceInfo and priceInfo.price and priceInfo.price > 0 then
+            local hasAuctionatorLine = false
+            if Auctionator and Auctionator.API and tooltip.NumLines and tooltip.GetName then
+                local tName = tooltip:GetName()
+                if tName then
+                    for i = 1, tooltip:NumLines() do
+                        local leftLine = _G[tName .. "TextLeft" .. i]
+                        local text = leftLine and leftLine.GetText and leftLine:GetText()
+                        if text and (text:find("Auction:") or text:find("Auctionator:")) then
+                            hasAuctionatorLine = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            if not hasAuctionatorLine then
+                local priceStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(priceInfo.price) or MarketSync.FormatMoney(priceInfo.price)
+                local ageStr = MarketSync.FormatRelativeTime and MarketSync.FormatRelativeTime(priceInfo.scanTime, priceInfo.ageDays) or "Today"
+                local sourceStr = priceInfo.source or "MarketSync"
+                
+                tooltip:AddDoubleLine("|cffffd700MarketSync AH:|r", priceStr)
+                
+                local stackCount = nil
+                if data and data.stackCount and data.stackCount > 1 then
+                    stackCount = data.stackCount
+                elseif tooltip.GetItem then
+                    local focus = GetMouseFoci and GetMouseFoci()[1] or (GetMouseFocus and GetMouseFocus())
+                    if focus and focus.count and focus.count > 1 then
+                        stackCount = focus.count
+                    end
+                end
+                if stackCount and stackCount > 1 then
+                    local stackPrice = priceInfo.price * stackCount
+                    local stackStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(stackPrice) or MarketSync.FormatMoney(stackPrice)
+                    tooltip:AddDoubleLine(string.format("|cffffd700Stack (%d):|r", stackCount), stackStr)
+                end
+                
+                tooltip:AddDoubleLine("|cff888888Scanned:|r", string.format("|cffaaaaaa%s (%s)|r", ageStr, sourceStr))
+                
+                if priceInfo.neutralPrice and priceInfo.neutralPrice > 0 and priceInfo.neutralPrice ~= priceInfo.price then
+                    local nPriceStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(priceInfo.neutralPrice) or MarketSync.FormatMoney(priceInfo.neutralPrice)
+                    tooltip:AddDoubleLine("|cff00ccffNeutral AH:|r", nPriceStr)
+                end
+            end
+        end
+    end
+
+    if not MarketSyncDB.EnableTooltipProb then return end
 
     -- 1. Check ProcessingData (Milling/Prospecting)
     if MarketSync.ProcessingData and MarketSync.ProcessingData[itemID] then

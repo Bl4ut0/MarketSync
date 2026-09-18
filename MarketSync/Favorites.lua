@@ -161,7 +161,14 @@ function F.GetListItems(listName)
     local items = {}
 
     for _, itemID in ipairs(list) do
-        local name, link, quality, ilvl, minLevel, itemType, itemSubType, _, _, icon = C_Item.GetItemInfo(itemID)
+        local name, link, quality, ilvl, minLevel, itemType, itemSubType, _, _, icon
+        if MarketSync and MarketSync.GetItemInfo then
+            name, link, quality, ilvl, minLevel, itemType, itemSubType, _, _, icon = MarketSync.GetItemInfo(itemID)
+        elseif C_Item and C_Item.GetItemInfo then
+            name, link, quality, ilvl, minLevel, itemType, itemSubType, _, _, icon = C_Item.GetItemInfo(itemID)
+        elseif GetItemInfo then
+            name, link, quality, ilvl, minLevel, itemType, itemSubType, _, _, icon = GetItemInfo(itemID)
+        end
         -- If not loaded yet, check cache or provide fallback
         if not name and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
             local c = MarketSyncDB.ItemInfoCache[itemID]
@@ -170,8 +177,8 @@ function F.GetListItems(listName)
             icon = c.ic
             ilvl = c.i
         end
-        if not name then
-            C_Item.RequestLoadItemDataByID(itemID)
+        if not name and C_Item and C_Item.RequestLoadItemDataByID then
+            pcall(C_Item.RequestLoadItemDataByID, itemID)
         end
         table.insert(items, {
             itemID = itemID,

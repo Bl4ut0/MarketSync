@@ -701,9 +701,20 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableTooltipProb ~= false) end
     end)
 
+    local chkTooltipPrice = CreateCheckbox(leftFeaturesBox, chkTooltip, "BOTTOMLEFT",
+        "Enable Tooltip Auction Prices",
+        "Show buyout prices, stack totals, and scan freshness directly on item tooltips (standalone mode).")
+    chkTooltipPrice:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableTooltipAuctionPrice = self:GetChecked()
+        print("|cFF00FF00[MarketSync]|r Tooltip Auction Prices " .. (MarketSyncDB.EnableTooltipAuctionPrice and "Enabled" or "Disabled"))
+    end)
+    chkTooltipPrice:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableTooltipAuctionPrice ~= false) end
+    end)
+
     -- --- SOUND CONTROLS ---
     local soundHeader = leftFeaturesBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    soundHeader:SetPoint("TOPLEFT", chkTooltip, "BOTTOMLEFT", 6, -10)
+    soundHeader:SetPoint("TOPLEFT", chkTooltipPrice, "BOTTOMLEFT", 6, -10)
     soundHeader:SetText("Notification Sound")
     soundHeader:SetTextColor(1, 0.82, 0)
 

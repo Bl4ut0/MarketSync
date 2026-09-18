@@ -2101,16 +2101,21 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
     local realmDB = MarketSync.GetRealmDB() -- Cache once per call (hot path during sync)
     local itemLink = "item:" .. tostring(key) -- Fallback for logs
 
-    -- DIRECT INSERTION to ensure persistence
-    local priceData = Auctionator.Database.db[key]
-    if not priceData then
+    -- DIRECT INSERTION to ensure persistence (when Auctionator is loaded)
+    local priceData = nil
+    if Auctionator and Auctionator.Database and Auctionator.Database.db then
+        priceData = Auctionator.Database.db[key]
+        if not priceData then
+            priceData = { l={}, h={}, m=0, a={} }
+            Auctionator.Database.db[key] = priceData
+            Debug("Creating new DB entry for " .. key)
+        end
+        if not priceData.l then priceData.l = {} end
+        if not priceData.h then priceData.h = {} end
+        if not priceData.a then priceData.a = {} end
+    else
         priceData = { l={}, h={}, m=0, a={} }
-        Auctionator.Database.db[key] = priceData
-        Debug("Creating new DB entry for " .. key)
     end
-    if not priceData.l then priceData.l = {} end
-    if not priceData.h then priceData.h = {} end
-    if not priceData.a then priceData.a = {} end
 
     if isGranular then
         -- ==========================================

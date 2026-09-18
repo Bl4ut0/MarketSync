@@ -222,6 +222,7 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.DebugMode == nil then MarketSyncDB.DebugMode = false end
     if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
     if MarketSyncDB.EnableTooltipProb == nil then MarketSyncDB.EnableTooltipProb = true end
+    if MarketSyncDB.EnableTooltipAuctionPrice == nil then MarketSyncDB.EnableTooltipAuctionPrice = true end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
@@ -662,6 +663,123 @@ function MarketSync.FormatMoney(amount)
     if silver > 0 or gold > 0 then str = str .. silver .. "s " end
     str = str .. copper .. "c"
     return str
+end
+
+function MarketSync.FormatMoneyColored(amount)
+    if not amount or amount <= 0 then return "|cff8888880c|r" end
+    local gold = math.floor(amount / 10000)
+    local silver = math.floor((amount % 10000) / 100)
+    local copper = amount % 100
+    local str = ""
+    if gold > 0 then str = str .. "|cffffd700" .. gold .. "g|r " end
+    if silver > 0 or gold > 0 then str = str .. "|cffc0c0c0" .. silver .. "s|r " end
+    if copper > 0 or (gold == 0 and silver == 0) then str = str .. "|cffeda55f" .. copper .. "c|r" end
+    return str
+end
+
+function MarketSync.FormatRelativeTime(epochTime, fallbackDays)
+    if epochTime and epochTime > 0 then
+        local diff = math.max(0, time() - epochTime)
+        if diff < 60 then
+            return "Just now"
+        elseif diff < 3600 then
+            return string.format("%dm ago", math.floor(diff / 60))
+        elseif diff < 86400 then
+            return string.format("%dh ago", math.floor(diff / 3600))
+        else
+            return string.format("%dd ago", math.floor(diff / 86400))
+        end
+    end
+    if fallbackDays ~= nil then
+        if fallbackDays == 0 then return "Today" end
+        if fallbackDays == 1 then return "Yesterday" end
+        return string.format("%dd ago", fallbackDays)
+    end
+    return "Unknown"
+end
+
+function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
+    if not keyOrLink then return nil end
+    local itemID, suffix = MarketSync.ParseItemIDFromDBKey(tostring(keyOrLink))
+    if not itemID then
+        if type(keyOrLink) == "number" then
+            itemID = keyOrLink
+        elseif type(keyOrLink) == "string" then
+            itemID = tonumber(keyOrLink:match("item:(%d+)") or keyOrLink:match("^(%d+)$"))
+        end
+    end
+    if not itemID then return nil end
+
+    local itemKey = tostring(itemID)
+    local suffixKey = (suffix and suffix ~= 0) and ("p:" .. itemID .. ":" .. suffix) or nil
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or {}
+    
+    local price = nil
+    local ageDays = nil
+    local scanTime = nil
+    local source = nil
+    local currentDay = MarketSync.GetCurrentScanDay()
+
+    -- 1. Check PersonalData
+    local pData = realmDB.PersonalData
+    local pEntry = pData and ((suffixKey and pData[suffixKey]) or pData[itemKey])
+    if pEntry and pEntry.m and pEntry.m > 0 then
+        price = pEntry.m
+        local entryDay = tonumber(pEntry.d) or currentDay
+        ageDays = math.max(0, currentDay - entryDay)
+        if ageDays == 0 and realmDB.PersonalScanTime then
+            scanTime = realmDB.PersonalScanTime
+        end
+        source = "Personal Scan"
+    end
+
+    -- 2. Check Provider / LiveStore / Synced Guild Data
+    if not price and MarketSync.Provider and MarketSync.Provider.GetPrice then
+        local provPrice = MarketSync.Provider.GetPrice(suffixKey or keyOrLink or itemKey)
+        if provPrice and provPrice > 0 then
+            price = provPrice
+            local provAge = MarketSync.Provider.GetPriceAge and MarketSync.Provider.GetPriceAge(suffixKey or keyOrLink or itemKey)
+            if provAge ~= nil then
+                ageDays = math.max(0, math.floor(provAge))
+            end
+            source = "Guild Sync"
+        end
+    end
+
+    -- Check ItemMetadata for more accurate guild contributor and timestamp
+    local meta = realmDB.ItemMetadata and ((suffixKey and realmDB.ItemMetadata[suffixKey]) or realmDB.ItemMetadata[itemKey])
+    if meta then
+        local dayStr = tostring(pEntry and pEntry.d or currentDay)
+        if meta.days and meta.days[dayStr] then
+            source = meta.days[dayStr].source or source or "Guild Sync"
+            scanTime = meta.days[dayStr].time or scanTime
+        elseif meta.lastSource then
+            source = meta.lastSource or source
+            scanTime = meta.lastTime or scanTime
+        end
+    end
+
+    -- 3. Check Neutral AH Data
+    local neutralPrice = nil
+    local nData = realmDB.NeutralData
+    local nEntry = nData and ((suffixKey and nData[suffixKey]) or nData[itemKey])
+    if nEntry and nEntry.m and nEntry.m > 0 then
+        neutralPrice = nEntry.m
+    end
+
+    if not price and not neutralPrice then
+        return nil
+    end
+
+    return {
+        itemID = itemID,
+        suffix = suffix,
+        price = price,
+        ageDays = ageDays,
+        scanTime = scanTime,
+        source = source or "MarketSync",
+        neutralPrice = neutralPrice,
+    }
 end
 
 function MarketSync.FormatAge(days)

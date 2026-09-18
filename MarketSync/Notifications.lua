@@ -143,9 +143,31 @@ local function AlertNotification(req, state, itemName, price, eventScope, source
 
     local realmDB = MarketSync.GetRealmDB()
     realmDB.NotificationLog = realmDB.NotificationLog or {}
+
+    local itemID = nil
+    if req.matchType == "itemID" then
+        itemID = tonumber(req.matchValue)
+    elseif req.matchType == "dbKey" and MarketSync.ParseItemIDFromDBKey then
+        itemID = MarketSync.ParseItemIDFromDBKey(req.matchValue)
+    end
+    if not itemID and itemName and MarketSync.ResolveItemID then
+        itemID = MarketSync.ResolveItemID(itemName)
+    end
+
+    local itemLink = nil
+    local itemIcon = nil
+    if itemID then
+        local _, link, _, _, _, _, _, _, _, icon = MarketSync.GetItemInfo(itemID)
+        itemLink = link
+        itemIcon = icon or (MarketSync.GetItemIcon and MarketSync.GetItemIcon(itemID))
+    end
+
     table.insert(realmDB.NotificationLog, 1, {
         requestID = req.id,
-        itemName = itemName,
+        itemName = itemName or req.displayName or (itemID and ("Item " .. itemID)) or "Unknown",
+        itemLink = itemLink,
+        itemID = itemID,
+        itemIcon = itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark",
         price = price,
         threshold = threshold,
         scope = scope,
@@ -162,6 +184,24 @@ local function AlertNotification(req, state, itemName, price, eventScope, source
                 (tonumber(MarketSync.NotificationUnreadCount) or 0) - 1)
         end
     end
+end
+
+function MarketSync.ClearNotificationLog()
+    local realmDB = MarketSync.GetRealmDB()
+    if realmDB then
+        realmDB.NotificationLog = {}
+    end
+    MarketSync.NotificationUnreadCount = 0
+end
+
+function MarketSync.MarkAllNotificationsRead()
+    local realmDB = MarketSync.GetRealmDB()
+    if realmDB and realmDB.NotificationLog then
+        for _, entry in ipairs(realmDB.NotificationLog) do
+            entry.read = true
+        end
+    end
+    MarketSync.NotificationUnreadCount = 0
 end
 
 function MarketSync.UpsertNotificationRequest(req)
@@ -467,6 +507,107 @@ local notificationTicker = C_Timer.NewTicker(60, function()
     end
 end)
 MarketSync.NotificationTicker = notificationTicker
+
+function MarketSync.GetImportableListNames()
+    local lists = {}
+    -- 1. Native MarketSync Favorites
+    if MarketSync.Favorites and MarketSync.Favorites.GetLists then
+        local favLists = MarketSync.Favorites.GetLists()
+        for _, name in ipairs(favLists) do
+            table.insert(lists, { name = name, source = "favorites", label = name .. " (Favorites)" })
+        end
+    end
+    -- 2. Auctionator shopping lists if available
+    if Auctionator and Auctionator.Shopping and Auctionator.Shopping.ListManager then
+        local aNames = MarketSync.GetAuctionatorShoppingListNames and MarketSync.GetAuctionatorShoppingListNames() or {}
+        for _, name in ipairs(aNames) do
+            table.insert(lists, { name = name, source = "auctionator", label = name .. " (Auctionator)" })
+        end
+    end
+    return lists
+end
+
+function MarketSync.ImportNotificationRequestsFromFavorites(listNames, options)
+    options = options or {}
+    local realmDB = MarketSync.GetRealmDB()
+    if not realmDB or not MarketSyncDB or not MarketSyncDB.Favorites then
+        return 0, "Favorites database not found"
+    end
+
+    local targetLists = {}
+    if type(listNames) == "string" then
+        if listNames == "__ALL__" then
+            for name in pairs(MarketSyncDB.Favorites) do
+                table.insert(targetLists, name)
+            end
+        else
+            table.insert(targetLists, listNames)
+        end
+    elseif type(listNames) == "table" and #listNames > 0 then
+        targetLists = listNames
+    else
+        for name in pairs(MarketSyncDB.Favorites) do
+            table.insert(targetLists, name)
+        end
+    end
+
+    local itemsToImport = {}
+    for _, lName in ipairs(targetLists) do
+        local list = MarketSyncDB.Favorites[lName]
+        if list then
+            for _, itemID in ipairs(list) do
+                table.insert(itemsToImport, { itemID = itemID, listName = lName })
+            end
+        end
+    end
+
+    if #itemsToImport == 0 then
+        return 0, "No items found in selected list"
+    end
+
+    local imported = 0
+    local skipped = 0
+    local thresholdPct = tonumber(options.thresholdPct) -- e.g. 90 for 10% below market
+    local fallbackCopper = math.max(0, math.floor(tonumber(options.thresholdCopper) or 0))
+    local scope = options.scope or "all"
+    local cooldown = tonumber(options.cooldownSec) or 300
+
+    for _, entry in ipairs(itemsToImport) do
+        local itemID = entry.itemID
+        local name, link = MarketSync.GetItemInfo(itemID)
+        local displayName = name or ("Item " .. tostring(itemID))
+        
+        local marketPrice = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(itemID)
+        local resolvedThreshold = fallbackCopper
+
+        if thresholdPct and marketPrice and marketPrice > 0 then
+            resolvedThreshold = math.floor(marketPrice * (thresholdPct / 100))
+        elseif (not resolvedThreshold or resolvedThreshold <= 0) and marketPrice and marketPrice > 0 then
+            resolvedThreshold = math.floor(marketPrice * 0.9)
+        end
+
+        local reqID = BuildRequestID("itemID", itemID, scope)
+        local req = MarketSync.UpsertNotificationRequest({
+            id = reqID,
+            matchType = "itemID",
+            matchValue = itemID,
+            displayName = displayName,
+            thresholdCopper = resolvedThreshold,
+            scope = scope,
+            variantMode = "any_suffix",
+            cooldownSec = cooldown,
+            enabled = (options.enabledDefault ~= nil) and options.enabledDefault or (resolvedThreshold > 0),
+            importSource = entry.listName,
+        })
+        if req then
+            imported = imported + 1
+        else
+            skipped = skipped + 1
+        end
+    end
+
+    return imported
+end
 
 function MarketSync.GetAuctionatorShoppingListNames()
     if MarketSync.Provider and not MarketSync.Provider.CanExportShoppingList() then
