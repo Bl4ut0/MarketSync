@@ -177,18 +177,43 @@ function MarketSync.CreateAHSidecar(parent)
     local ahFrame = parent or AuctionHouseFrame
     if not ahFrame then return nil end
 
-    -- 1. Drawer Toggle Button attached to right edge of AuctionHouseFrame
-    local toggleBtn = CreateFrame("Button", "MarketSyncAHSidecarToggleBtn", ahFrame, "UIPanelButtonTemplate")
-    toggleBtn:SetSize(130, 24)
-    toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -38)
-    toggleBtn:SetText("🛒 MarketSync ▶")
+    -- 1. Slim pull-tab toggle on AH right edge
+    local toggleBtn = CreateFrame("Button", "MarketSyncAHSidecarToggleBtn", ahFrame, "BackdropTemplate")
+    toggleBtn:SetSize(24, 80)
+    toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -1, -60)
     toggleBtn:SetFrameLevel(ahFrame:GetFrameLevel() + 5)
+    toggleBtn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    toggleBtn:SetBackdropColor(0.12, 0.14, 0.18, 0.95)
+    toggleBtn:SetBackdropBorderColor(0.4, 0.35, 0.2, 0.8)
+    toggleBtn:EnableMouse(true)
+    toggleBtn:RegisterForClicks("LeftButtonUp")
 
-    -- 2. Breakout Sidecar Frame
+    local toggleArrow = toggleBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    toggleArrow:SetPoint("CENTER", 0, 0)
+    toggleArrow:SetText("|cFFFFD100▶|r")
+
+    toggleBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.2, 0.22, 0.28, 0.95)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("MarketSync Sidecar", 1, 0.82, 0)
+        GameTooltip:AddLine("Click to toggle shopping lists & bag selling", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    toggleBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.12, 0.14, 0.18, 0.95)
+        GameTooltip:Hide()
+    end)
+
+    -- 2. Breakout Sidecar Frame — flush against AH, matching backdrop
     local frame = CreateFrame("Frame", "MarketSyncAHSidecarFrame", ahFrame, "BackdropTemplate")
     frame:SetWidth(SIDECAR_WIDTH)
-    frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 2, 0)
-    frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", 2, 0)
+    frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 0, 0)
+    frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", 0, 0)
     frame:SetFrameStrata(ahFrame:GetFrameStrata())
     frame:SetFrameLevel(ahFrame:GetFrameLevel() + 1)
     frame:SetBackdrop({
@@ -201,64 +226,109 @@ function MarketSync.CreateAHSidecar(parent)
     frame:SetBackdropBorderColor(0.4, 0.35, 0.2, 0.9)
     Sidecar.Frame = frame
 
-    -- Top Header Container
+    -- Top Header Container with inline tab switchers
     local header = CreateFrame("Frame", nil, frame)
     header:SetPoint("TOPLEFT", 6, -6)
     header:SetPoint("TOPRIGHT", -6, -6)
-    header:SetHeight(62)
+    header:SetHeight(32)
 
     local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", 8, -4)
-    title:SetText("|cFFFFD100MarketSync|r Sidecar")
+    title:SetPoint("LEFT", 8, 0)
+    title:SetText("|cFFFFD100MarketSync|r")
 
-    local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", 2, 2)
-    closeBtn:SetScript("OnClick", function()
+    -- Compact inline tab buttons: [Lists] [Bags]
+    local function CreateModeTab(label, anchorFrame, anchorPoint, offsetX)
+        local btn = CreateFrame("Button", nil, header, "BackdropTemplate")
+        btn:SetSize(56, 20)
+        btn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+        btn:SetBackdropColor(0, 0, 0, 0)
+        btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        btn.label:SetPoint("CENTER")
+        btn.label:SetText(label)
+        btn:SetScript("OnEnter", function(self)
+            if not self.isActive then
+                self:SetBackdropColor(0.25, 0.25, 0.3, 0.5)
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            if not self.isActive then
+                self:SetBackdropColor(0, 0, 0, 0)
+            end
+        end)
+        return btn
+    end
+
+    local tabLists = CreateModeTab("Lists", title, "RIGHT", 6)
+    tabLists:SetPoint("LEFT", title, "RIGHT", 10, 0)
+
+    local tabBags = CreateModeTab("Bags", tabLists, "RIGHT", 2)
+    tabBags:SetPoint("LEFT", tabLists, "RIGHT", 2, 0)
+
+    local collapseBtn = CreateFrame("Button", nil, header, "BackdropTemplate")
+    collapseBtn:SetSize(20, 20)
+    collapseBtn:SetPoint("TOPRIGHT", -2, -2)
+    collapseBtn:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+    collapseBtn:SetBackdropColor(0, 0, 0, 0)
+    local collapseText = collapseBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    collapseText:SetPoint("CENTER")
+    collapseText:SetText("|cFFFFD100◀|r")
+    collapseBtn:SetScript("OnClick", function()
         Sidecar.SetExpanded(false)
     end)
+    collapseBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.3, 0.3, 0.3, 0.5)
+    end)
+    collapseBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0, 0, 0, 0)
+    end)
 
-    -- Mode Switcher Tabs
-    local modeListsBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    modeListsBtn:SetSize(150, 22)
-    modeListsBtn:SetPoint("BOTTOMLEFT", 6, 4)
-    modeListsBtn:SetText("🛒 Shopping Lists")
-
-    local modeSellBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    modeSellBtn:SetSize(150, 22)
-    modeSellBtn:SetPoint("BOTTOMRIGHT", -6, 4)
-    modeSellBtn:SetText("🎒 Bag Selling")
+    -- Separator line under header
+    local headerSep = frame:CreateTexture(nil, "ARTWORK")
+    headerSep:SetHeight(1)
+    headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -1)
+    headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -4, -1)
+    headerSep:SetColorTexture(0.4, 0.35, 0.2, 0.5)
 
     -- Content Containers
     local listsContainer = CreateFrame("Frame", nil, frame)
-    listsContainer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+    listsContainer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
     listsContainer:SetPoint("BOTTOMRIGHT", -4, 6)
 
     local sellContainer = CreateFrame("Frame", nil, frame)
-    sellContainer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+    sellContainer:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
     sellContainer:SetPoint("BOTTOMRIGHT", -4, 6)
     sellContainer:Hide()
 
+    -- Mode switching — auto-driven by AH tab, but also manually switchable
     local activeMode = "lists"
     local function SetMode(mode)
         activeMode = mode
         if mode == "lists" then
             listsContainer:Show()
             sellContainer:Hide()
-            modeListsBtn:LockHighlight()
-            modeSellBtn:UnlockHighlight()
+            tabLists.isActive = true
+            tabBags.isActive = false
+            tabLists:SetBackdropColor(0.2, 0.25, 0.35, 0.7)
+            tabLists.label:SetText("|cFFFFD100Lists|r")
+            tabBags:SetBackdropColor(0, 0, 0, 0)
+            tabBags.label:SetText("|cFF999999Bags|r")
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         else
             listsContainer:Hide()
             sellContainer:Show()
-            modeSellBtn:LockHighlight()
-            modeListsBtn:UnlockHighlight()
+            tabBags.isActive = true
+            tabLists.isActive = false
+            tabBags:SetBackdropColor(0.2, 0.25, 0.35, 0.7)
+            tabBags.label:SetText("|cFFFFD100Bags|r")
+            tabLists:SetBackdropColor(0, 0, 0, 0)
+            tabLists.label:SetText("|cFF999999Lists|r")
             if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
         end
     end
     Sidecar.SetMode = SetMode
 
-    modeListsBtn:SetScript("OnClick", function() SetMode("lists") end)
-    modeSellBtn:SetScript("OnClick", function() SetMode("sell") end)
+    tabLists:SetScript("OnClick", function() SetMode("lists") end)
+    tabBags:SetScript("OnClick", function() SetMode("sell") end)
 
     -- Toggle Expand / Collapse
     function Sidecar.SetExpanded(expanded)
@@ -266,7 +336,7 @@ function MarketSync.CreateAHSidecar(parent)
         MarketSyncDB.AHSidecarExpanded = (expanded == true)
         if expanded then
             frame:Show()
-            toggleBtn:SetText("🛒 MarketSync ◀")
+            toggleArrow:SetText("|cFFFFD100◀|r")
             if activeMode == "lists" and Sidecar.UpdateListsView then
                 Sidecar.UpdateListsView()
             elseif activeMode == "sell" and Sidecar.UpdateSellView then
@@ -274,7 +344,7 @@ function MarketSync.CreateAHSidecar(parent)
             end
         else
             frame:Hide()
-            toggleBtn:SetText("🛒 MarketSync ▶")
+            toggleArrow:SetText("|cFFFFD100▶|r")
         end
     end
 
@@ -374,7 +444,11 @@ function MarketSync.CreateAHSidecar(parent)
     searchAllBtn:SetText("▶ Search / Scan Entire List")
     searchAllBtn:SetScript("OnClick", function()
         if MarketSync.Scanner then
-            MarketSync.Scanner.ScanList(currentListName)
+            if MarketSync.Scanner.Active then
+                MarketSync.Scanner.Cancel("User stopped scan")
+            else
+                MarketSync.Scanner.ScanList(currentListName)
+            end
         end
     end)
 
@@ -702,6 +776,25 @@ function MarketSync.CreateAHSidecar(parent)
             if frame:IsShown() and activeMode == "lists" and Sidecar.UpdateListsView then
                 UIDropDownMenu_Initialize(listDropdown, InitListDropdown)
                 Sidecar.UpdateListsView()
+            end
+        end)
+    end
+
+    -- Register with Scanner callbacks for live progress & prices
+    if MarketSync.Scanner then
+        MarketSync.Scanner.RegisterCallback(function()
+            if not frame:IsShown() then return end
+            if activeMode == "lists" then
+                if MarketSync.Scanner.Active then
+                    local cur = (MarketSync.Scanner.Progress and MarketSync.Scanner.Progress.current) or 0
+                    local tot = (MarketSync.Scanner.Progress and MarketSync.Scanner.Progress.total) or 0
+                    searchAllBtn:SetText(string.format("⏹ Scanning (%d/%d) - Stop", cur, tot))
+                else
+                    searchAllBtn:SetText("▶ Search / Scan Entire List")
+                end
+                if Sidecar.UpdateListsView then
+                    Sidecar.UpdateListsView()
+                end
             end
         end)
     end
