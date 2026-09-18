@@ -52,11 +52,11 @@ Useful offline work while native access is unavailable: provider extraction, iso
 
 ## Stage 2 — add a provider boundary to the full MarketSync addon
 
-- [ ] Preserve the rc2 working tree in the separate integration track.
-- [ ] Put existing Auctionator behavior behind a provider for clients that already use it.
-- [ ] Add a Forever provider using the scanner's `GetMarketID()` and `GetSnapshot(nativeItemKey)` contract.
-- [ ] Replace direct price/age and scan-completion assumptions before changing the required Auctionator dependency.
-- [ ] Review `Config.lua`, `Core.lua`, `Neutral.lua`, `Chat.lua`, `Processing.lua`, `Notifications.lua`, `Sync.lua`, and the portable UI modules.
+- [x] Preserve the rc2 working tree in the separate integration track.
+- [x] Put existing Auctionator behavior behind a provider for clients that already use it.
+- [x] Add a Forever provider using the scanner's `GetMarketID()` and `GetSnapshot(nativeItemKey)` contract.
+- [x] Replace direct price/age and scan-completion assumptions before changing the required Auctionator dependency.
+- [x] Review `Config.lua`, `Core.lua`, `Neutral.lua`, `Chat.lua`, `Processing.lua`, `Notifications.lua`, `Sync.lua`, and the portable UI modules.
 
 Current coupling includes `GetAuctionPrice`/`GetAuctionAge`, Auctionator-relative scan buckets, private `SetPrice`/`ProcessScan` hooks, scan-complete notifications, neutral capture, and shopping-list imports/exports. Making the TOC dependency optional alone leaves those paths unported.
 
@@ -68,11 +68,11 @@ Acceptance: existing client/provider behavior remains valid; Forever runs withou
 
 ## Stage 3 — restore the portable views and build the embedded AH panel
 
-- [ ] Add source-aware view models for **Personal Scan**, **Guild Sync**, and **Neutral AH**.
-- [ ] Make the portable and auctioneer panels use the same watch list, saved rules, selected market, and scanner state.
-- [ ] Build an embedded AH panel for watch-list management, scan/stop, progress, source selection, and alert setup.
-- [ ] Replace the launcher's click behavior only after the embedded panel's show/hide/selection lifecycle is covered.
-- [ ] Retain a separate command/button that opens the portable window, even while the AH panel is active.
+- [x] Add source-aware view models for **Personal Scan**, **Guild Sync**, and **Neutral AH**.
+- [x] Make the portable and auctioneer panels use the same watch list, saved rules, selected market, and scanner state.
+- [x] Build an embedded AH panel for watch-list management, scan/stop, progress, source selection, and alert setup.
+- [x] Replace the launcher's click behavior only after the embedded panel's show/hide/selection lifecycle is covered.
+- [x] Retain a separate command/button that opens the portable window, even while the AH panel is active.
 
 Blizzard's exported `SetDisplayMode` controls subframes and Buy/Sell/Auctions selection. Inspect that contract again for the installed build before extending the panel controller. Keep tab IDs, native titles, and visibility changes in one integration module. Test moving between every native tab and MarketSync, reopening, closing mid-refresh, Escape, and another addon adding a tab. Avoid relying on a tab template alone as proof of a supported extension API.
 
