@@ -7,12 +7,15 @@ MarketSync = MarketSync or {}
 MarketSync.AuctionHouse = {}
 
 local AH = MarketSync.AuctionHouse
-local displayMode = { "MarketSyncPanel" }
 
 function AH.ShowAuctionHousePanel()
     if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then return false end
     if not AH.Attach() then return false end
-    AuctionHouseFrame:SetDisplayMode(displayMode)
+    local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
+    if libAHTab and libAHTab:DoesIDExist("MarketSync") then
+        libAHTab:SetSelected("MarketSync")
+        return true
+    end
     if AH.Panel then
         AH.Panel:Show()
     end
@@ -30,13 +33,8 @@ function AH.Attach()
     if not frame or not frame.AuctionsTab or type(frame.Tabs) ~= "table" or #frame.Tabs == 0 then
         return false
     end
-    if AH.TabButton and AH.Panel then return true end
+    if AH.Attached then return true end
 
-    if type(frame.tabsForDisplayMode) ~= "table" or type(frame.SetDisplayMode) ~= "function" then
-        return false
-    end
-
-    local lastTab = frame.Tabs[#frame.Tabs]
     local panel = CreateFrame("Frame", "MarketSyncAuctionHousePanel", frame)
     panel:Hide()
     panel:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
@@ -44,30 +42,14 @@ function AH.Attach()
     frame.MarketSyncPanel = panel
     AH.Panel = panel
 
-    -- Create Tab Button
-    local entry
-    local ok, res = pcall(CreateFrame, "Button", "MarketSyncAuctionHouseTab", frame, "AuctionHouseFrameTabTemplate")
-    if ok and res then
-        entry = res
-    else
-        entry = CreateFrame("Button", "MarketSyncAuctionHouseTab", frame, "PanelTabButtonTemplate")
+    -- Create Tab Button via LibAHTab-1-0 (safe, compatible with modern AH & all addons)
+    local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
+    if libAHTab then
+        if not libAHTab:DoesIDExist("MarketSync") then
+            libAHTab:CreateTab("MarketSync", panel, "MarketSync", "MarketSync")
+        end
+        AH.TabButton = libAHTab:GetButton("MarketSync")
     end
-    entry:SetText("MarketSync")
-    if PanelTemplates_TabResize then
-        PanelTemplates_TabResize(entry, 20, nil, 70)
-    end
-    table.insert(frame.Tabs, entry)
-    local tabIndex = #frame.Tabs
-    entry:SetID(tabIndex)
-    frame.tabsForDisplayMode[displayMode] = tabIndex
-    PanelTemplates_SetNumTabs(frame, tabIndex)
-    entry:ClearAllPoints()
-    entry:SetPoint("LEFT", lastTab, "RIGHT", -15, 0)
-    entry:SetScript("OnClick", function()
-        AH.ShowAuctionHousePanel()
-    end)
-    PanelTemplates_DeselectTab(entry)
-    AH.TabButton = entry
 
     -- Embed UI Content into AH Panel
     if MarketSync.CreateAHScannerPanel then
@@ -82,15 +64,6 @@ function AH.Attach()
 
     -- Hook display mode switching
     hooksecurefunc(frame, "SetDisplayMode", function()
-        local selected = (frame:GetDisplayMode() == displayMode) and frame:IsShown()
-        panel:SetShown(selected)
-        if selected then
-            frame:SetTitle("MarketSync")
-            if panel.ScannerPanel and panel.ScannerPanel.OnShow then
-                panel.ScannerPanel:OnShow()
-            end
-        end
-
         -- Auto-switch sidecar view depending on whether user is browsing or selling
         if MarketSync.AHSidecar and MarketSync.AHSidecar.SetMode then
             local currentMode = frame:GetDisplayMode()
@@ -102,9 +75,9 @@ function AH.Attach()
         end
     end)
 
-    hooksecurefunc(frame, "UpdateTitle", function()
-        if frame:GetDisplayMode() == displayMode then
-            frame:SetTitle("MarketSync")
+    panel:SetScript("OnShow", function()
+        if panel.ScannerPanel and panel.ScannerPanel.OnShow then
+            panel.ScannerPanel:OnShow()
         end
     end)
 
@@ -126,7 +99,7 @@ function AH.Attach()
         end
     end)
 
-    PanelTemplates_UpdateTabs(frame)
+    AH.Attached = true
     return true
 end
 
