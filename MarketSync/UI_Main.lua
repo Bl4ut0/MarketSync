@@ -219,6 +219,7 @@ local function CreateMainFrame()
     local function SelectTab(id)
         activeBrowseTab = id
         MainFrame.activeTabID = id
+        MainFrame.selectedTab = id
         
         -- Hide all sub-panels (Detail, History, Analytics) on tab change
         if MarketSync.HideAllTabContent then
@@ -238,10 +239,14 @@ local function CreateMainFrame()
 
         for i, tab in ipairs(tabs) do
             if i == id then
-                PanelTemplates_SelectTab(tab)
+                if PanelTemplates_SelectTab then
+                    PanelTemplates_SelectTab(tab)
+                end
                 if contentFrames[i] then contentFrames[i]:Show() end
             else
-                PanelTemplates_DeselectTab(tab)
+                if PanelTemplates_DeselectTab then
+                    PanelTemplates_DeselectTab(tab)
+                end
                 if contentFrames[i] then contentFrames[i]:Hide() end
             end
         end
@@ -277,11 +282,33 @@ local function CreateMainFrame()
         MainFrame.titleHitBox:Show()
     end
 
+    local function CreateMainTab(id, name)
+        local tab
+        local tabName = "MarketSyncMainFrameTab" .. id
+        -- Modern WoW (10.0+ / Forever) uses PanelTabButtonTemplate
+        local ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, "PanelTabButtonTemplate")
+        if ok and res then
+            tab = res
+        else
+            -- Legacy fallback for older Classic clients
+            ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, "CharacterFrameTabButtonTemplate")
+            if ok and res then
+                tab = res
+            else
+                tab = CreateFrame("Button", tabName, MainFrame, "UIPanelButtonTemplate")
+            end
+        end
+        tab:SetID(id)
+        tab:SetText(name)
+        if PanelTemplates_TabResize then
+            PanelTemplates_TabResize(tab, 0)
+        end
+        return tab
+    end
+
     local lastVisibleTab = nil
     for i, name in ipairs(tabNames) do
-        local tab = CreateFrame("Button", "AucAnnTab" .. i, MainFrame, "CharacterFrameTabButtonTemplate")
-        tab:SetID(i)
-        tab:SetText(name)
+        local tab = CreateMainTab(i, name)
         
         -- Check if tab should be hidden based on settings
         local isHidden = false
@@ -309,6 +336,9 @@ local function CreateMainFrame()
     end
     MainFrame.numTabs = #tabs
     MainFrame.tabs = tabs
+    if PanelTemplates_SetNumTabs then
+        PanelTemplates_SetNumTabs(MainFrame, #tabs)
+    end
 
     -- Dynamically show/hide tabs and re-anchor visible ones
     local function RefreshTabVisibility()
