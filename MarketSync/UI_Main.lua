@@ -9,24 +9,27 @@ local activeBrowseTab = 1
 
 -- ================================================================
 -- HELPER: CreateModernInset
--- Blizzard Dragonflight / Classic Beta NineSlice marble panel
+-- Matches Blizzard Auction House sleek dark slate inset panels
 -- ================================================================
 function MarketSync.CreateModernInset(parent, x, y, width, height)
-    local inset
-    local ok, res = pcall(CreateFrame, "Frame", nil, parent, "InsetFrameTemplate")
-    if ok and res then
-        inset = res
-    else
-        inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-        inset:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = false, tileSize = 0, edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        inset:SetBackdropColor(0.06, 0.07, 0.09, 0.90)
-        inset:SetBackdropBorderColor(0.4, 0.35, 0.2, 0.8)
-    end
+    local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    inset:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        tile = false, tileSize = 0, edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    inset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
+    inset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+
+    -- Subtle top inner highlight line matching Blizzard AH insets
+    local topHighlight = inset:CreateTexture(nil, "BORDER")
+    topHighlight:SetHeight(1)
+    topHighlight:SetPoint("TOPLEFT", 1, -1)
+    topHighlight:SetPoint("TOPRIGHT", -1, -1)
+    topHighlight:SetColorTexture(0.35, 0.38, 0.45, 0.35)
+    inset.topHighlight = topHighlight
+
     if x and y then
         inset:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     end
@@ -34,6 +37,55 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
         inset:SetSize(width, height)
     end
     return inset
+end
+
+-- ================================================================
+-- HELPER: CreateAHColumnHeader
+-- Matches Blizzard Auction House column headers (clean dark slate + sort arrow)
+-- ================================================================
+function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
+    local hdr = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    hdr:SetSize(width, height or 20)
+    hdr.sortKey = sortKey
+
+    hdr:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 }
+    })
+    hdr:SetBackdropColor(0.09, 0.11, 0.14, 0.95)
+    hdr:SetBackdropBorderColor(0.18, 0.20, 0.24, 0.70)
+
+    -- Vertical separator on right side
+    local sep = hdr:CreateTexture(nil, "OVERLAY")
+    sep:SetWidth(1)
+    sep:SetPoint("TOPRIGHT", 0, -2)
+    sep:SetPoint("BOTTOMRIGHT", 0, 2)
+    sep:SetColorTexture(0.25, 0.28, 0.34, 0.60)
+    hdr.sep = sep
+
+    local label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", 6, 0)
+    label:SetText(text or "")
+    hdr.label = label
+
+    local arrow = hdr:CreateTexture(nil, "OVERLAY")
+    arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
+    arrow:SetSize(9, 8)
+    arrow:SetPoint("LEFT", label, "RIGHT", 4, -1)
+    arrow:SetTexCoord(0, 0.5625, 0, 1.0)
+    arrow:Hide()
+    hdr.arrow = arrow
+
+    hdr:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.16, 0.20, 0.26, 0.95)
+    end)
+    hdr:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.09, 0.11, 0.14, 0.95)
+    end)
+
+    return hdr
 end
 
 -- ================================================================

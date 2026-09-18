@@ -8,24 +8,29 @@ MarketSync.AuctionHouse = {}
 
 local AH = MarketSync.AuctionHouse
 
-function AH.ShowAuctionHousePanel()
+function AH.ShowAuctionHousePanel(targetTab)
     if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then return false end
     if not AH.Attach() then return false end
     local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
-    if libAHTab and libAHTab:DoesIDExist("MarketSync") then
-        libAHTab:SetSelected("MarketSync")
-        return true
-    end
-    if AH.Panel then
-        AH.Panel:Show()
+    if libAHTab then
+        local tabID = "MarketSyncScanner"
+        if targetTab == "processing" or targetTab == "Processing" then
+            tabID = "MarketSyncProcessing"
+        elseif targetTab == "alerts" or targetTab == "Alerts" then
+            tabID = "MarketSyncAlerts"
+        end
+        if libAHTab:DoesIDExist(tabID) then
+            libAHTab:SetSelected(tabID)
+            return true
+        end
     end
     return true
 end
 
 function AH.HideAuctionHousePanel()
-    if AH.Panel then
-        AH.Panel:Hide()
-    end
+    if AH.ScannerPanel then AH.ScannerPanel:Hide() end
+    if AH.ProcessingPanel then AH.ProcessingPanel:Hide() end
+    if AH.AlertsPanel then AH.AlertsPanel:Hide() end
 end
 
 function AH.Attach()
@@ -35,26 +40,59 @@ function AH.Attach()
     end
     if AH.Attached then return true end
 
-    local panel = CreateFrame("Frame", "MarketSyncAuctionHousePanel", frame)
-    panel:Hide()
-    panel:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
-    panel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
-    frame.MarketSyncPanel = panel
-    AH.Panel = panel
+    -- 1. Scanner Panel Container
+    local panelScanner = CreateFrame("Frame", "MarketSyncAHScannerPanel", frame)
+    panelScanner:Hide()
+    panelScanner:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
+    panelScanner:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    AH.ScannerPanel = panelScanner
 
-    -- Create Tab Button via LibAHTab-1-0 (safe, compatible with modern AH & all addons)
-    local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
-    if libAHTab then
-        if not libAHTab:DoesIDExist("MarketSync") then
-            libAHTab:CreateTab("MarketSync", panel, "MarketSync", "MarketSync")
+    if MarketSync.CreateAHScannerPanel then
+        panelScanner.Content = MarketSync.CreateAHScannerPanel(panelScanner)
+    end
+    panelScanner:SetScript("OnShow", function()
+        if panelScanner.Content and panelScanner.Content.OnShow then
+            panelScanner.Content:OnShow()
         end
-        AH.TabButton = libAHTab:GetButton("MarketSync")
+    end)
+
+    -- 2. Processing Panel Container
+    local panelProcessing = CreateFrame("Frame", "MarketSyncAHProcessingPanel", frame)
+    panelProcessing:Hide()
+    panelProcessing:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
+    panelProcessing:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    AH.ProcessingPanel = panelProcessing
+
+    if MarketSync.CreateProcessingPanel then
+        panelProcessing.Content = MarketSync.CreateProcessingPanel(panelProcessing)
     end
 
-    -- Embed UI Content into AH Panel
-    if MarketSync.CreateAHScannerPanel then
-        panel.ScannerPanel = MarketSync.CreateAHScannerPanel(panel)
-        panel.ScannerPanel:SetAllPoints(panel)
+    -- 3. Alerts Panel Container
+    local panelAlerts = CreateFrame("Frame", "MarketSyncAHAlertsPanel", frame)
+    panelAlerts:Hide()
+    panelAlerts:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
+    panelAlerts:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    AH.AlertsPanel = panelAlerts
+
+    if MarketSync.CreateNotificationsPanel then
+        panelAlerts.Content = MarketSync.CreateNotificationsPanel(panelAlerts)
+    end
+
+    -- Register 3 tabs via LibAHTab-1-0 (Scanner, Processing, Alerts)
+    local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
+    if libAHTab then
+        if not libAHTab:DoesIDExist("MarketSyncScanner") then
+            libAHTab:CreateTab("MarketSyncScanner", panelScanner, "Scanner", "MarketSync Scanner")
+        end
+        if not libAHTab:DoesIDExist("MarketSyncProcessing") then
+            libAHTab:CreateTab("MarketSyncProcessing", panelProcessing, "Processing", "MarketSync Processing")
+        end
+        if not libAHTab:DoesIDExist("MarketSyncAlerts") then
+            libAHTab:CreateTab("MarketSyncAlerts", panelAlerts, "Alerts", "MarketSync Alerts")
+        end
+        AH.ScannerTab = libAHTab:GetButton("MarketSyncScanner")
+        AH.ProcessingTab = libAHTab:GetButton("MarketSyncProcessing")
+        AH.AlertsTab = libAHTab:GetButton("MarketSyncAlerts")
     end
 
     -- Attach MarketSync Breakout Sidecar to AuctionHouseFrame
@@ -75,12 +113,6 @@ function AH.Attach()
         end
     end)
 
-    panel:SetScript("OnShow", function()
-        if panel.ScannerPanel and panel.ScannerPanel.OnShow then
-            panel.ScannerPanel:OnShow()
-        end
-    end)
-
     frame:HookScript("OnShow", function()
         if MarketSync.AHSidecar and MarketSync.AHSidecar.SetExpanded then
             local expanded = (MarketSyncDB and MarketSyncDB.AHSidecarExpanded ~= nil) and MarketSyncDB.AHSidecarExpanded or true
@@ -89,7 +121,9 @@ function AH.Attach()
     end)
 
     frame:HookScript("OnHide", function()
-        panel:Hide()
+        panelScanner:Hide()
+        panelProcessing:Hide()
+        panelAlerts:Hide()
         if AH.Sidecar then
             AH.Sidecar:Hide()
         end

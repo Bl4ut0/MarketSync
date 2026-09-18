@@ -138,11 +138,7 @@ end
 -- MAIN PANEL CREATION
 -- =============================================================
 function MarketSync.CreateNotificationsPanel(parent)
-    if NotificationPanel then
-        return NotificationPanel
-    end
-
-    local panel = CreateFrame("Frame", "MarketSyncNotificationsPanel", parent)
+    local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     panel:Hide()
 

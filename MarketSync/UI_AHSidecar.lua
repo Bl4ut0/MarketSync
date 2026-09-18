@@ -87,15 +87,15 @@ function MarketSync.SearchInAuctionHouse(itemOrName)
 end
 
 -- ================================================================
+-- ================================================================
 -- BAG SCANNER HELPER
--- Scans player inventory for auctionable items (excludes soulbound/quest)
+-- Scans player inventory grouped by bag container (0 to 5)
 -- ================================================================
 function Sidecar.ScanBagsForSelling()
-    local grouped = {}
-    local order = {}
-
+    local bags = {}
     local getNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
     local getItemInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
+    local getContainerInvID = (C_Container and C_Container.ContainerIDToInventoryID) or ContainerIDToInventoryID
 
     if type(getNumSlots) ~= "function" then
         return {}
@@ -105,33 +105,53 @@ function Sidecar.ScanBagsForSelling()
     local maxBags = (NUM_BAG_SLOTS or 4) + 1
     for bag = 0, maxBags do
         local numSlots = getNumSlots(bag) or 0
-        for slot = 1, numSlots do
-            local info = getItemInfo(bag, slot)
-            local itemID, stackCount, isBound, isLocked, quality, itemLink
-            if type(info) == "table" then
-                itemID = info.itemID
-                stackCount = info.stackCount or 1
-                isBound = info.isBound
-                isLocked = info.isLocked
-                quality = info.quality
-                itemLink = info.hyperlink or info.itemLink
-            elseif info then
-                -- Legacy signature: icon, count, locked, quality, readable, lootable, link, isFiltered, noValue, id, isBound
-                local _, count, locked, qual, _, _, link, _, _, id, bound = getItemInfo(bag, slot)
-                itemID = id
-                stackCount = count or 1
-                isBound = bound
-                isLocked = locked
-                quality = qual
-                itemLink = link
+        if numSlots > 0 then
+            local bagName = "Bag " .. bag
+            local bagIcon = 133633
+            if bag == 0 then
+                bagName = "Backpack"
+                bagIcon = 130716
+            elseif bag == 5 then
+                bagName = "Reagent Bag"
+                bagIcon = 463560
+            elseif getContainerInvID then
+                local invID = getContainerInvID(bag)
+                if invID then
+                    local link = GetInventoryItemLink and GetInventoryItemLink("player", invID)
+                    local icon = GetInventoryItemTexture and GetInventoryItemTexture("player", invID)
+                    if icon then bagIcon = icon end
+                    if link then
+                        local infoName = SafeGetItemInfo(link)
+                        bagName = infoName or (link:match("%[(.-)%]")) or ("Bag " .. bag)
+                    end
+                end
             end
 
-            -- Filter: must have valid itemID, not soulbound, and not locked
-            if itemID and itemID > 0 and not isBound and not isLocked then
-                -- Verify not a quest item (classID 12)
-                local _, _, _, _, _, _, _, _, _, _, _, classID = SafeGetItemInfo(itemID)
-                if classID ~= 12 then
-                    if not grouped[itemID] then
+            local bagItems = {}
+            for slot = 1, numSlots do
+                local info = getItemInfo(bag, slot)
+                local itemID, stackCount, isBound, isLocked, quality, itemLink
+                if type(info) == "table" then
+                    itemID = info.itemID
+                    stackCount = info.stackCount or 1
+                    isBound = info.isBound
+                    isLocked = info.isLocked
+                    quality = info.quality
+                    itemLink = info.hyperlink or info.itemLink
+                elseif info then
+                    local _, count, locked, qual, _, _, link, _, _, id, bound = getItemInfo(bag, slot)
+                    itemID = id
+                    stackCount = count or 1
+                    isBound = bound
+                    isLocked = locked
+                    quality = qual
+                    itemLink = link
+                end
+
+                -- Filter: valid itemID, not soulbound, and not locked
+                if itemID and itemID > 0 and not isBound and not isLocked then
+                    local _, _, _, _, _, _, _, _, _, _, _, classID = SafeGetItemInfo(itemID)
+                    if classID ~= 12 then -- Not a quest item
                         local name, link, rQual, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
                         if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
                             local c = MarketSyncDB.ItemInfoCache[itemID]
@@ -139,33 +159,33 @@ function Sidecar.ScanBagsForSelling()
                             icon = c.ic
                             rQual = c.r
                         end
-                        grouped[itemID] = {
+                        local marketP = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(itemID) or 0
+                        table.insert(bagItems, {
+                            bag = bag,
+                            slot = slot,
                             itemID = itemID,
                             name = name or ("Item #" .. itemID),
                             icon = icon or 134400,
                             quality = quality or rQual or 1,
                             link = itemLink or link or ("item:" .. itemID),
-                            totalCount = 0,
-                            slots = {},
-                        }
-                        table.insert(order, itemID)
+                            stackCount = stackCount or 1,
+                            marketPrice = marketP,
+                        })
                     end
-                    grouped[itemID].totalCount = grouped[itemID].totalCount + stackCount
-                    table.insert(grouped[itemID].slots, { bag = bag, slot = slot, count = stackCount })
                 end
             end
+
+            table.insert(bags, {
+                bagID = bag,
+                name = bagName,
+                icon = bagIcon,
+                totalSlots = numSlots,
+                items = bagItems,
+            })
         end
     end
 
-    local items = {}
-    for _, itemID in ipairs(order) do
-        table.insert(items, grouped[itemID])
-    end
-
-    table.sort(items, function(a, b)
-        return (a.name or "") < (b.name or "")
-    end)
-    return items
+    return bags
 end
 
 -- ================================================================
@@ -394,7 +414,8 @@ function MarketSync.CreateAHSidecar(parent)
             button2 = "Cancel",
             hasEditBox = true,
             OnAccept = function(self)
-                local text = self.editBox:GetText()
+                local eb = self.editBox or self.EditBox or (self.GetName and _G[self:GetName().."EditBox"])
+                local text = eb and eb:GetText()
                 if text and text ~= "" and MarketSync.Favorites then
                     local ok = MarketSync.Favorites.CreateList(text)
                     if ok then
@@ -486,12 +507,12 @@ function MarketSync.CreateAHSidecar(parent)
     listInset:SetPoint("BOTTOMRIGHT", 0, 0)
     listInset:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    listInset:SetBackdropColor(0.04, 0.05, 0.07, 0.90)
-    listInset:SetBackdropBorderColor(0.3, 0.26, 0.15, 0.7)
+    listInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
+    listInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
 
     -- Scrollable List Items Table
     local listScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarListScroll", listInset, "UIPanelScrollFrameTemplate")
@@ -643,150 +664,212 @@ function MarketSync.CreateAHSidecar(parent)
     sellInset:SetPoint("BOTTOMRIGHT", 0, 0)
     sellInset:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    sellInset:SetBackdropColor(0.04, 0.05, 0.07, 0.90)
-    sellInset:SetBackdropBorderColor(0.3, 0.26, 0.15, 0.7)
+    sellInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
+    sellInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
 
     local sellScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarSellScroll", sellInset, "UIPanelScrollFrameTemplate")
     sellScroll:SetPoint("TOPLEFT", 2, -3)
     sellScroll:SetPoint("BOTTOMRIGHT", -22, 3)
 
     local sellScrollContent = CreateFrame("Frame", nil, sellScroll)
-    sellScrollContent:SetSize(280, 1)
+    sellScrollContent:SetSize(288, 1)
     sellScroll:SetScrollChild(sellScrollContent)
 
     local sellEmptyText = sellInset:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     sellEmptyText:SetPoint("CENTER", 0, 20)
     sellEmptyText:SetText("No auctionable items found in bags.")
 
-    local sellRows = {}
+    local bagHeaderPool = {}
+    local slotButtonPool = {}
+
     local function UpdateSellView()
-        local allItems = Sidecar.ScanBagsForSelling()
+        local bags = Sidecar.ScanBagsForSelling()
         local query = sellFilterBox:GetText()
         if query == "Filter inventory..." then query = "" end
-        query = string.lower(query:match("^%s*(.-)%s*$"))
+        query = string.lower(query:match("^%s*(.-)%s*$") or "")
 
-        local items = {}
-        for _, item in ipairs(allItems) do
-            if query == "" or string.find(string.lower(item.name or ""), query, 1, true) then
-                table.insert(items, item)
+        -- Hide existing pooled elements
+        for _, h in ipairs(bagHeaderPool) do h:Hide() end
+        for _, b in ipairs(slotButtonPool) do b:Hide() end
+
+        local yOffset = -4
+        local totalMatching = 0
+        local headerIndex = 0
+        local slotButtonIndex = 0
+
+        for _, bag in ipairs(bags) do
+            local matching = {}
+            for _, item in ipairs(bag.items or {}) do
+                if query == "" or string.find(string.lower(item.name or ""), query, 1, true) then
+                    table.insert(matching, item)
+                end
+            end
+
+            if #matching > 0 then
+                totalMatching = totalMatching + #matching
+                headerIndex = headerIndex + 1
+                local header = bagHeaderPool[headerIndex]
+                if not header then
+                    header = CreateFrame("Frame", nil, sellScrollContent, "BackdropTemplate")
+                    header:SetSize(284, 22)
+                    header:SetBackdrop({
+                        bgFile = "Interface\\Buttons\\WHITE8X8",
+                        edgeFile = "Interface\\Buttons\\WHITE8X8",
+                        edgeSize = 1,
+                        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+                    })
+                    header:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
+                    header:SetBackdropBorderColor(0.22, 0.25, 0.30, 0.85)
+
+                    header.icon = header:CreateTexture(nil, "ARTWORK")
+                    header.icon:SetSize(16, 16)
+                    header.icon:SetPoint("LEFT", 4, 0)
+
+                    header.title = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                    header.title:SetPoint("LEFT", header.icon, "RIGHT", 6, 0)
+                    header.title:SetPoint("RIGHT", -80, 0)
+                    header.title:SetJustifyH("LEFT")
+
+                    header.count = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    header.count:SetPoint("RIGHT", -6, 0)
+
+                    bagHeaderPool[headerIndex] = header
+                end
+
+                header:ClearAllPoints()
+                header:SetPoint("TOPLEFT", sellScrollContent, "TOPLEFT", 2, yOffset)
+                header.icon:SetTexture(bag.icon)
+                header.title:SetText(bag.name)
+                header.count:SetText(string.format("|cFFFFD100%d|r/%d items", #matching, bag.totalSlots))
+                header:Show()
+
+                yOffset = yOffset - 26
+
+                -- Render 6-column item slot grid
+                local numRows = math.ceil(#matching / 6)
+                for idx, item in ipairs(matching) do
+                    slotButtonIndex = slotButtonIndex + 1
+                    local btn = slotButtonPool[slotButtonIndex]
+                    if not btn then
+                        btn = CreateFrame("Button", nil, sellScrollContent, "BackdropTemplate")
+                        btn:SetSize(42, 42)
+                        btn:SetBackdrop({
+                            bgFile = "Interface\\Buttons\\WHITE8X8",
+                            edgeFile = "Interface\\Buttons\\WHITE8X8",
+                            edgeSize = 1,
+                            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+                        })
+                        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+                        btn.icon = btn:CreateTexture(nil, "ARTWORK")
+                        btn.icon:SetSize(36, 36)
+                        btn.icon:SetPoint("CENTER", 0, 0)
+
+                        btn.count = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+                        btn.count:SetPoint("BOTTOMRIGHT", -2, 2)
+
+                        slotButtonPool[slotButtonIndex] = btn
+                    end
+
+                    local col = (idx - 1) % 6
+                    local row = math.floor((idx - 1) / 6)
+                    local x = 6 + col * 46
+                    local y = yOffset - row * 46
+
+                    btn:ClearAllPoints()
+                    btn:SetPoint("TOPLEFT", sellScrollContent, "TOPLEFT", x, y)
+                    btn.icon:SetTexture(item.icon)
+                    btn.count:SetText(item.stackCount > 1 and tostring(item.stackCount) or "")
+
+                    local qColor = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] or { r = 0.4, g = 0.4, b = 0.4 }
+                    btn:SetBackdropColor(0.06, 0.08, 0.10, 0.95)
+                    btn:SetBackdropBorderColor(qColor.r or 0.4, qColor.g or 0.4, qColor.b or 0.4, 0.85)
+
+                    btn:SetScript("OnEnter", function(self)
+                        self:SetBackdropBorderColor(1, 0.82, 0, 1)
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        if item.link and GameTooltip.SetHyperlink then
+                            pcall(GameTooltip.SetHyperlink, GameTooltip, item.link)
+                        else
+                            GameTooltip:SetText(item.name, 1, 1, 1)
+                        end
+                        GameTooltip:AddLine(" ")
+                        GameTooltip:AddLine(string.format("%s (Slot %d)", bag.name, item.slot), 0.8, 0.8, 0.8)
+                        GameTooltip:AddLine(string.format("Stack Count: |cFFFFD100%d|r", item.stackCount), 1, 1, 1)
+                        if item.marketPrice and item.marketPrice > 0 then
+                            local priceStr = MarketSync.FormatMoney and MarketSync.FormatMoney(item.marketPrice) or tostring(item.marketPrice)
+                            GameTooltip:AddLine(string.format("Market Price: %s", priceStr), 1, 1, 1)
+                            local under = math.max(1, item.marketPrice - 1)
+                            local underStr = MarketSync.FormatMoney and MarketSync.FormatMoney(under) or tostring(under)
+                            GameTooltip:AddLine(string.format("Suggested Undercut (-1c): %s", underStr), 0.4, 1.0, 0.4)
+                        else
+                            GameTooltip:AddLine("Market Price: |cff888888No data|r", 1, 1, 1)
+                        end
+                        GameTooltip:AddLine(" ")
+                        GameTooltip:AddLine("|cFF00FF00Left-Click|r: Select into AH Sell slot", 0.9, 0.9, 0.9)
+                        GameTooltip:AddLine("|cFFFFD100Right-Click|r: Search in Auction House", 0.9, 0.9, 0.9)
+                        GameTooltip:Show()
+                    end)
+
+                    btn:SetScript("OnLeave", function(self)
+                        self:SetBackdropBorderColor(qColor.r or 0.4, qColor.g or 0.4, qColor.b or 0.4, 0.85)
+                        GameTooltip:Hide()
+                    end)
+
+                    btn:SetScript("OnClick", function(self, mouseButton)
+                        if mouseButton == "RightButton" then
+                            MarketSync.SearchInAuctionHouse(item.itemID)
+                            return
+                        end
+
+                        -- 1. Switch to native Sell tab
+                        if AuctionHouseFrame.Tabs and AuctionHouseFrame.Tabs[2] then
+                            AuctionHouseFrame.Tabs[2]:Click()
+                        end
+
+                        -- 2. Pick up item from container slot and place in sell frame
+                        local pFunc = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
+                        if pFunc then
+                            pFunc(item.bag, item.slot)
+                            if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.ItemDisplay then
+                                pcall(AuctionHouseFrame.ItemSellFrame.ItemDisplay.Click, AuctionHouseFrame.ItemSellFrame.ItemDisplay)
+                            elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay then
+                                pcall(AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay.Click, AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay)
+                            elseif ClickAuctionSellItemButton then
+                                pcall(ClickAuctionSellItemButton)
+                            end
+                            ClearCursor()
+                        end
+
+                        -- 3. Set suggested undercut price (marketPrice - 1 copper)
+                        if item.marketPrice and item.marketPrice > 1 then
+                            local undercutPrice = item.marketPrice - 1
+                            if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.PriceInput and AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount then
+                                pcall(AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount, AuctionHouseFrame.ItemSellFrame.PriceInput, undercutPrice)
+                            elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount then
+                                pcall(AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount, AuctionHouseFrame.CommoditiesSellFrame.UnitPrice, undercutPrice)
+                            end
+                        end
+                    end)
+
+                    btn:Show()
+                end
+
+                yOffset = yOffset - (numRows * 46) - 10
             end
         end
 
-        local rowH = 28
-        for i = 1, math.max(#items, #sellRows) do
-            local row = sellRows[i]
-            local item = items[i]
-
-            if item then
-                if not row then
-                    row = CreateFrame("Button", nil, sellScrollContent, "BackdropTemplate")
-                    row:SetHeight(rowH)
-                    row:SetPoint("LEFT", 2, 0)
-                    row:SetPoint("RIGHT", -2, 0)
-                    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-
-                    row.icon = row:CreateTexture(nil, "ARTWORK")
-                    row.icon:SetSize(22, 22)
-                    row.icon:SetPoint("LEFT", 4, 0)
-
-                    row.count = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                    row.count:SetPoint("BOTTOMRIGHT", row.icon, "BOTTOMRIGHT", 2, -2)
-
-                    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                    row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-                    row.name:SetPoint("RIGHT", -80, 0)
-                    row.name:SetJustifyH("LEFT")
-
-                    row.price = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    row.price:SetPoint("RIGHT", -6, 0)
-
-                    sellRows[i] = row
-                end
-
-                row:SetPoint("TOPLEFT", 0, -(i - 1) * rowH)
-                row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
-
-                if i % 2 == 0 then
-                    row:SetBackdropColor(0.1, 0.12, 0.15, 0.6)
-                else
-                    row:SetBackdropColor(0.06, 0.08, 0.1, 0.6)
-                end
-
-                row.icon:SetTexture(item.icon)
-                row.count:SetText(item.totalCount > 1 and tostring(item.totalCount) or "")
-                local colorHex = "ffffffff"
-                if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] then
-                    colorHex = ITEM_QUALITY_COLORS[item.quality].hex or "ffffffff"
-                end
-                row.name:SetText(string.format("|c%s%s|r", colorHex, item.name))
-                row.price:SetText(GetPriceText(item.itemID))
-
-                -- Clicking bag row: switches AH to Sell tab and selects item for posting
-                row:SetScript("OnClick", function()
-                    -- 1. Switch to native Sell tab
-                    if AuctionHouseFrame.Tabs and AuctionHouseFrame.Tabs[2] then
-                        AuctionHouseFrame.Tabs[2]:Click()
-                    end
-
-                    -- 2. Pick up item from first slot and place in sell frame
-                    local firstSlot = item.slots and item.slots[1]
-                    if firstSlot and C_Container and C_Container.PickupContainerItem then
-                        C_Container.PickupContainerItem(firstSlot.bag, firstSlot.slot)
-                        if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.ItemDisplay then
-                            pcall(AuctionHouseFrame.ItemSellFrame.ItemDisplay.Click, AuctionHouseFrame.ItemSellFrame.ItemDisplay)
-                        elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay then
-                            pcall(AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay.Click, AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay)
-                        elseif ClickAuctionSellItemButton then
-                            pcall(ClickAuctionSellItemButton)
-                        end
-                        ClearCursor()
-                    end
-
-                    -- 3. Set suggested undercut price
-                    local marketP = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(item.itemID)
-                    if marketP and marketP > 1 then
-                        local undercutPrice = marketP - 1
-                        if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.PriceInput and AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount then
-                            pcall(AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount, AuctionHouseFrame.ItemSellFrame.PriceInput, undercutPrice)
-                        elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount then
-                            pcall(AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount, AuctionHouseFrame.CommoditiesSellFrame.UnitPrice, undercutPrice)
-                        end
-                    end
-                end)
-
-                -- Tooltip
-                row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.2, 0.25, 0.35, 0.8)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    if item.link and GameTooltip.SetHyperlink then
-                        pcall(GameTooltip.SetHyperlink, GameTooltip, item.link)
-                    else
-                        GameTooltip:SetText(item.name, 1, 1, 1)
-                    end
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(string.format("In Bags: |cFFFFD100%d|r", item.totalCount), 1, 1, 1)
-                    GameTooltip:AddLine("|cFF00FF00Click|r to select into Auction House Sell slot", 0.8, 0.8, 0.8)
-                    GameTooltip:Show()
-                end)
-                row:SetScript("OnLeave", function(self)
-                    if i % 2 == 0 then
-                        self:SetBackdropColor(0.1, 0.12, 0.15, 0.6)
-                    else
-                        self:SetBackdropColor(0.06, 0.08, 0.1, 0.6)
-                    end
-                    GameTooltip:Hide()
-                end)
-
-                row:Show()
-            elseif row then
-                row:Hide()
-            end
+        if totalMatching == 0 then
+            sellEmptyText:Show()
+        else
+            sellEmptyText:Hide()
         end
-        sellScrollContent:SetHeight(math.max(1, #items * rowH))
+
+        sellScrollContent:SetHeight(math.max(1, -yOffset))
     end
     Sidecar.UpdateSellView = UpdateSellView
 

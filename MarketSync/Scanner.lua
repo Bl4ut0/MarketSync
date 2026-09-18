@@ -91,7 +91,7 @@ function S.Cancel(reason)
     S.Notify()
 end
 
-local function RecordScanObservation(itemKey, unitPrice, available, isCommodity)
+local function RecordScanObservation(itemKey, unitPrice, available, isCommodity, isFullScan)
     if not itemKey or not unitPrice or unitPrice <= 0 then return end
     local itemID = itemKey.itemID
     local dbKey = tostring(itemID)
@@ -132,7 +132,15 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity)
     entry.vh[dayStr] = entry.h[dayStr]
 
     realmDB.PersonalScanTime = now
-    realmDB.SwarmTSF = now
+    if isFullScan then
+        realmDB.FullScanTime = now
+        realmDB.SwarmTSF = now
+    else
+        realmDB.PartialScanTime = now
+        if not realmDB.SwarmTSF or realmDB.SwarmTSF == 0 then
+            realmDB.SwarmTSF = now
+        end
+    end
     realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
 
     -- Record in live Scanner feed
@@ -292,12 +300,87 @@ function S.ScanWatched()
     return S.StartScan(ids, "Scanning Watched Items (" .. #ids .. " items)...")
 end
 
+function S.GetFullScanCooldownRemaining()
+    if not MarketSyncDB or not MarketSyncDB.LastFullScanAt then return 0 end
+    local elapsed = time() - MarketSyncDB.LastFullScanAt
+    if elapsed < 900 then
+        return 900 - elapsed
+    end
+    return 0
+end
+
+function S.ScanMultipleLists(listNames)
+    if type(listNames) ~= "table" or #listNames == 0 then return false end
+    local seen = {}
+    local ids = {}
+    for _, listName in ipairs(listNames) do
+        local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(listName) or {}
+        for _, it in ipairs(items) do
+            if it.itemID and not seen[it.itemID] then
+                seen[it.itemID] = true
+                table.insert(ids, it.itemID)
+            end
+        end
+    end
+    if #ids == 0 then
+        S.Status = "No items in selected lists"
+        S.Notify()
+        return false
+    end
+    local title = string.format("Scanning %d Lists (%d items)...", #listNames, #ids)
+    return S.StartScan(ids, title)
+end
+
+function S.StartFullScan()
+    if not S.IsAvailable() then
+        S.Status = "Auctioneer must be open to scan"
+        S.Notify()
+        return false
+    end
+
+    local cd = S.GetFullScanCooldownRemaining()
+    if cd > 0 then
+        local mins = math.floor(cd / 60)
+        local secs = cd % 60
+        S.Status = string.format("Full scan on cooldown (%dm %02ds remaining)", mins, secs)
+        S.Notify()
+        return false
+    end
+
+    if not A or type(A.ReplicateItems) ~= "function" then
+        S.Status = "Full scan (ReplicateItems) not supported on this client"
+        S.Notify()
+        return false
+    end
+
+    S.Generation = S.Generation + 1
+    S.Active = true
+    S.Pending = nil
+    S.Queue = {}
+    S.RecentResults = {}
+    S.Progress.total = 100
+    S.Progress.current = 0
+    S.Status = "Requesting full AH snapshot from server..."
+    S.Notify()
+
+    local ok = pcall(A.ReplicateItems)
+    if not ok then
+        S.Active = false
+        S.Status = "ReplicateItems request failed"
+        S.Notify()
+        return false
+    end
+
+    return true
+end
+
 -- ================================================================
--- EVENT FRAME: Handle Search Results
+-- EVENT FRAME: Handle Search Results & Full Scan Replicate
 -- ================================================================
 local eventFrame = CreateFrame("Frame")
 pcall(eventFrame.RegisterEvent, eventFrame, "ITEM_SEARCH_RESULTS_UPDATED")
 pcall(eventFrame.RegisterEvent, eventFrame, "COMMODITY_SEARCH_RESULTS_UPDATED")
+pcall(eventFrame.RegisterEvent, eventFrame, "REPLICATE_ITEM_LIST_UPDATE")
 pcall(eventFrame.RegisterEvent, eventFrame, "AUCTION_HOUSE_CLOSED")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
@@ -305,6 +388,92 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if S.Active then
             S.Cancel("Auctioneer closed")
         end
+        return
+    end
+
+    if event == "REPLICATE_ITEM_LIST_UPDATE" then
+        if not S.Active or not A or type(A.GetNumReplicateItems) ~= "function" then return end
+        local totalItems = A.GetNumReplicateItems() or 0
+        if totalItems == 0 then
+            S.Status = "Replicate returned 0 items"
+            S.Active = false
+            S.Notify()
+            return
+        end
+
+        S.Status = string.format("Processing %d auction items...", totalItems)
+        S.Progress.total = totalItems
+        S.Progress.current = 0
+        S.Notify()
+
+        local SLICE_SIZE = 1000
+        local currentIndex = 0
+        local aggregated = {}
+
+        local sliceFrame = CreateFrame("Frame")
+        sliceFrame:SetScript("OnUpdate", function(sf)
+            if not S.Active then
+                sf:SetScript("OnUpdate", nil)
+                return
+            end
+
+            local stopIndex = math.min(totalItems, currentIndex + SLICE_SIZE)
+            for idx = currentIndex + 1, stopIndex do
+                local name, texture, count, qualityID, canUse, level, levelColHeader, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, bidderFullName, owner, ownerFullName, saleStatus, itemID = A.GetReplicateItemInfo(idx - 1)
+                if not itemID and type(name) == "table" and name.itemID then
+                    local info = name
+                    itemID = info.itemID
+                    count = info.quantity or 1
+                    buyoutPrice = info.buyoutAmount or 0
+                end
+
+                if itemID and itemID > 0 and count and count > 0 and buyoutPrice and buyoutPrice > 0 then
+                    local unitPrice = math.floor(buyoutPrice / count)
+                    if unitPrice > 0 then
+                        if not aggregated[itemID] or unitPrice < aggregated[itemID].unitPrice then
+                            aggregated[itemID] = {
+                                itemID = itemID,
+                                unitPrice = unitPrice,
+                                available = (aggregated[itemID] and aggregated[itemID].available or 0) + count,
+                            }
+                        else
+                            aggregated[itemID].available = (aggregated[itemID].available or 0) + count
+                        end
+                    end
+                end
+            end
+
+            currentIndex = stopIndex
+            S.Progress.current = currentIndex
+            S.Status = string.format("Processing auctions (%d / %d)...", currentIndex, totalItems)
+            S.Notify()
+
+            if currentIndex >= totalItems then
+                sf:SetScript("OnUpdate", nil)
+                local countRecorded = 0
+                for itemID, info in pairs(aggregated) do
+                    local key = { itemID = itemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
+                    RecordScanObservation(key, info.unitPrice, info.available, false, true)
+                    countRecorded = countRecorded + 1
+                end
+
+                MarketSyncDB.LastFullScanAt = time()
+                local realmDB = MarketSync.GetRealmDB()
+                if realmDB then
+                    realmDB.FullScanTime = time()
+                    realmDB.PersonalScanTime = time()
+                    realmDB.SwarmTSF = time()
+                end
+
+                S.Active = false
+                S.Status = string.format("Full Scan Complete: %d items recorded", countRecorded)
+                if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+                if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+                    C_Timer.After(1, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
+                end
+                S.Notify()
+            end
+        end)
         return
     end
 
@@ -316,7 +485,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if updatedItemID and S.Pending.itemID and updatedItemID == S.Pending.itemID then
         local minPrice, available = SummarizeSearchResults(S.Pending, isCommodity)
         if minPrice and minPrice > 0 then
-            RecordScanObservation(S.Pending, minPrice, available, isCommodity)
+            RecordScanObservation(S.Pending, minPrice, available, isCommodity, false)
         end
         S.Pending = nil
         S.ScheduleNext()

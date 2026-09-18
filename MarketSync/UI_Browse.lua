@@ -901,14 +901,10 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel:SetAllPoints(parent)
     panel.dataSource = dataSourceName
 
-    -- --- Search Bar ---
-    local nameLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    nameLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 80, -38)
-    nameLabel:SetText("Name")
-
+    -- --- Search Bar (matches native AH search bar alignment) ---
     local searchBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    searchBox:SetSize(160, 20)
-    searchBox:SetPoint("TOPLEFT", parent, "TOPLEFT", 80, -50)
+    searchBox:SetSize(220, 20)
+    searchBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 80, -46)
     searchBox:SetAutoFocus(false)
     searchBox:SetScript("OnEnterPressed", function(self)
         self:ClearFocus()
@@ -933,15 +929,15 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     -- Search Button
     local searchBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    searchBtn:SetSize(80, 22)
-    searchBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -40, -50)
+    searchBtn:SetSize(84, 22)
+    searchBtn:SetPoint("LEFT", searchBox, "RIGHT", 8, 0)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() panel:RunSearch() end)
 
     -- Reset Button
     local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    resetBtn:SetSize(80, 22)
-    resetBtn:SetPoint("RIGHT", searchBtn, "LEFT", -5, 0)
+    resetBtn:SetSize(74, 22)
+    resetBtn:SetPoint("LEFT", searchBtn, "RIGHT", 6, 0)
     resetBtn:SetText("Reset")
     resetBtn:SetScript("OnClick", function()
         searchBox:SetText("")
@@ -983,24 +979,57 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     local function MakeFilterButton(parentFrame, labelText, indent, yOff, btnWidth)
         local w = btnWidth or (SIDEBAR_WIDTH - 6)
-        local btn = CreateFrame("Button", nil, parentFrame)
+        local btn = CreateFrame("Button", nil, parentFrame, "BackdropTemplate")
         btn:SetSize(w, FILTER_HEIGHT)
         btn:SetPoint("TOPLEFT", 0, -yOff)
 
+        -- Normal background
         local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetColorTexture(1, 1, 1, 0.02)
+        bg:SetColorTexture(0.08, 0.09, 0.12, 0.35)
         bg:SetAllPoints()
 
+        -- Selected highlight (dark gold background + gold border)
+        local selBg = btn:CreateTexture(nil, "BORDER")
+        selBg:SetPoint("TOPLEFT", 1, -1)
+        selBg:SetPoint("BOTTOMRIGHT", -1, 1)
+        selBg:SetColorTexture(0.24, 0.18, 0.05, 0.75)
+        selBg:Hide()
+        btn.selBg = selBg
+
+        btn:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        })
+        btn:SetBackdropBorderColor(0, 0, 0, 0)
+
         local text = btn:CreateFontString(nil, "ARTWORK", indent > 0 and "GameFontHighlightSmallLeft" or "GameFontNormalSmallLeft")
-        text:SetSize(w - 10 - indent, 8)
-        text:SetPoint("LEFT", 4 + indent, 0)
+        text:SetSize(w - 10 - indent, 12)
+        text:SetPoint("LEFT", 6 + indent, 0)
         text:SetText(labelText)
         btn.text = text
 
+        -- Hover highlight: subtle warm amber glow
         local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
-        hl:SetBlendMode("ADD")
+        hl:SetColorTexture(1, 0.82, 0, 0.12)
         hl:SetAllPoints()
+
+        btn.SetSelected = function(self, isSelected)
+            if isSelected then
+                self.selBg:Show()
+                self:SetBackdropBorderColor(1, 0.82, 0, 0.75)
+                self.text:SetTextColor(1, 0.82, 0)
+            else
+                self.selBg:Hide()
+                self:SetBackdropBorderColor(0, 0, 0, 0)
+                if indent > 0 then
+                    self.text:SetTextColor(0.85, 0.85, 0.85)
+                else
+                    self.text:SetTextColor(1, 1, 1)
+                end
+            end
+        end
+
         return btn
     end
 
@@ -1014,9 +1043,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             local btn = MakeFilterButton(self.filterChild, cat.name, 0, y, btnWidth)
             btn.classID = cat.classID
             btn.isCategory = true
-            if self.activeCategory == cat.classID and not self.activeSubCategory then
-                btn:LockHighlight()
-            end
+            local isCatSelected = (self.activeCategory == cat.classID and not self.activeSubCategory)
+            btn:SetSelected(isCatSelected)
+
             btn:SetScript("OnClick", function()
                 if self.activeCategory == cat.classID and self.activeSubCategory == nil then
                     -- Toggle OFF: Clear filter and collapse
@@ -1039,9 +1068,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     local sbtn = MakeFilterButton(self.filterChild, sub.name, 12, y, btnWidth)
                     sbtn.classID = cat.classID
                     sbtn.subID = sub.subID
-                    if self.activeSubCategory == sub.subID and self.activeCategory == cat.classID then
-                        sbtn:LockHighlight()
-                    end
+                    local isSubSelected = (self.activeSubCategory == sub.subID and self.activeCategory == cat.classID)
+                    sbtn:SetSelected(isSubSelected)
+
                     sbtn:SetScript("OnClick", function()
                         if self.activeCategory == cat.classID and self.activeSubCategory == sub.subID then
                             self.activeSubCategory = nil -- Toggle OFF (Revert to Parent)
@@ -1077,19 +1106,21 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         panel:UpdateResults()
         for _, h in ipairs(panel.headerButtons) do
             if h.sortKey == field then
-                h.arrow:Show()
+                if h.arrow then h.arrow:Show() end
+                if h.label then h.label:SetTextColor(1, 0.82, 0) end
                 if panel.sortAscending then
-                    h.arrow:SetTexCoord(0, 0.5625, 1.0, 0)
+                    if h.arrow then h.arrow:SetTexCoord(0, 0.5625, 1.0, 0) end
                 else
-                    h.arrow:SetTexCoord(0, 0.5625, 0, 1.0)
+                    if h.arrow then h.arrow:SetTexCoord(0, 0.5625, 0, 1.0) end
                 end
             else
-                h.arrow:Hide()
+                if h.arrow then h.arrow:Hide() end
+                if h.label then h.label:SetTextColor(0.85, 0.85, 0.85) end
             end
         end
     end
 
-    -- --- COLUMN HEADERS ---
+    -- --- COLUMN HEADERS (matches Blizzard AH dark charcoal headers) ---
     local colDefs = {
         {name = "Rarity",  width = 275, sortKey = "rarity"},
         {name = "Lvl",     width = 42,  sortKey = "minLevel"},
@@ -1097,65 +1128,38 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         {name = "Age",     width = 50,  sortKey = nil},
         {name = "Source",  width = 55,  sortKey = nil},
         {name = "Src Age", width = 60,  sortKey = nil},
-        {name = "",        width = 62,  sortKey = nil},
+        {name = "",        width = 48,  sortKey = nil},
     }
-    local colX = 193
+    local colX = 184
     panel.headerButtons = {}
     for i, col in ipairs(colDefs) do
-        local hdr = CreateFrame("Button", nil, panel)
-        hdr:SetSize(col.width, 19)
-        hdr:SetPoint("TOPLEFT", parent, "TOPLEFT", colX, -81)
+        local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(panel, col.width, 20, col.name, col.sortKey)
+        if not hdr then
+            hdr = CreateFrame("Button", nil, panel, "BackdropTemplate")
+            hdr:SetSize(col.width, 20)
+            hdr.label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            hdr.label:SetPoint("LEFT", 6, 0)
+            hdr.label:SetText(col.name)
+        end
+        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", colX, -75)
         hdr.sortKey = col.sortKey
 
-        local hleft = hdr:CreateTexture(nil, "BACKGROUND")
-        hleft:SetTexture("Interface\\FriendsFrame\\WhoFrame-ColumnTabs")
-        hleft:SetSize(5, 19)
-        hleft:SetPoint("TOPLEFT")
-        hleft:SetTexCoord(0, 0.078125, 0, 0.59375)
-
-        local hright = hdr:CreateTexture(nil, "BACKGROUND")
-        hright:SetTexture("Interface\\FriendsFrame\\WhoFrame-ColumnTabs")
-        hright:SetSize(4, 19)
-        hright:SetPoint("TOPRIGHT")
-        hright:SetTexCoord(0.90625, 0.96875, 0, 0.59375)
-
-        local hmid = hdr:CreateTexture(nil, "BACKGROUND")
-        hmid:SetTexture("Interface\\FriendsFrame\\WhoFrame-ColumnTabs")
-        hmid:SetPoint("LEFT", hleft, "RIGHT")
-        hmid:SetPoint("RIGHT", hright, "LEFT")
-        hmid:SetHeight(19)
-        hmid:SetTexCoord(0.078125, 0.90625, 0, 0.59375)
-
-        local htxt = hdr:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        htxt:SetPoint("LEFT", 8, 0)
-        htxt:SetText(col.name)
-
-        local arrow = hdr:CreateTexture(nil, "ARTWORK")
-        arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
-        arrow:SetSize(9, 8)
-        arrow:SetPoint("LEFT", htxt, "RIGHT", 3, -2)
-        arrow:SetTexCoord(0, 0.5625, 0, 1.0)
-        arrow:Hide()
-        hdr.arrow = arrow
-
         if col.sortKey == "price" then
-            arrow:Show()
-            arrow:SetTexCoord(0, 0.5625, 1.0, 0)
+            if hdr.arrow then
+                hdr.arrow:Show()
+                hdr.arrow:SetTexCoord(0, 0.5625, 1.0, 0)
+            end
+            if hdr.label then
+                hdr.label:SetTextColor(1, 0.82, 0)
+            end
         end
-
-        local hhl = hdr:CreateTexture(nil, "HIGHLIGHT")
-        hhl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
-        hhl:SetBlendMode("ADD")
-        hhl:SetPoint("LEFT", 0, 0)
-        hhl:SetPoint("RIGHT", 4, 0)
-        hhl:SetHeight(24)
 
         if col.sortKey then
             hdr:SetScript("OnClick", function() SortResults(col.sortKey) end)
         end
 
         panel.headerButtons[i] = hdr
-        colX = colX + col.width - 2
+        colX = colX + col.width
     end
 
     -- --- Prev/Next Buttons (in gold bar, right side) ---
@@ -1164,7 +1168,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     local prevBtn = CreateFrame("Button", nil, panel)
     prevBtn:SetSize(28, 28)
-    prevBtn:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -50, 11)
+    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -50, 11)
     prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
     prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
     prevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
@@ -1197,24 +1201,24 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     -- No results text
     panel.noResultsText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    panel.noResultsText:SetPoint("TOP", parent, "TOP", 115, -200)
+    panel.noResultsText:SetPoint("TOP", panel, "TOP", 115, -200)
     panel.noResultsText:SetText("Search for items using the box above.")
     panel.noResultsText:Show()
 
     -- --- STATUS TEXT (inside the bottom gold bar, left side) ---
     panel.statusText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.statusText:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 30, 20)
+    panel.statusText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 30, 20)
     panel.statusText:SetWidth(200)
     panel.statusText:SetJustifyH("LEFT")
 
     -- --- "Last Guild Sync" LABEL (aligned with Rarity column area) ---
     panel.syncLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.syncLabel:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 195, 20)
+    panel.syncLabel:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 195, 20)
     panel.syncLabel:SetJustifyH("LEFT")
 
     -- --- ITEM COUNT TEXT (center-left of gold bar) ---
     panel.itemCountText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.itemCountText:SetPoint("BOTTOM", parent, "BOTTOM", -60, 20)
+    panel.itemCountText:SetPoint("BOTTOM", panel, "BOTTOM", -60, 20)
     panel.itemCountText:SetWidth(200)
     panel.itemCountText:SetJustifyH("CENTER")
 
@@ -1286,7 +1290,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     for i = 1, NUM_RESULTS_TO_DISPLAY do
         local row = CreateFrame("Button", nil, panel)
         row:SetSize(632, RESULT_HEIGHT)
-        row:SetPoint("TOPLEFT", parent, "TOPLEFT", 195, -107 - (i-1) * RESULT_HEIGHT)
+        row:SetPoint("TOPLEFT", panel, "TOPLEFT", 184, -97 - (i-1) * RESULT_HEIGHT)
 
         -- Item Icon
         local iconBtn = CreateFrame("Button", nil, row)
@@ -1307,17 +1311,21 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         countText:SetJustifyH("RIGHT")
         row.countText = countText
 
-        -- Modern clean row background replacing legacy parchment slices
+        -- Modern clean row background matching native AH subtle alternation
         local rowBg = row:CreateTexture(nil, "BACKGROUND")
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowBg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.035 or 0.015)
+        if i % 2 == 0 then
+            rowBg:SetColorTexture(0.08, 0.09, 0.12, 0.50)
+        else
+            rowBg:SetColorTexture(0.04, 0.05, 0.07, 0.50)
+        end
         row.rowBg = rowBg
 
         local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
         rowHl:SetPoint("TOPLEFT", 34, 0)
         rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(1, 0.84, 0, 0.12)
+        rowHl:SetColorTexture(0.18, 0.22, 0.30, 0.60)
 
         -- Name text
         local nameText = row:CreateFontString(nil, "BACKGROUND", "GameFontNormal")

@@ -70,10 +70,42 @@ local function IsSupportedProcessType(processType)
 end
 
 local function BuildDropdown(frameName, parent, width, initFunc)
-    local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate")
+    local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate,BackdropTemplate")
     UIDropDownMenu_SetWidth(dd, width)
     dd._initFunc = initFunc
     UIDropDownMenu_Initialize(dd, initFunc)
+
+    -- Reskin to sleek AH dark style
+    local left = _G[frameName.."Left"]
+    local mid = _G[frameName.."Middle"]
+    local right = _G[frameName.."Right"]
+    if left then left:Hide() end
+    if mid then mid:Hide() end
+    if right then right:Hide() end
+
+    dd:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    dd:SetBackdropColor(0.08, 0.10, 0.13, 0.95)
+    dd:SetBackdropBorderColor(0.25, 0.28, 0.35, 0.8)
+
+    local txt = _G[frameName.."Text"]
+    if txt then
+        txt:ClearAllPoints()
+        txt:SetPoint("LEFT", dd, "LEFT", 10, 0)
+        txt:SetPoint("RIGHT", dd, "RIGHT", -24, 0)
+        txt:SetJustifyH("LEFT")
+    end
+
+    local btn = _G[frameName.."Button"]
+    if btn then
+        btn:ClearAllPoints()
+        btn:SetPoint("RIGHT", dd, "RIGHT", -2, 0)
+    end
+
     return dd
 end
 
@@ -410,11 +442,17 @@ function MarketSync.CreateProcessingPanel(parent)
 
         for _, t in ipairs(MarketSync.GetProcessingTargets and MarketSync.GetProcessingTargets() or {}) do
             local opt = UIDropDownMenu_CreateInfo()
-            opt.text = string.format("%s (%d)", t.name or ("Item " .. tostring(t.itemID)), t.itemID)
+            local priceStr = ""
+            local price = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(t.itemID)
+            if price and price > 0 and MarketSync.FormatMoney then
+                priceStr = "  " .. MarketSync.FormatMoney(price)
+            end
+            opt.text = string.format("%s%s", t.name or ("Item #" .. tostring(t.itemID)), priceStr)
+            opt.icon = t.icon or (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(t.itemID))
             opt.func = function()
                 panel.selectedTargetID = t.itemID
-                targetInputBox:SetText(t.name or ("Item " .. tostring(t.itemID)))
-                UIDropDownMenu_SetText(targetDropdown, opt.text)
+                targetInputBox:SetText(t.name or ("Item #" .. tostring(t.itemID)))
+                UIDropDownMenu_SetText(targetDropdown, t.name or ("Item #" .. tostring(t.itemID)))
             end
             UIDropDownMenu_AddButton(opt, level)
         end
@@ -500,7 +538,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnRun:SetSize(100, 22)
-    btnRun:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -238, -44)
+    btnRun:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -238, -44)
 
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnExport:SetSize(100, 22)
@@ -513,7 +551,7 @@ function MarketSync.CreateProcessingPanel(parent)
     btnTrack:SetText("Track")
 
     local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    statusSummary:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -22, -66)
+    statusSummary:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -66)
     statusSummary:SetWidth(320)
     statusSummary:SetJustifyH("RIGHT")
     statusSummary:SetText("|cff888888Ready|r")
@@ -535,74 +573,32 @@ function MarketSync.CreateProcessingPanel(parent)
     local function RefreshHeaderArrows()
         for _, h in ipairs(panel.headerButtons) do
             if h.sortKey and h.sortKey == panel.sortField then
-                h.arrow:Show()
+                if h.arrow then h.arrow:Show() end
+                if h.label then h.label:SetTextColor(1, 0.82, 0) end
                 if panel.sortAscending then
-                    h.arrow:SetTexCoord(0, 0.5625, 1.0, 0)
+                    if h.arrow then h.arrow:SetTexCoord(0, 0.5625, 1.0, 0) end
                 else
-                    h.arrow:SetTexCoord(0, 0.5625, 0, 1.0)
+                    if h.arrow then h.arrow:SetTexCoord(0, 0.5625, 0, 1.0) end
                 end
             else
-                h.arrow:Hide()
+                if h.arrow then h.arrow:Hide() end
+                if h.label then h.label:SetTextColor(0.85, 0.85, 0.85) end
             end
         end
     end
 
-    local colX = 193
+    local colX = RESULTS_X - 2
     for i, col in ipairs(colDefs) do
-        local hdr = CreateFrame("Button", nil, panel)
-        hdr:SetSize(col.width, 19)
-        hdr:SetPoint("TOPLEFT", parent, "TOPLEFT", colX, -81)
+        local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(panel, col.width, 20, col.name, col.sortKey)
+        if not hdr then
+            hdr = CreateFrame("Button", nil, panel, "BackdropTemplate")
+            hdr:SetSize(col.width, 20)
+            hdr.label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            hdr.label:SetPoint("LEFT", 6, 0)
+            hdr.label:SetText(col.name)
+        end
+        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", colX, -77)
         hdr.sortKey = col.sortKey
-
-        local hleft = hdr:CreateTexture(nil, "BACKGROUND")
-        hleft:SetTexture("Interface\\FriendsFrame\\WhoFrame-ColumnTabs")
-        hleft:SetSize(5, 19)
-        hleft:SetPoint("TOPLEFT")
-        hleft:SetTexCoord(0, 0.078125, 0, 0.59375)
-
-        local hright = hdr:CreateTexture(nil, "BACKGROUND")
-        hright:SetTexture("Interface\\FriendsFrame\\WhoFrame-ColumnTabs")
-        hright:SetSize(4, 19)
-        hright:SetPoint("TOPRIGHT")
-        hright:SetTexCoord(0.90625, 0.96875, 0, 0.59375)
-
-        local hmid = hdr:CreateTexture(nil, "BACKGROUND")
-        hmid:SetTexture("Interface\\FriendsFrame\\WhoFrame-ColumnTabs")
-        hmid:SetPoint("LEFT", hleft, "RIGHT")
-        hmid:SetPoint("RIGHT", hright, "LEFT")
-        hmid:SetHeight(19)
-        hmid:SetTexCoord(0.078125, 0.90625, 0, 0.59375)
-
-        local htxt = hdr:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        htxt:SetPoint("LEFT", 8, 0)
-        htxt:SetText(col.name)
-        hdr.label = htxt
-
-        local arrow = hdr:CreateTexture(nil, "ARTWORK")
-        arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
-        arrow:SetSize(9, 8)
-        arrow:SetPoint("LEFT", htxt, "RIGHT", 3, -2)
-        arrow:SetTexCoord(0, 0.5625, 0, 1.0)
-        arrow:Hide()
-        hdr.arrow = arrow
-
-        hdr:SetScript("OnEnter", function(self)
-            if not self.tooltipText then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(self.tooltipTitle or col.name, 1, 0.82, 0)
-            GameTooltip:AddLine(self.tooltipText, 0.85, 0.85, 0.85, true)
-            GameTooltip:Show()
-        end)
-        hdr:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-
-        local hhl = hdr:CreateTexture(nil, "HIGHLIGHT")
-        hhl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
-        hhl:SetBlendMode("ADD")
-        hhl:SetPoint("LEFT", 0, 0)
-        hhl:SetPoint("RIGHT", 4, 0)
-        hhl:SetHeight(24)
 
         if col.sortKey then
             hdr:SetScript("OnClick", function()
@@ -620,7 +616,7 @@ function MarketSync.CreateProcessingPanel(parent)
         end
 
         panel.headerButtons[i] = hdr
-        colX = colX + col.width - 2
+        colX = colX + col.width
     end
 
     local ARBITRAGE_HEADERS = {
@@ -661,7 +657,7 @@ function MarketSync.CreateProcessingPanel(parent)
     for i = 1, RESULTS_PER_PAGE do
         local row = CreateFrame("Button", nil, panel)
         row:SetSize(ROW_WIDTH, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", parent, "TOPLEFT", RESULTS_X, -107 - ((i - 1) * ROW_HEIGHT))
+        row:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, -103 - ((i - 1) * ROW_HEIGHT))
 
         local iconButton = CreateFrame("Button", nil, row)
         iconButton:SetSize(32, 32)
@@ -675,17 +671,21 @@ function MarketSync.CreateProcessingPanel(parent)
         iconBorder:SetSize(60, 60)
         iconBorder:SetPoint("CENTER")
 
-        -- Modern clean row background replacing legacy parchment slices
+        -- Modern clean row background matching native AH subtle alternation
         local rowBg = row:CreateTexture(nil, "BACKGROUND")
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowBg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.035 or 0.015)
+        if i % 2 == 0 then
+            rowBg:SetColorTexture(0.08, 0.09, 0.12, 0.50)
+        else
+            rowBg:SetColorTexture(0.04, 0.05, 0.07, 0.50)
+        end
         row.rowBg = rowBg
 
         local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
         rowHl:SetPoint("TOPLEFT", 34, 0)
         rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(1, 0.84, 0, 0.12)
+        rowHl:SetColorTexture(0.18, 0.22, 0.30, 0.60)
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         row.nameText:SetPoint("TOPLEFT", 43, -3)
@@ -834,6 +834,17 @@ function MarketSync.CreateProcessingPanel(parent)
                     UIDropDownMenu_AddButton(info, level)
 
                     info = UIDropDownMenu_CreateInfo()
+                    info.text = "Search in AH"
+                    info.notCheckable = true
+                    info.func = function()
+                        if MarketSync.SearchInAuctionHouse then
+                            local searchTarget = (row.data and row.data.name) or (row.nameText and row.nameText:GetText()) or row.itemID
+                            MarketSync.SearchInAuctionHouse(searchTarget)
+                        end
+                    end
+                    UIDropDownMenu_AddButton(info, level)
+
+                    info = UIDropDownMenu_CreateInfo()
                     info.text = ""
                     info.isTitle = true
                     info.notCheckable = true
@@ -881,13 +892,13 @@ function MarketSync.CreateProcessingPanel(parent)
 
 
     panel.noResultsText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    panel.noResultsText:SetPoint("TOP", parent, "TOP", 115, -200)
+    panel.noResultsText:SetPoint("TOP", panel, "TOP", 115, -200)
     panel.noResultsText:SetText("|cff888888Run a mode to see results.|r")
     panel.noResultsText:Show()
 
     local prevBtn = CreateFrame("Button", nil, panel)
     prevBtn:SetSize(28, 28)
-    prevBtn:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -50, 11)
+    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -50, 11)
     prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
     prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
     prevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
@@ -905,7 +916,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local btnResyncProf = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnResyncProf:SetSize(118, 20)
-    btnResyncProf:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", RESULTS_X + 2, 15)
+    btnResyncProf:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RESULTS_X + 2, 15)
     btnResyncProf:SetText("Resync Profs")
     btnResyncProf:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")

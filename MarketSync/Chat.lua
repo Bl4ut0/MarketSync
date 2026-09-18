@@ -111,18 +111,28 @@ local function ComputeFreshness(advBucket, advItemCount, advScanTime)
         ourItemCount = MarketSync.CountRecentItemsBucket(ourBucket)
     end
     local ourScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
+    local ourTotalCount = (MarketSync.GetTotalPersonalItemCount and MarketSync.GetTotalPersonalItemCount()) or 0
 
     local isFresher = false
     if advBucket > ourBucket then
         -- They have a newer bucket, always fresher
         isFresher = true
     elseif advBucket == ourBucket then
-        -- Same bucket: TSF decides; count fallback only for legacy TSF=0 paths.
-        if advScanTime > ourScanTime then
+        -- In the same bucket:
+        -- If peer has more items (e.g. peer performed a full scan while we only have a partial scan),
+        -- or if peer's scan time is newer and they do not have fewer items.
+        if (advItemCount or 0) > ourItemCount then
             isFresher = true
-        elseif advScanTime == 0 and advItemCount > ourItemCount then
+        elseif advScanTime > ourScanTime and (advItemCount or 0) >= ourItemCount then
+            isFresher = true
+        elseif advScanTime == 0 and (advItemCount or 0) > ourItemCount then
             isFresher = true
         end
+    elseif ourTotalCount < 200 and (advItemCount or 0) > 500 then
+        -- Baseline bootstrap: local database has sparse/empty catalog (< 200 items), while peer
+        -- advertises a full catalog (> 500 items). Request baseline catchup from bucket 0.
+        isFresher = true
+        ourBucket = 0
     end
 
     return isFresher, ourBucket, ourItemCount, ourScanTime

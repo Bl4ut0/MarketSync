@@ -1023,6 +1023,17 @@ function MarketSync.CountRecentItemsBucket(sinceBucket)
     end
     return count
 end
+
+function MarketSync.GetTotalPersonalItemCount()
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if not realmDB or not realmDB.PersonalData then return 0 end
+    local count = 0
+    for _ in pairs(realmDB.PersonalData) do
+        count = count + 1
+    end
+    return count
+end
+
 -- CountRecentItems was replaced by CountRecentItemsBucket above for Personal Data.
 function MarketSync.GetMyLatestScanDay()
     local pData = MarketSync.GetRealmDB().PersonalData
