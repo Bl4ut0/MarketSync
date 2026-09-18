@@ -30,10 +30,22 @@ function AH.ShowAuctionHousePanel(targetTab)
 end
 
 function AH.HideAuctionHousePanel()
-    if AH.ScannerPanel then AH.ScannerPanel:Hide() end
-    if AH.ProcessingPanel then AH.ProcessingPanel:Hide() end
-    if AH.AlertsPanel then AH.AlertsPanel:Hide() end
-    if AH.AnalyticsPanel then AH.AnalyticsPanel:Hide() end
+    if AH.ScannerPanel then
+        AH.ScannerPanel:Hide()
+        if AH.ScannerPanel.Content and AH.ScannerPanel.Content.Hide then AH.ScannerPanel.Content:Hide() end
+    end
+    if AH.ProcessingPanel then
+        AH.ProcessingPanel:Hide()
+        if AH.ProcessingPanel.Content and AH.ProcessingPanel.Content.Hide then AH.ProcessingPanel.Content:Hide() end
+    end
+    if AH.AlertsPanel then
+        AH.AlertsPanel:Hide()
+        if AH.AlertsPanel.Content and AH.AlertsPanel.Content.Hide then AH.AlertsPanel.Content:Hide() end
+    end
+    if AH.AnalyticsPanel then
+        AH.AnalyticsPanel:Hide()
+        if AH.AnalyticsPanel.Content and AH.AnalyticsPanel.Content.Hide then AH.AnalyticsPanel.Content:Hide() end
+    end
 end
 
 function AH.Attach()
@@ -54,8 +66,17 @@ function AH.Attach()
         panelScanner.Content = MarketSync.CreateAHScannerPanel(panelScanner)
     end
     panelScanner:SetScript("OnShow", function()
-        if panelScanner.Content and panelScanner.Content.OnShow then
-            panelScanner.Content:OnShow()
+        if panelScanner.Content then
+            if panelScanner.Content.Show then panelScanner.Content:Show() end
+            local onShow = panelScanner.Content.OnShow or (panelScanner.Content.GetScript and panelScanner.Content:GetScript("OnShow"))
+            if onShow then
+                onShow(panelScanner.Content)
+            end
+        end
+    end)
+    panelScanner:SetScript("OnHide", function()
+        if panelScanner.Content and panelScanner.Content.Hide then
+            panelScanner.Content:Hide()
         end
     end)
 
@@ -69,6 +90,20 @@ function AH.Attach()
     if MarketSync.CreateProcessingPanel then
         panelProcessing.Content = MarketSync.CreateProcessingPanel(panelProcessing)
     end
+    panelProcessing:SetScript("OnShow", function()
+        if panelProcessing.Content then
+            if panelProcessing.Content.Show then panelProcessing.Content:Show() end
+            local onShow = panelProcessing.Content.OnShow or (panelProcessing.Content.GetScript and panelProcessing.Content:GetScript("OnShow"))
+            if onShow then
+                onShow(panelProcessing.Content)
+            end
+        end
+    end)
+    panelProcessing:SetScript("OnHide", function()
+        if panelProcessing.Content and panelProcessing.Content.Hide then
+            panelProcessing.Content:Hide()
+        end
+    end)
 
     -- 3. Alerts Panel Container
     local panelAlerts = CreateFrame("Frame", "MarketSyncAHAlertsPanel", frame)
@@ -80,6 +115,20 @@ function AH.Attach()
     if MarketSync.CreateNotificationsPanel then
         panelAlerts.Content = MarketSync.CreateNotificationsPanel(panelAlerts)
     end
+    panelAlerts:SetScript("OnShow", function()
+        if panelAlerts.Content then
+            if panelAlerts.Content.Show then panelAlerts.Content:Show() end
+            local onShow = panelAlerts.Content.OnShow or (panelAlerts.Content.GetScript and panelAlerts.Content:GetScript("OnShow"))
+            if onShow then
+                onShow(panelAlerts.Content)
+            end
+        end
+    end)
+    panelAlerts:SetScript("OnHide", function()
+        if panelAlerts.Content and panelAlerts.Content.Hide then
+            panelAlerts.Content:Hide()
+        end
+    end)
 
     -- 4. Analytics Panel Container
     local panelAnalytics = CreateFrame("Frame", "MarketSyncAHAnalyticsPanel", frame)
@@ -92,8 +141,17 @@ function AH.Attach()
         panelAnalytics.Content = MarketSync.CreateAnalyticsPanel(panelAnalytics)
     end
     panelAnalytics:SetScript("OnShow", function()
-        if panelAnalytics.Content and panelAnalytics.Content.OnShow then
-            panelAnalytics.Content:OnShow()
+        if panelAnalytics.Content then
+            if panelAnalytics.Content.Show then panelAnalytics.Content:Show() end
+            local onShow = panelAnalytics.Content.OnShow or (panelAnalytics.Content.GetScript and panelAnalytics.Content:GetScript("OnShow"))
+            if onShow then
+                onShow(panelAnalytics.Content)
+            end
+        end
+    end)
+    panelAnalytics:SetScript("OnHide", function()
+        if panelAnalytics.Content and panelAnalytics.Content.Hide then
+            panelAnalytics.Content:Hide()
         end
     end)
 
@@ -145,11 +203,15 @@ function AH.Attach()
     end)
 
     frame:HookScript("OnHide", function()
+        if panelScanner.Content and panelScanner.Content.Hide then panelScanner.Content:Hide() end
         panelScanner:Hide()
+        if panelProcessing.Content and panelProcessing.Content.Hide then panelProcessing.Content:Hide() end
         panelProcessing:Hide()
+        if panelAlerts.Content and panelAlerts.Content.Hide then panelAlerts.Content:Hide() end
         panelAlerts:Hide()
+        if panelAnalytics.Content and panelAnalytics.Content.Hide then panelAnalytics.Content:Hide() end
         panelAnalytics:Hide()
-        if AH.Sidecar then
+        if AH.Sidecar and AH.Sidecar.Hide then
             AH.Sidecar:Hide()
         end
         MarketSync.IsAuctionHouseOpen = false

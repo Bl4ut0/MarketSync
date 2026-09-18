@@ -140,7 +140,9 @@ end
 function MarketSync.CreateNotificationsPanel(parent)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
-    panel:Hide()
+    if parent == MarketSync.MainFrame then
+        panel:Hide()
+    end
 
     -- State
     panel.currentView = "watchlist" -- "watchlist" or "history"
@@ -235,9 +237,9 @@ function MarketSync.CreateNotificationsPanel(parent)
     local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     editorTitle:SetPoint("TOPLEFT", 10, -7)
     editorTitle:SetText("|cffffd700Alert Editor|r")
-
+    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
     -- 32x32 Item Drop Slot
-    local itemSlot = CreateFrame("Button", "MarketSyncItemDropSlot", editorBox)
+    local itemSlot = CreateFrame("Button", parentPrefix .. "ItemDropSlot", editorBox)
     itemSlot:SetSize(32, 32)
     itemSlot:SetPoint("TOPLEFT", 10, -23)
 
@@ -380,7 +382,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     scopeLabel:SetText("Scope:")
 
     local scopeDropdown = BuildScopeDropdown(
-        "MarketSyncNotificationsScopeDropdown",
+        parentPrefix .. "NotificationsScopeDropdown",
         editorBox,
         80,
         function() return panel.editorScope end,
@@ -456,7 +458,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     importTitle:SetPoint("TOPLEFT", 10, -7)
     importTitle:SetText("|cffffd700Preferred List Import|r")
 
-    local importDropdown = CreateFrame("Frame", "MarketSyncNotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
+    local importDropdown = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
     UIDropDownMenu_SetWidth(importDropdown, LEFT_W - 40)
     importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", -6, -22)
 

@@ -297,7 +297,9 @@ end
 function MarketSync.CreateProcessingPanel(parent)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
-    panel:Hide()
+    if parent == MarketSync.MainFrame then
+        panel:Hide()
+    end
 
     panel.activeMode = "target"
     panel.selectedTargetID = nil
@@ -429,8 +431,9 @@ function MarketSync.CreateProcessingPanel(parent)
         })
     end
 
+    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
     local targetDropdown
-    targetDropdown = BuildDropdown("MarketSyncProcessingTargetDropdown", leftTopBox, LEFT_W - 26, function(self, level)
+    targetDropdown = BuildDropdown(parentPrefix .. "ProcessingTargetDropdown", leftTopBox, LEFT_W - 26, function(self, level)
         local resetInfo = UIDropDownMenu_CreateInfo()
         resetInfo.text = "Select material..."
         resetInfo.func = function()
@@ -464,7 +467,7 @@ function MarketSync.CreateProcessingPanel(parent)
     processLabel:SetText("Process")
 
     local processDropdown
-    processDropdown = BuildDropdown("MarketSyncProcessingTypeDropdown", leftTopBox, LEFT_W - 26, function(self, level)
+    processDropdown = BuildDropdown(parentPrefix .. "ProcessingTypeDropdown", leftTopBox, LEFT_W - 26, function(self, level)
         if panel.selectedProcess and not IsSupportedProcessType(panel.selectedProcess) then
             panel.selectedProcess = nil
         end
@@ -490,7 +493,7 @@ function MarketSync.CreateProcessingPanel(parent)
     professionLabel:SetText("Profession")
 
     local professionDropdown
-    professionDropdown = BuildDropdown("MarketSyncCraftProfDropdown", leftTopBox, LEFT_W - 26, function(self, level)
+    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, LEFT_W - 26, function(self, level)
         professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or professionOptions
         for _, p in ipairs(professionOptions) do
             local opt = UIDropDownMenu_CreateInfo()
