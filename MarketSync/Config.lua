@@ -871,4 +871,147 @@ MarketSync.StandardSounds = {
     { name = "Hush",         id = 0 }, -- Mute
 }
 
+-- ================================================================
+-- UI HELPER: CreateModernDialog
+-- Clean dark-slate dialog matching Blizzard Auction House styling
+-- ================================================================
+function MarketSync.CreateModernDialog(name, width, height, titleText)
+    local frame = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
+    frame:SetSize(width or 400, height or 400)
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetClampedToScreen(true)
+    frame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    frame:SetBackdropColor(0.06, 0.07, 0.09, 0.98)
+    frame:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.95)
+
+    if name then
+        table.insert(UISpecialFrames, name)
+    end
+
+    -- Header bar
+    local header = CreateFrame("Frame", nil, frame)
+    header:SetPoint("TOPLEFT", 8, -6)
+    header:SetPoint("TOPRIGHT", -8, -6)
+    header:SetHeight(28)
+    frame.Header = header
+    frame.TitleContainer = header
+    frame.TitleBg = header
+
+    local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("LEFT", 6, 0)
+    title:SetText(titleText or "|cFFFFD100MarketSync|r")
+    frame.TitleText = title
+
+    local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
+    closeBtn:SetSize(24, 24)
+    closeBtn:SetPoint("TOPRIGHT", 2, 2)
+    closeBtn:SetScript("OnClick", function()
+        frame:Hide()
+    end)
+    frame.CloseButton = closeBtn
+
+    local headerSep = frame:CreateTexture(nil, "ARTWORK")
+    headerSep:SetHeight(1)
+    headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 2, -2)
+    headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -2, -2)
+    headerSep:SetColorTexture(0.40, 0.35, 0.20, 0.50)
+    frame.headerSep = headerSep
+
+    frame:Hide()
+    return frame
+end
+
+-- ================================================================
+-- UI HELPER: CreateModernInset
+-- Matches Blizzard Auction House sleek dark slate inset panels
+-- ================================================================
+function MarketSync.CreateModernInset(parent, x, y, width, height)
+    local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    inset:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        tile = false, tileSize = 0, edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    inset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
+    inset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+
+    -- Subtle top inner highlight line matching Blizzard AH insets
+    local topHighlight = inset:CreateTexture(nil, "BORDER")
+    topHighlight:SetHeight(1)
+    topHighlight:SetPoint("TOPLEFT", 1, -1)
+    topHighlight:SetPoint("TOPRIGHT", -1, -1)
+    topHighlight:SetColorTexture(0.35, 0.38, 0.45, 0.35)
+    inset.topHighlight = topHighlight
+
+    if x and y then
+        inset:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    end
+    if width and height then
+        inset:SetSize(width, height)
+    end
+    return inset
+end
+
+-- ================================================================
+-- UI HELPER: CreateAHColumnHeader
+-- Matches Blizzard Auction House column headers (clean dark slate + sort arrow)
+-- ================================================================
+function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
+    local hdr = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    hdr:SetSize(width, height or 20)
+    hdr.sortKey = sortKey
+
+    hdr:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 }
+    })
+    hdr:SetBackdropColor(0.09, 0.11, 0.14, 0.95)
+    hdr:SetBackdropBorderColor(0.18, 0.20, 0.24, 0.70)
+
+    -- Vertical separator on right side
+    local sep = hdr:CreateTexture(nil, "OVERLAY")
+    sep:SetWidth(1)
+    sep:SetPoint("TOPRIGHT", 0, -2)
+    sep:SetPoint("BOTTOMRIGHT", 0, 2)
+    sep:SetColorTexture(0.25, 0.28, 0.34, 0.60)
+    hdr.sep = sep
+
+    local label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", 6, 0)
+    label:SetText(text or "")
+    hdr.label = label
+
+    local arrow = hdr:CreateTexture(nil, "OVERLAY")
+    arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
+    arrow:SetSize(9, 8)
+    arrow:SetPoint("LEFT", label, "RIGHT", 4, -1)
+    arrow:SetTexCoord(0, 0.5625, 0, 1.0)
+    arrow:Hide()
+    hdr.arrow = arrow
+
+    hdr:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.16, 0.20, 0.26, 0.95)
+    end)
+    hdr:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.09, 0.11, 0.14, 0.95)
+    end)
+
+    return hdr
+end
+
+
 

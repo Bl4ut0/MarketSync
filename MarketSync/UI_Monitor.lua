@@ -44,92 +44,58 @@ end
 local function CreateMonitorFrame()
     if MonitorFrame then return end
 
-    MonitorFrame = CreateFrame("Frame", "MarketSyncMonitorFrame", UIParent, "BasicFrameTemplateWithInset")
-    MonitorFrame:SetSize(620, 520)
-    MonitorFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    MonitorFrame:SetMovable(true)
-    MonitorFrame:EnableMouse(true)
-    MonitorFrame:RegisterForDrag("LeftButton")
-    MonitorFrame:SetScript("OnDragStart", MonitorFrame.StartMoving)
-    MonitorFrame:SetScript("OnDragStop", MonitorFrame.StopMovingOrSizing)
+    MonitorFrame = MarketSync.CreateModernDialog("MarketSyncMonitorFrame", 680, 560, "|cFFFFD100Network Monitor & Debug Console|r")
     MonitorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     MonitorFrame:SetFrameLevel(100)
     MonitorFrame:SetToplevel(true)
     MonitorFrame:Hide()
-    
-    -- Make it close on ESC
-    table.insert(UISpecialFrames, "MarketSyncMonitorFrame")
 
-    MonitorFrame.TitleText:SetText("MarketSync Debug Console")
-    MonitorFrame.TitleText:ClearAllPoints()
-    local titleAnchor = MonitorFrame.TitleContainer or MonitorFrame.TitleBg or MonitorFrame
-    MonitorFrame.TitleText:SetPoint("CENTER", titleAnchor, "CENTER", 0, 0)
-
-    -- Right-click menu for opening Task Manager
-    local titleButton = CreateFrame("Button", nil, MonitorFrame)
-    titleButton:SetAllPoints(MonitorFrame.TitleText)
-    titleButton:RegisterForClicks("RightButtonUp")
-    local dd = CreateFrame("Frame", "MarketSyncMonitorConfigDropdown", MonitorFrame, "UIDropDownMenuTemplate")
-    titleButton:SetScript("OnClick", function(self, button)
-        if button == "RightButton" then
-            UIDropDownMenu_Initialize(dd, function(self, level)
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = "Open Rate Monitor (Task Manager)"
-                info.notCheckable = true
-                info.func = function()
-                    if MarketSync.ToggleRateMonitor then
-                        MarketSync.ToggleRateMonitor()
-                    end
-                end
-                UIDropDownMenu_AddButton(info, level)
-            end, "MENU")
-            ToggleDropDownMenu(1, nil, dd, "cursor", 0, 0)
+    -- Quick button to open Task Manager right in the header
+    local btnTaskMgr = CreateFrame("Button", nil, MonitorFrame.Header, "UIPanelButtonTemplate")
+    btnTaskMgr:SetSize(110, 20)
+    btnTaskMgr:SetPoint("RIGHT", MonitorFrame.CloseButton, "LEFT", -6, 0)
+    btnTaskMgr:SetText("Task Manager")
+    btnTaskMgr:SetScript("OnClick", function()
+        if MarketSync.ToggleRateMonitor then
+            MarketSync.ToggleRateMonitor()
         end
     end)
 
+    local monSub = MonitorFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    monSub:SetPoint("TOPLEFT", 16, -36)
+    monSub:SetText("|cff888888Real-time communication events, peer status, and cache pipeline activity.|r")
+
     -- Stats Panel
-    local statsPanel = CreateFrame("Frame", nil, MonitorFrame, "BackdropTemplate")
-    statsPanel:SetSize(580, 40)
-    statsPanel:SetPoint("TOP", MonitorFrame, "TOP", 0, -30)
-    statsPanel.backdropInfo = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    }
-    statsPanel:ApplyBackdrop()
-    statsPanel:SetBackdropColor(0, 0, 0, 0.5)
+    local statsPanel = MarketSync.CreateModernInset(MonitorFrame, 14, -56, 652, 34)
 
     local txLabel = statsPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    txLabel:SetPoint("LEFT", 15, 0)
+    txLabel:SetPoint("LEFT", 16, 0)
     txLabel:SetText("|cffff8800Tx: 0 msgs/s|r")
     MonitorFrame.txLabel = txLabel
 
     local rxLabel = statsPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    rxLabel:SetPoint("LEFT", 200, 0)
+    rxLabel:SetPoint("LEFT", 190, 0)
     rxLabel:SetText("|cff00ff00Rx: 0 msgs/s|r")
     MonitorFrame.rxLabel = rxLabel
 
     local queueLabel = statsPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    queueLabel:SetPoint("RIGHT", -15, 0)
+    queueLabel:SetPoint("LEFT", 360, 0)
     queueLabel:SetText("|cffaaaaaaNetwork: Idle|r")
     MonitorFrame.queueLabel = queueLabel
-    -- Log / Console
-    local logPanel = CreateFrame("Frame", nil, MonitorFrame, "BackdropTemplate")
-    logPanel:SetSize(410, 200)
-    logPanel:SetPoint("TOPLEFT", statsPanel, "BOTTOMLEFT", 0, -10)
-    logPanel.backdropInfo = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    }
-    logPanel:ApplyBackdrop()
-    logPanel:SetBackdropColor(0, 0, 0, 0.5)
+
+    local limitBadge = statsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    limitBadge:SetPoint("RIGHT", -16, 0)
+    limitBadge:SetText("Throttle Limit: ~800 B/s")
+
+    -- Log / Console Header & Inset
+    local logHeader = MarketSync.CreateAHColumnHeader(MonitorFrame, 450, 20, "Network Event Log")
+    logHeader:SetPoint("TOPLEFT", 14, -96)
+
+    local logPanel = MarketSync.CreateModernInset(MonitorFrame, 14, -116, 450, 216)
 
     local logScroll = CreateFrame("ScrollingMessageFrame", nil, logPanel)
-    logScroll:SetPoint("TOPLEFT", logPanel, "TOPLEFT", 10, -10)
-    logScroll:SetPoint("BOTTOMRIGHT", logPanel, "BOTTOMRIGHT", -10, 10)
+    logScroll:SetPoint("TOPLEFT", logPanel, "TOPLEFT", 8, -6)
+    logScroll:SetPoint("BOTTOMRIGHT", logPanel, "BOTTOMRIGHT", -8, 6)
     logScroll:SetFontObject("GameFontHighlightSmall")
     logScroll:SetJustifyH("LEFT")
     logScroll:SetFading(false)
@@ -139,26 +105,16 @@ local function CreateMonitorFrame()
         if delta > 0 then self:ScrollUp() else self:ScrollDown() end
     end)
     MonitorFrame.logScroll = logScroll
-    
-    -- Swarm Queue Tracker
-    local swarmPanel = CreateFrame("Frame", nil, MonitorFrame, "BackdropTemplate")
-    swarmPanel:SetSize(160, 200)
-    swarmPanel:SetPoint("TOPRIGHT", statsPanel, "BOTTOMRIGHT", 0, -10)
-    swarmPanel.backdropInfo = {
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    }
-    swarmPanel:ApplyBackdrop()
-    
-    local swarmTitle = swarmPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    swarmTitle:SetPoint("TOP", 0, -10)
-    swarmTitle:SetText("Swarm Queue")
+
+    -- Swarm Queue Tracker Header & Inset
+    local swarmHeader = MarketSync.CreateAHColumnHeader(MonitorFrame, 194, 20, "Swarm Queue")
+    swarmHeader:SetPoint("TOPLEFT", 472, -96)
+
+    local swarmPanel = MarketSync.CreateModernInset(MonitorFrame, 472, -116, 194, 216)
 
     local swarmText = CreateFrame("ScrollingMessageFrame", nil, swarmPanel)
-    swarmText:SetPoint("TOPLEFT", 10, -25)
-    swarmText:SetPoint("BOTTOMRIGHT", -10, 10)
+    swarmText:SetPoint("TOPLEFT", swarmPanel, "TOPLEFT", 8, -6)
+    swarmText:SetPoint("BOTTOMRIGHT", swarmPanel, "BOTTOMRIGHT", -8, 6)
     swarmText:SetFontObject("GameFontHighlightSmall")
     swarmText:SetJustifyH("LEFT")
     swarmText:SetFading(false)
@@ -168,32 +124,31 @@ local function CreateMonitorFrame()
         if delta > 0 then self:ScrollUp() else self:ScrollDown() end
     end)
     MonitorFrame.swarmText = swarmText
-    
+
     -- Initialize display
     swarmText:AddMessage("No active peers.")
-    -- Add an introductory message
     logScroll:AddMessage("|cFF00FF00[MarketSync]|r Network Monitor Initialized. Listening for sync events...", 1, 1, 1)
 
-    -- Cache Activity Stream
-    local cachePanel = CreateFrame("Frame", nil, MonitorFrame, "BackdropTemplate")
-    cachePanel:SetSize(580, 200)
-    cachePanel:SetPoint("TOPLEFT", logPanel, "BOTTOMLEFT", 0, -10)
-    cachePanel.backdropInfo = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    }
-    cachePanel:ApplyBackdrop()
-    cachePanel:SetBackdropColor(0, 0, 0, 0.5)
+    -- Cache Activity Stream Header & Inset
+    local cacheHeader = MarketSync.CreateAHColumnHeader(MonitorFrame, 652, 20, "Cache Processing Stream")
+    cacheHeader:SetPoint("TOPLEFT", 14, -338)
 
-    local cacheTitle = cachePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cacheTitle:SetPoint("TOPLEFT", 10, -10)
-    cacheTitle:SetText("Cache Processing Stream")
+    local btnClearCache = CreateFrame("Button", nil, cacheHeader, "UIPanelButtonTemplate")
+    btnClearCache:SetSize(60, 18)
+    btnClearCache:SetPoint("RIGHT", -4, 0)
+    btnClearCache:SetText("Clear")
+    btnClearCache:SetScript("OnClick", function()
+        if MonitorFrame and MonitorFrame.cacheScroll then
+            MonitorFrame.cacheScroll:Clear()
+            MonitorFrame.cacheScroll:AddMessage("|cff888888Cache log cleared.|r")
+        end
+    end)
+
+    local cachePanel = MarketSync.CreateModernInset(MonitorFrame, 14, -358, 652, 160)
 
     local cacheScroll = CreateFrame("ScrollingMessageFrame", nil, cachePanel)
-    cacheScroll:SetPoint("TOPLEFT", cachePanel, "TOPLEFT", 10, -30)
-    cacheScroll:SetPoint("BOTTOMRIGHT", cachePanel, "BOTTOMRIGHT", -10, 10)
+    cacheScroll:SetPoint("TOPLEFT", cachePanel, "TOPLEFT", 8, -6)
+    cacheScroll:SetPoint("BOTTOMRIGHT", cachePanel, "BOTTOMRIGHT", -8, 6)
     cacheScroll:SetFontObject("GameFontHighlightSmall")
     cacheScroll:SetJustifyH("LEFT")
     cacheScroll:SetFading(false)
@@ -205,12 +160,19 @@ local function CreateMonitorFrame()
     MonitorFrame.cacheScroll = cacheScroll
     cacheScroll:AddMessage("|cFF00FF00[MarketSync]|r Cache Monitor Initialized. Ready for rebuild tasks...", 1, 1, 1)
 
+    -- Bottom Close Button
+    local btnCloseMon = CreateFrame("Button", nil, MonitorFrame, "UIPanelButtonTemplate")
+    btnCloseMon:SetSize(80, 22)
+    btnCloseMon:SetPoint("BOTTOMRIGHT", MonitorFrame, "BOTTOMRIGHT", -14, 10)
+    btnCloseMon:SetText("Close")
+    btnCloseMon:SetScript("OnClick", function() MonitorFrame:Hide() end)
+
     -- Dump early logs
     for _, log in ipairs(earlyNetworkLogs) do
         MonitorFrame.logScroll:AddMessage(log)
     end
     wipe(earlyNetworkLogs)
-    
+
     for _, log in ipairs(earlyCacheLogs) do
         MonitorFrame.cacheScroll:AddMessage(log)
     end
@@ -372,82 +334,146 @@ local RateMonitorFrame = nil
 local function CreateRateMonitorFrame()
     if RateMonitorFrame then return end
 
-    RateMonitorFrame = CreateFrame("Frame", "MarketSyncRateMonitorFrame", UIParent, "BasicFrameTemplateWithInset")
-    RateMonitorFrame:SetSize(300, 260)
+    RateMonitorFrame = MarketSync.CreateModernDialog("MarketSyncRateMonitorFrame", 400, 440, "|cFFFFD100Task Manager: Rate Limiter|r")
     RateMonitorFrame:SetPoint("CENTER", UIParent, "CENTER", 200, 0)
-    RateMonitorFrame:SetMovable(true)
-    RateMonitorFrame:EnableMouse(true)
-    RateMonitorFrame:RegisterForDrag("LeftButton")
-    RateMonitorFrame:SetScript("OnDragStart", RateMonitorFrame.StartMoving)
-    RateMonitorFrame:SetScript("OnDragStop", RateMonitorFrame.StopMovingOrSizing)
     RateMonitorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     RateMonitorFrame:SetFrameLevel(105)
     RateMonitorFrame:SetToplevel(true)
     RateMonitorFrame:Hide()
-    
-    table.insert(UISpecialFrames, "MarketSyncRateMonitorFrame")
 
-    RateMonitorFrame.TitleText:SetText("Rate Limiter Monitor")
-    RateMonitorFrame.TitleText:ClearAllPoints()
-    local titleAnchor = RateMonitorFrame.TitleContainer or RateMonitorFrame.TitleBg or RateMonitorFrame
-    RateMonitorFrame.TitleText:SetPoint("CENTER", titleAnchor, "CENTER", 0, 0)
+    local rateSub = RateMonitorFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    rateSub:SetPoint("TOPLEFT", 16, -36)
+    rateSub:SetText("|cff888888Real-time sync throughput and bandwidth throttle monitor.|r")
 
-    local txMsgLabel = RateMonitorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    txMsgLabel:SetPoint("TOPLEFT", 15, -35)
-    txMsgLabel:SetText("Tx API Calls: 0/sec")
+    -- Card 1: Throughput & Bandwidth Inset
+    local card1 = MarketSync.CreateModernInset(RateMonitorFrame, 14, -56, 372, 136)
+
+    local card1Title = card1:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    card1Title:SetPoint("TOPLEFT", 12, -10)
+    card1Title:SetText("|cffffd700Bandwidth & API Throughput|r")
+
+    local txMsgLabel = card1:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    txMsgLabel:SetPoint("TOPLEFT", 14, -30)
+    txMsgLabel:SetText("Tx API Calls: 0/sec |cff888888(WoW Limit: ~50/s)|r")
     RateMonitorFrame.txMsgLabel = txMsgLabel
 
-    local rxMsgLabel = RateMonitorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    rxMsgLabel:SetPoint("TOPLEFT", 15, -55)
+    local rxMsgLabel = card1:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rxMsgLabel:SetPoint("TOPLEFT", 14, -48)
     rxMsgLabel:SetText("Rx API Calls: 0/sec")
     RateMonitorFrame.rxMsgLabel = rxMsgLabel
 
-    local txByteLabel = RateMonitorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    txByteLabel:SetPoint("TOPLEFT", 15, -75)
+    local txByteLabel = card1:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    txByteLabel:SetPoint("TOPLEFT", 14, -66)
     txByteLabel:SetText("Tx Bandwidth: 0 B/s")
     RateMonitorFrame.txByteLabel = txByteLabel
 
-    local limitLabel = RateMonitorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    limitLabel:SetPoint("TOPLEFT", 15, -100)
-    limitLabel:SetText("Global Server Rate Limit Threshold: ~800 B/s")
-    
-    local rateBar = CreateFrame("StatusBar", nil, RateMonitorFrame, "TextStatusBar")
-    rateBar:SetSize(260, 20)
-    rateBar:SetPoint("TOPLEFT", 15, -120)
+    local limitLabel = card1:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    limitLabel:SetPoint("TOPLEFT", 14, -84)
+    limitLabel:SetText("Throttle Threshold: ~800 B/s")
+
+    -- Modern Progress Bar Track & Fill
+    local barTrack = CreateFrame("Frame", nil, card1, "BackdropTemplate")
+    barTrack:SetSize(344, 20)
+    barTrack:SetPoint("TOPLEFT", 14, -104)
+    barTrack:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 }
+    })
+    barTrack:SetBackdropColor(0.02, 0.03, 0.04, 1.0)
+    barTrack:SetBackdropBorderColor(0.22, 0.24, 0.28, 0.9)
+
+    local rateBar = CreateFrame("StatusBar", nil, barTrack)
+    rateBar:SetPoint("TOPLEFT", 1, -1)
+    rateBar:SetPoint("BOTTOMRIGHT", -1, 1)
     rateBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     rateBar:GetStatusBarTexture():SetHorizTile(false)
     rateBar:SetMinMaxValues(0, 800)
     rateBar:SetValue(0)
-    rateBar:SetStatusBarColor(0, 1, 0)
-    
-    local bg = rateBar:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, 0.5)
+    rateBar:SetStatusBarColor(0.20, 0.85, 0.30)
 
-    local border = CreateFrame("Frame", nil, rateBar, "BackdropTemplate")
-    border:SetPoint("TOPLEFT", -2, 2)
-    border:SetPoint("BOTTOMRIGHT", 2, -2)
-    border:SetBackdrop({
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-    })
-    
+    local rateBarText = rateBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rateBarText:SetPoint("CENTER", barTrack, "CENTER", 0, 0)
+    rateBarText:SetText("0 B/s (0.0% of limit)")
     RateMonitorFrame.rateBar = rateBar
+    RateMonitorFrame.rateBarText = rateBarText
 
-    -- Top Addons Breakdown
-    local breakdownHeader = RateMonitorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    breakdownHeader:SetPoint("TOPLEFT", 15, -150)
-    breakdownHeader:SetText("|cffffd700Top Addons (API/s | B/s)|r")
+    -- Card 2: Top Addons Breakdown Table
+    local hdrAddon = MarketSync.CreateAHColumnHeader(RateMonitorFrame, 192, 20, "Addon / Prefix")
+    hdrAddon:SetPoint("TOPLEFT", 14, -198)
 
+    local hdrApi = MarketSync.CreateAHColumnHeader(RateMonitorFrame, 80, 20, "API/s")
+    hdrApi:SetPoint("LEFT", hdrAddon, "RIGHT", 0, 0)
+
+    local hdrBytes = MarketSync.CreateAHColumnHeader(RateMonitorFrame, 100, 20, "Bandwidth")
+    hdrBytes:SetPoint("LEFT", hdrApi, "RIGHT", 0, 0)
+
+    local card2 = MarketSync.CreateModernInset(RateMonitorFrame, 14, -218, 372, 180)
+
+    local emptyAddons = card2:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    emptyAddons:SetPoint("CENTER", card2, "CENTER", 0, 0)
+    emptyAddons:SetText("|cff888888No active addon traffic detected.|r")
+    RateMonitorFrame.emptyAddonsText = emptyAddons
+
+    RateMonitorFrame.addonRows = {}
     RateMonitorFrame.addonLabels = {}
-    local yOffset = -170
-    for i = 1, 5 do
-        local lbl = RateMonitorFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("TOPLEFT", 25, yOffset)
-        lbl:SetText("")
-        RateMonitorFrame.addonLabels[i] = lbl
-        yOffset = yOffset - 15
+
+    for i = 1, 6 do
+        local row = CreateFrame("Frame", nil, card2)
+        row:SetSize(368, 24)
+        row:SetPoint("TOPLEFT", 2, -(i - 1) * 25 - 2)
+
+        local rowBg = row:CreateTexture(nil, "BACKGROUND")
+        rowBg:SetAllPoints()
+        if i % 2 == 1 then
+            rowBg:SetColorTexture(0.07, 0.09, 0.12, 0.65)
+        else
+            rowBg:SetColorTexture(0.04, 0.05, 0.07, 0.65)
+        end
+        row.bg = rowBg
+
+        local nameText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        nameText:SetPoint("LEFT", 8, 0)
+        nameText:SetWidth(180)
+        nameText:SetJustifyH("LEFT")
+        row.nameText = nameText
+
+        local apiText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        apiText:SetPoint("LEFT", 192, 0)
+        apiText:SetWidth(75)
+        apiText:SetJustifyH("CENTER")
+        row.apiText = apiText
+
+        local byteText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        byteText:SetPoint("RIGHT", -8, 0)
+        byteText:SetWidth(90)
+        byteText:SetJustifyH("RIGHT")
+        row.byteText = byteText
+
+        row:Hide()
+        RateMonitorFrame.addonRows[i] = row
+
+        -- Legacy fallback label compatibility
+        RateMonitorFrame.addonLabels[i] = nameText
     end
+
+    -- Bottom Controls
+    local btnConsole = CreateFrame("Button", nil, RateMonitorFrame, "UIPanelButtonTemplate")
+    btnConsole:SetSize(120, 22)
+    btnConsole:SetPoint("BOTTOMLEFT", RateMonitorFrame, "BOTTOMLEFT", 14, 12)
+    btnConsole:SetText("Debug Console")
+    btnConsole:SetScript("OnClick", function()
+        if MarketSync.ToggleNetworkMonitor then
+            MarketSync.ToggleNetworkMonitor()
+        end
+    end)
+
+    local btnCloseRate = CreateFrame("Button", nil, RateMonitorFrame, "UIPanelButtonTemplate")
+    btnCloseRate:SetSize(80, 22)
+    btnCloseRate:SetPoint("BOTTOMRIGHT", RateMonitorFrame, "BOTTOMRIGHT", -14, 12)
+    btnCloseRate:SetText("Close")
+    btnCloseRate:SetScript("OnClick", function() RateMonitorFrame:Hide() end)
 end
 
 function MarketSync.ToggleRateMonitor()
@@ -467,26 +493,49 @@ function MarketSync.UpdateRateMonitor(txRate, rxRate, txAPIRate, txBytesRate, ad
     RateMonitorFrame.rxMsgLabel:SetText(string.format("Rx API Calls: %d/sec", rxRate or 0))
     RateMonitorFrame.txByteLabel:SetText(string.format("Tx Bandwidth: %d B/s", txBytesRate or 0))
 
-    local usagePct = math.min(1.0, (txBytesRate or 0) / 800)
-    RateMonitorFrame.rateBar:SetValue(txBytesRate or 0)
-    
-    -- Color the progress bar from Green -> Yellow -> Red
-    if usagePct < 0.5 then
-        RateMonitorFrame.rateBar:SetStatusBarColor(0, 1, 0) -- Green
-    elseif usagePct < 0.8 then
-        RateMonitorFrame.rateBar:SetStatusBarColor(1, 1, 0) -- Yellow
-    else
-        RateMonitorFrame.rateBar:SetStatusBarColor(1, 0, 0) -- Red
+    local bytes = txBytesRate or 0
+    local usagePct = math.min(1.0, bytes / 800)
+    RateMonitorFrame.rateBar:SetValue(bytes)
+    if RateMonitorFrame.rateBarText then
+        RateMonitorFrame.rateBarText:SetText(string.format("%d B/s (%.1f%% of throttle limit)", bytes, usagePct * 100))
     end
 
-    -- Update Top 5 List
-    for i = 1, 5 do
-        local label = RateMonitorFrame.addonLabels[i]
+    -- Color the progress bar smoothly: Green -> Amber -> Red
+    if usagePct < 0.5 then
+        RateMonitorFrame.rateBar:SetStatusBarColor(0.20, 0.85, 0.30) -- Green
+    elseif usagePct < 0.8 then
+        RateMonitorFrame.rateBar:SetStatusBarColor(0.95, 0.75, 0.10) -- Amber
+    else
+        RateMonitorFrame.rateBar:SetStatusBarColor(0.95, 0.25, 0.20) -- Red
+    end
+
+    -- Update Top Addons List
+    local hasAddons = false
+    for i = 1, 6 do
+        local row = RateMonitorFrame.addonRows and RateMonitorFrame.addonRows[i]
+        local label = RateMonitorFrame.addonLabels and RateMonitorFrame.addonLabels[i]
         local data = addonRates and addonRates[i]
         if data then
-            label:SetText(string.format("%d. %s: %d/sec | %d B/s", i, tostring(data.prefix), data.apiRate or 0, data.rate))
+            hasAddons = true
+            if row then
+                row.nameText:SetText(string.format("%d. %s", i, tostring(data.prefix)))
+                row.apiText:SetText(string.format("%d/s", data.apiRate or 0))
+                row.byteText:SetText(string.format("%d B/s", data.rate or 0))
+                row:Show()
+            end
+            if label and label ~= row.nameText then
+                label:SetText(string.format("%d. %s: %d/sec | %d B/s", i, tostring(data.prefix), data.apiRate or 0, data.rate or 0))
+            end
         else
-            label:SetText("")
+            if row then row:Hide() end
+            if label and label ~= (row and row.nameText) then label:SetText("") end
+        end
+    end
+    if RateMonitorFrame.emptyAddonsText then
+        if hasAddons then
+            RateMonitorFrame.emptyAddonsText:Hide()
+        else
+            RateMonitorFrame.emptyAddonsText:Show()
         end
     end
 end

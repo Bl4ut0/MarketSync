@@ -305,6 +305,138 @@ test('Scanner parses table itemKey in ITEM_SEARCH_RESULTS_UPDATED and commodity 
   }
 });
 
+test('Modern Dialog Helpers and Task Manager / Rate Monitor update logic', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mock = `
+    UIParent = {}
+    UISpecialFrames = {}
+    time = function() return 1773780000 end
+    date = function(fmt) return "14:00:00" end
+    UnitFactionGroup = function() return "Alliance" end
+    GetRealmName = function() return "Faerlina" end
+    GetNormalizedRealmName = function() return "Faerlina" end
+    UnitName = function() return "Player" end
+    IsInGuild = function() return true end
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() return true end }
+    ItemLocation = { CreateFromItemLink = function(link) return { link = link } end }
+    function CreateFrame(frameType, name, parent, template)
+      local f = {
+        name = name,
+        parent = parent,
+        shown = false,
+        scripts = {},
+        Show = function(self) self.shown = true end,
+        Hide = function(self) self.shown = false end,
+        IsShown = function(self) return self.shown end,
+        SetSize = function(self, w, h) self.width = w; self.height = h end,
+        SetHeight = function(self, h) self.height = h end,
+        SetWidth = function(self, w) self.width = w end,
+        SetText = function(self, t) self.text = t end,
+        GetText = function(self) return self.text end,
+        SetPoint = function(self, ...) end,
+        ClearAllPoints = function(self) end,
+        SetMovable = function(self, m) end,
+        EnableMouse = function(self, e) end,
+        RegisterForDrag = function(self, ...) end,
+        SetFrameStrata = function(self, s) end,
+        SetFrameLevel = function(self, l) end,
+        SetToplevel = function(self, t) end,
+        SetClampedToScreen = function(self, c) end,
+        SetBackdrop = function(self, b) end,
+        SetBackdropColor = function(self, ...) end,
+        SetBackdropBorderColor = function(self, ...) end,
+        SetScript = function(self, ev, fn) self.scripts[ev] = fn end,
+        CreateTexture = function(self, ...)
+          return {
+            SetHeight = function() end,
+            SetWidth = function() end,
+            SetPoint = function() end,
+            SetColorTexture = function() end,
+            SetTexture = function() end,
+            SetSize = function() end,
+            SetTexCoord = function() end,
+            SetAllPoints = function() end,
+            Hide = function() end,
+            Show = function() end,
+          }
+        end,
+        CreateFontString = function(self, ...)
+          return {
+            text = "",
+            SetPoint = function() end,
+            SetWidth = function() end,
+            SetJustifyH = function() end,
+            SetText = function(s, t) s.text = t end,
+            GetText = function(s) return s.text end,
+            Hide = function() end,
+            Show = function() end,
+          }
+        end,
+        SetStatusBarTexture = function() end,
+        GetStatusBarTexture = function() return { SetHorizTile = function() end } end,
+        SetMinMaxValues = function() end,
+        SetValue = function(self, v) self.val = v end,
+        SetStatusBarColor = function(self, r, g, b) self.color = {r, g, b} end,
+      }
+      if name then _G[name] = f end
+      return f
+    end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mock));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Config.lua error: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const monitorLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Monitor.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(monitorLua)) !== 0) {
+    throw new Error('UI_Monitor.lua error: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    assert(type(MarketSync.CreateModernDialog) == "function", "CreateModernDialog should be defined")
+    assert(type(MarketSync.CreateModernInset) == "function", "CreateModernInset should be defined")
+    assert(type(MarketSync.CreateAHColumnHeader) == "function", "CreateAHColumnHeader should be defined")
+
+    local testDlg = MarketSync.CreateModernDialog("MarketSyncTestDialog", 400, 300, "|cFFFFD100Test|r")
+    assert(testDlg.Header ~= nil, "Dialog should have Header")
+    assert(testDlg.TitleText ~= nil, "Dialog should have TitleText")
+    assert(testDlg.CloseButton ~= nil, "Dialog should have CloseButton")
+
+    -- Test Rate Monitor toggling and updating
+    MarketSync.ToggleRateMonitor()
+    local rf = MarketSyncRateMonitorFrame
+    assert(rf ~= nil, "MarketSyncRateMonitorFrame should exist")
+    assert(rf:IsShown(), "RateMonitorFrame should be shown after ToggleRateMonitor")
+
+    MarketSync.UpdateRateMonitor(10, 5, 12, 450, {
+      { prefix = "MarketSync", apiRate = 8, rate = 320 },
+      { prefix = "Auctionator", apiRate = 4, rate = 130 }
+    })
+
+    assert(rf.rateBar.val == 450, "rateBar value should match txBytesRate")
+    assert(rf.rateBarText:GetText():find("450 B/s"), "rateBarText should include 450 B/s")
+    assert(rf.addonRows[1]:IsShown(), "First addon row should be shown")
+    assert(rf.addonRows[1].nameText:GetText():find("MarketSync"), "Addon row 1 should contain MarketSync")
+    assert(rf.addonRows[2]:IsShown(), "Second addon row should be shown")
+    assert(rf.addonRows[2].nameText:GetText():find("Auctionator"), "Addon row 2 should contain Auctionator")
+    assert(not rf.addonRows[3]:IsShown(), "Third addon row should be hidden")
+
+    -- Test ToggleBlock logic
+    MarketSyncDB = { BlockedUsers = {} }
+    MarketSync.ToggleBlock("GnomishSeller")
+    assert(MarketSyncDB.BlockedUsers["GnomishSeller"] == true, "GnomishSeller should be blocked")
+    MarketSync.ToggleBlock("GnomishSeller")
+    assert(MarketSyncDB.BlockedUsers["GnomishSeller"] == nil, "GnomishSeller should be unblocked")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {

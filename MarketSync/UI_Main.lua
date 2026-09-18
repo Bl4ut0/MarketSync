@@ -1004,20 +1004,16 @@ local function CreateMainFrame()
     lblDebug:SetPoint("BOTTOM", btnNetworkMonitor, "TOP", 0, 5)
     lblDebug:SetText("Debug")
 
-    local smartRulesFrame = CreateFrame("Frame", "MarketSyncSmartRulesFrame", UIParent, "BasicFrameTemplateWithInset")
-    smartRulesFrame:SetSize(420, 280)
+    local smartRulesFrame = MarketSync.CreateModernDialog("MarketSyncSmartRulesFrame", 440, 310, "|cFFFFD100Smart Bandwidth Rules|r")
     smartRulesFrame:SetPoint("CENTER")
-    smartRulesFrame:SetFrameStrata("DIALOG")
-    smartRulesFrame.title = smartRulesFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    smartRulesFrame.title:SetPoint("CENTER", smartRulesFrame.TitleBg, "CENTER", 0, 0)
-    smartRulesFrame.title:SetText("Smart Bandwidth Rules")
-    smartRulesFrame:Hide()
 
     local swDesc = smartRulesFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    swDesc:SetPoint("TOPLEFT", 15, -35)
-    swDesc:SetWidth(390)
+    swDesc:SetPoint("TOPLEFT", 16, -38)
+    swDesc:SetWidth(400)
     swDesc:SetJustifyH("LEFT")
-    swDesc:SetText("Automatically suspend heavy background operations to protect your network ping.")
+    swDesc:SetText("|cff888888Automatically suspend background operations to protect your network ping.|r")
+
+    local rulesInset = MarketSync.CreateModernInset(smartRulesFrame, 14, -58, 412, 208)
 
     local function CreateSmartCheckbox(parent, label, key, xOffset, yOffset)
         local cb = CreateFrame("CheckButton", nil, parent, "ChatConfigCheckButtonTemplate")
@@ -1034,25 +1030,31 @@ local function CreateMainFrame()
         return cb
     end
 
-    local syncLabel = smartRulesFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    syncLabel:SetPoint("TOPLEFT", 20, -75)
+    local syncLabel = rulesInset:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    syncLabel:SetPoint("TOPLEFT", 16, -14)
     syncLabel:SetText("|cffffd700Allow Swarm Sync in:|r")
 
-    CreateSmartCheckbox(smartRulesFrame, "Combat", "AllowSyncInCombat", 25, -95)
-    CreateSmartCheckbox(smartRulesFrame, "Raids", "AllowSyncInRaid", 25, -125)
-    CreateSmartCheckbox(smartRulesFrame, "Dungeons / Parties", "AllowSyncInDungeon", 25, -155)
-    CreateSmartCheckbox(smartRulesFrame, "Battlegrounds", "AllowSyncInPvP", 25, -185)
-    CreateSmartCheckbox(smartRulesFrame, "Arenas", "AllowSyncInArena", 25, -215)
+    CreateSmartCheckbox(rulesInset, "Combat", "AllowSyncInCombat", 20, -36)
+    CreateSmartCheckbox(rulesInset, "Raids", "AllowSyncInRaid", 20, -66)
+    CreateSmartCheckbox(rulesInset, "Dungeons / Parties", "AllowSyncInDungeon", 20, -96)
+    CreateSmartCheckbox(rulesInset, "Battlegrounds", "AllowSyncInPvP", 20, -126)
+    CreateSmartCheckbox(rulesInset, "Arenas", "AllowSyncInArena", 20, -156)
 
-    local cacheLabel = smartRulesFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cacheLabel:SetPoint("TOPLEFT", 220, -75)
+    local cacheLabel = rulesInset:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cacheLabel:SetPoint("TOPLEFT", 216, -14)
     cacheLabel:SetText("|cffffd700Allow Cache Indexer in:|r")
 
-    CreateSmartCheckbox(smartRulesFrame, "Combat", "AllowCacheInCombat", 225, -95)
-    CreateSmartCheckbox(smartRulesFrame, "Raids", "AllowCacheInRaid", 225, -125)
-    CreateSmartCheckbox(smartRulesFrame, "Dungeons / Parties", "AllowCacheInDungeon", 225, -155)
-    CreateSmartCheckbox(smartRulesFrame, "Battlegrounds", "AllowCacheInPvP", 225, -185)
-    CreateSmartCheckbox(smartRulesFrame, "Arenas", "AllowCacheInArena", 225, -215)
+    CreateSmartCheckbox(rulesInset, "Combat", "AllowCacheInCombat", 220, -36)
+    CreateSmartCheckbox(rulesInset, "Raids", "AllowCacheInRaid", 220, -66)
+    CreateSmartCheckbox(rulesInset, "Dungeons / Parties", "AllowCacheInDungeon", 220, -96)
+    CreateSmartCheckbox(rulesInset, "Battlegrounds", "AllowCacheInPvP", 220, -126)
+    CreateSmartCheckbox(rulesInset, "Arenas", "AllowCacheInArena", 220, -156)
+
+    local btnCloseRules = CreateFrame("Button", nil, smartRulesFrame, "UIPanelButtonTemplate")
+    btnCloseRules:SetSize(80, 22)
+    btnCloseRules:SetPoint("BOTTOMRIGHT", smartRulesFrame, "BOTTOMRIGHT", -14, 10)
+    btnCloseRules:SetText("Close")
+    btnCloseRules:SetScript("OnClick", function() smartRulesFrame:Hide() end)
 
     btnSmartBandwidth:SetScript("OnClick", function()
         if smartRulesFrame:IsShown() then smartRulesFrame:Hide() else smartRulesFrame:Show() end
@@ -1079,66 +1081,91 @@ local function CreateMainFrame()
     -- ================================================================
     -- USER MANAGEMENT POPUP
     -- ================================================================
-    local userMgmtFrame = CreateFrame("Frame", "MarketSyncUserMgmt", UIParent, "BasicFrameTemplateWithInset")
-    userMgmtFrame:SetSize(360, 380)
-    userMgmtFrame:SetPoint("CENTER", 0, 50)
-    userMgmtFrame:SetMovable(true)
-    userMgmtFrame:EnableMouse(true)
-    userMgmtFrame:RegisterForDrag("LeftButton")
-    userMgmtFrame:SetScript("OnDragStart", userMgmtFrame.StartMoving)
-    userMgmtFrame:SetScript("OnDragStop", userMgmtFrame.StopMovingOrSizing)
-    userMgmtFrame:SetFrameStrata("DIALOG")
-    userMgmtFrame:SetClampedToScreen(true)
-    userMgmtFrame.TitleText:SetText("User Management")
-    userMgmtFrame:Hide()
+    local userMgmtFrame = MarketSync.CreateModernDialog("MarketSyncUserMgmt", 430, 480, "|cFFFFD100User Management|r")
+    userMgmtFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
 
-    -- Fix visual break in top-left corner of the Inset border
-    if userMgmtFrame.Inset then
-        userMgmtFrame.Inset:SetPoint("TOPLEFT", userMgmtFrame, "TOPLEFT", 4, -25)
-        userMgmtFrame.Inset:SetPoint("BOTTOMRIGHT", userMgmtFrame, "BOTTOMRIGHT", -4, 4)
-    end
-
-    local umDesc = userMgmtFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    umDesc:SetPoint("TOPLEFT", 12, -30)
-    umDesc:SetWidth(330)
+    local umDesc = userMgmtFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    umDesc:SetPoint("TOPLEFT", 16, -38)
+    umDesc:SetWidth(398)
     umDesc:SetJustifyH("LEFT")
-    umDesc:SetText("|cff888888Block users to ignore their synced data. Blocked users' data will not be stored.|r")
+    umDesc:SetText("|cff888888Manage peer sync status. Blocked users' data is not accepted or stored.|r")
+
+    -- Manual Block Input Box & Button
+    local addBox = CreateFrame("EditBox", nil, userMgmtFrame, "InputBoxTemplate")
+    addBox:SetSize(210, 20)
+    addBox:SetPoint("TOPLEFT", 22, -62)
+    addBox:SetAutoFocus(false)
+    addBox:SetText("")
+    addBox:SetMaxLetters(40)
+
+    local addPlaceholder = addBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    addPlaceholder:SetPoint("LEFT", 4, 0)
+    addPlaceholder:SetText("Enter player name to block...")
+    addBox:SetScript("OnTextChanged", function(self)
+        if self:GetText() == "" then addPlaceholder:Show() else addPlaceholder:Hide() end
+    end)
+
+    local addBtn = CreateFrame("Button", nil, userMgmtFrame, "UIPanelButtonTemplate")
+    addBtn:SetSize(90, 22)
+    addBtn:SetPoint("LEFT", addBox, "RIGHT", 10, 0)
+    addBtn:SetText("Block Player")
 
     -- Column Headers
-    local umUserLabel = userMgmtFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    umUserLabel:SetPoint("TOPLEFT", umDesc, "BOTTOMLEFT", 0, -8)
-    umUserLabel:SetWidth(160)
-    umUserLabel:SetJustifyH("LEFT")
-    umUserLabel:SetText("|cffffd700Player|r")
+    local hdrPlayer = MarketSync.CreateAHColumnHeader(userMgmtFrame, 205, 20, "Player")
+    hdrPlayer:SetPoint("TOPLEFT", 14, -90)
 
-    local umStatusLabel = userMgmtFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    umStatusLabel:SetPoint("LEFT", umUserLabel, "RIGHT", 0, 0)
-    umStatusLabel:SetWidth(60)
-    umStatusLabel:SetJustifyH("LEFT")
-    umStatusLabel:SetText("|cffffd700Status|r")
+    local hdrStatus = MarketSync.CreateAHColumnHeader(userMgmtFrame, 85, 20, "Status")
+    hdrStatus:SetPoint("LEFT", hdrPlayer, "RIGHT", 0, 0)
 
-    local umActionLabel = userMgmtFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    umActionLabel:SetPoint("LEFT", umStatusLabel, "RIGHT", 0, 0)
-    umActionLabel:SetWidth(60)
-    umActionLabel:SetJustifyH("CENTER")
-    umActionLabel:SetText("|cffffd700Action|r")
+    local hdrAction = MarketSync.CreateAHColumnHeader(userMgmtFrame, 110, 20, "Action")
+    hdrAction:SetPoint("LEFT", hdrStatus, "RIGHT", 0, 0)
 
-    local umColSep = userMgmtFrame:CreateTexture(nil, "ARTWORK")
-    umColSep:SetColorTexture(0.5, 0.5, 0.5, 0.3)
-    umColSep:SetSize(320, 1)
-    umColSep:SetPoint("TOPLEFT", umUserLabel, "BOTTOMLEFT", 0, -2)
+    -- Inset Panel for table rows
+    local listInset = MarketSync.CreateModernInset(userMgmtFrame, 14, -112, 400, 318)
 
-    -- Scroll area for user rows
-    local umScrollChild = CreateFrame("Frame", nil, userMgmtFrame)
-    umScrollChild:SetPoint("TOPLEFT", umColSep, "BOTTOMLEFT", 0, -3)
-    umScrollChild:SetSize(330, 260)
+    local scrollFrame = CreateFrame("ScrollFrame", "MarketSyncUserMgmtScrollFrame", listInset, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 2, -2)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -22, 2)
+    scrollFrame:EnableMouseWheel(true)
+
+    local umScrollChild = CreateFrame("Frame", nil, scrollFrame)
+    umScrollChild:SetSize(374, 1)
+    scrollFrame:SetScrollChild(umScrollChild)
+
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll()
+        local maxScroll = self:GetVerticalScrollRange()
+        local step = 26
+        if delta > 0 then
+            self:SetVerticalScroll(math.max(0, cur - step))
+        else
+            self:SetVerticalScroll(math.min(maxScroll, cur + step))
+        end
+    end)
+
+    local emptyText = umScrollChild:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    emptyText:SetPoint("TOP", umScrollChild, "TOP", 0, -50)
+    emptyText:SetWidth(340)
+    emptyText:SetJustifyH("CENTER")
+    emptyText:SetText("|cff888888No sync peers recorded yet.|r\n|cff555555Synced guild members or blocked players will appear here.|r")
+
+    local summaryText = userMgmtFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    summaryText:SetPoint("LEFT", userMgmtFrame, "BOTTOMLEFT", 16, 22)
+    summaryText:SetText("Total: 0 peers")
+
+    local btnCloseUserMgmt = CreateFrame("Button", nil, userMgmtFrame, "UIPanelButtonTemplate")
+    btnCloseUserMgmt:SetSize(80, 22)
+    btnCloseUserMgmt:SetPoint("BOTTOMRIGHT", userMgmtFrame, "BOTTOMRIGHT", -14, 12)
+    btnCloseUserMgmt:SetText("Close")
+    btnCloseUserMgmt:SetScript("OnClick", function() userMgmtFrame:Hide() end)
 
     local blockRows = {}
 
     local function RefreshUserList()
         for _, r in pairs(blockRows) do r:Hide() end
-        local y = 0
         local count = 0
+        local activeCount = 0
+        local blockedCount = 0
 
         local allUsers = {}
         local contributors = {}
@@ -1148,71 +1175,99 @@ local function CreateMainFrame()
         for _, user in ipairs(contributors) do
             allUsers[user] = true
         end
-        if MarketSyncDB and MarketSyncDB.BlockedUsers then for u,_ in pairs(MarketSyncDB.BlockedUsers) do allUsers[u]=true end end
+        if MarketSyncDB and MarketSyncDB.BlockedUsers then
+            for u, _ in pairs(MarketSyncDB.BlockedUsers) do
+                allUsers[u] = true
+            end
+        end
 
         local sortedUsers = {}
-        for user in pairs(allUsers) do table.insert(sortedUsers, user) end
+        for user in pairs(allUsers) do
+            table.insert(sortedUsers, user)
+        end
         table.sort(sortedUsers)
 
         for _, user in ipairs(sortedUsers) do
             count = count + 1
             local row = blockRows[count]
             if not row then
-                row = CreateFrame("Frame", nil, umScrollChild)
-                row:SetClipsChildren(true)
-                row:SetSize(320, 20)
+                row = CreateFrame("Button", nil, umScrollChild)
+                row:SetSize(374, 24)
+
+                local bg = row:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
+                row.bg = bg
+
+                local hl = row:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints()
+                hl:SetColorTexture(0.18, 0.22, 0.30, 0.40)
+                row.hl = hl
+
                 row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-                row.nameText:SetPoint("LEFT", 0, 0)
-                row.nameText:SetWidth(200)
+                row.nameText:SetPoint("LEFT", 10, 0)
+                row.nameText:SetWidth(190)
                 row.nameText:SetJustifyH("LEFT")
 
-                row.statusText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-                row.statusText:SetPoint("LEFT", 200, 0)
-                row.statusText:SetWidth(60)
+                row.statusText = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                row.statusText:SetPoint("LEFT", 205, 0)
+                row.statusText:SetWidth(80)
                 row.statusText:SetJustifyH("LEFT")
 
                 row.btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-                row.btn:SetSize(60, 18)
-                row.btn:SetPoint("LEFT", 260, 0)
+                row.btn:SetSize(75, 20)
+                row.btn:SetPoint("RIGHT", -10, 0)
                 row.btn:SetScript("OnClick", function(btnSelf)
                     if MarketSync.ToggleBlock then MarketSync.ToggleBlock(btnSelf.user) end
                     RefreshUserList()
                 end)
 
-                local rowSep = row:CreateTexture(nil, "BACKGROUND")
-                rowSep:SetColorTexture(0.3, 0.3, 0.3, 0.2)
-                rowSep:SetHeight(1)
-                rowSep:SetPoint("BOTTOMLEFT", 0, 0)
-                rowSep:SetPoint("BOTTOMRIGHT", 0, 0)
-
                 blockRows[count] = row
             end
+
+            if count % 2 == 1 then
+                row.bg:SetColorTexture(0.07, 0.09, 0.12, 0.65)
+            else
+                row.bg:SetColorTexture(0.04, 0.05, 0.07, 0.65)
+            end
+
             local isBlocked = MarketSyncDB.BlockedUsers and MarketSyncDB.BlockedUsers[user]
             row.nameText:SetText(user)
             if isBlocked then
-                row.statusText:SetText("|cffff0000Blocked|r")
+                blockedCount = blockedCount + 1
+                row.statusText:SetText("|cffff4444Blocked|r")
                 row.btn:SetText("Unblock")
             else
+                activeCount = activeCount + 1
                 row.statusText:SetText("|cff00ff00Active|r")
                 row.btn:SetText("Block")
             end
             row.btn.user = user
-            row:SetPoint("TOPLEFT", 0, -y)
+            row:SetPoint("TOPLEFT", 0, -(count - 1) * 25)
             row:Show()
-            y = y + 22
         end
 
+        umScrollChild:SetHeight(math.max(1, count * 25))
+
         if count == 0 then
-            if not umScrollChild.emptyText then
-                umScrollChild.emptyText = umScrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-                umScrollChild.emptyText:SetPoint("TOPLEFT", 0, -10)
-            end
-            umScrollChild.emptyText:SetText("|cff888888No users synced yet.|r")
-            umScrollChild.emptyText:Show()
-        elseif umScrollChild.emptyText then
-            umScrollChild.emptyText:Hide()
+            emptyText:Show()
+            summaryText:SetText("Total: 0 peers")
+        else
+            emptyText:Hide()
+            summaryText:SetText(string.format("Total: %d peers (|cff00ff00%d Active|r, |cffff4444%d Blocked|r)", count, activeCount, blockedCount))
         end
     end
+
+    local function DoManualBlock()
+        local name = strtrim(addBox:GetText() or "")
+        if name ~= "" then
+            if MarketSync.ToggleBlock then MarketSync.ToggleBlock(name) end
+            addBox:SetText("")
+            addBox:ClearFocus()
+            RefreshUserList()
+        end
+    end
+    addBtn:SetScript("OnClick", DoManualBlock)
+    addBox:SetScript("OnEnterPressed", DoManualBlock)
 
     btnManageUsers:SetScript("OnClick", function()
         if userMgmtFrame:IsShown() then
