@@ -1,18 +1,19 @@
 -- =============================================================
--- MarketSync - Notifications Tab UI (Modern Overhaul)
+-- MarketSync - Notifications Tab UI (Perfect Window Fit)
 -- Dual-view: Tracked Watchlist & Alert History
 -- Interactive item drop slot, presets, and native Favorites import
 -- =============================================================
 
 local NotificationPanel = nil
-local ROWS_PER_PAGE = 10
+local ROWS_PER_PAGE = 9
 
 local LEFT_X = 20
-local TOP_Y = -58
-local LEFT_W = 215
-local RESULTS_X = 245
-local ROW_WIDTH = 565
-local ROW_HEIGHT = 28
+local TOP_Y = -68
+local LEFT_W = 196
+local RESULTS_X = 224
+local ROW_WIDTH = 584
+local CONTENT_H = 338
+local ROW_HEIGHT = 27
 
 local SCOPE_OPTIONS = {
     { value = "all", label = "All Scopes" },
@@ -112,11 +113,11 @@ local function CreateBox(parent, x, y, width, height)
 
     local bg = box:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, 0.4)
+    bg:SetColorTexture(0.04, 0.04, 0.04, 0.55)
 
     local function BorderLine(anchorPoint, relPoint, ox, oy, w, h)
         local t = box:CreateTexture(nil, "BACKGROUND", nil, 2)
-        t:SetColorTexture(1, 0.84, 0, 0.25)
+        t:SetColorTexture(1, 0.84, 0, 0.28)
         t:SetPoint(anchorPoint, box, relPoint, ox, oy)
         t:SetSize(w, h)
     end
@@ -172,46 +173,46 @@ function MarketSync.CreateNotificationsPanel(parent)
     panel.editorCooldown = 300
     panel.editorEditingID = nil
     panel.importSelectedList = "__ALL__"
-    panel.importDiscountPct = 10 -- default 10% below market
+    panel.importDiscountPct = 10
 
     -- Forward declarations
     local RefreshView, RefreshWatchlistTable, RefreshHistoryTable, RefreshImportDropdown
     local SetEditorItem, ClearEditorForm
 
     -- =========================================================
-    -- TOP SUB-TAB HEADER
+    -- TOP SUB-TAB HEADER (Clearing portrait at X >= 76)
     -- =========================================================
     local btnTabWatchlist = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnTabWatchlist:SetSize(140, 22)
-    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, -28)
+    btnTabWatchlist:SetSize(130, 22)
+    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", 76, -34)
     btnTabWatchlist:SetText("Tracked Watchlist")
 
     local btnTabHistory = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnTabHistory:SetSize(140, 22)
-    btnTabHistory:SetPoint("LEFT", btnTabWatchlist, "RIGHT", 8, 0)
+    btnTabHistory:SetSize(130, 22)
+    btnTabHistory:SetPoint("LEFT", btnTabWatchlist, "RIGHT", 6, 0)
     btnTabHistory:SetText("Alert History")
 
-    local soundCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    soundCheck:SetSize(22, 22)
-    soundCheck:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -150, -28)
-    soundCheck.text:SetText("Sound Alerts")
-    soundCheck.text:ClearAllPoints()
-    soundCheck.text:SetPoint("LEFT", soundCheck, "RIGHT", 4, 0)
-    soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
-    soundCheck:SetScript("OnClick", function(self)
-        if MarketSyncDB then
-            MarketSyncDB.EnableNotificationSounds = self:GetChecked() and true or false
-        end
-    end)
-
     local btnTestSound = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnTestSound:SetSize(78, 20)
-    btnTestSound:SetPoint("LEFT", soundCheck.text, "RIGHT", 14, 0)
+    btnTestSound:SetSize(76, 20)
+    btnTestSound:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -34)
     btnTestSound:SetText("Test Sound")
     btnTestSound:SetScript("OnClick", function()
         local soundID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
         if MarketSync.PlayNotificationSound then
             MarketSync.PlayNotificationSound(soundID, true)
+        end
+    end)
+
+    local soundCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    soundCheck:SetSize(20, 20)
+    soundCheck:SetPoint("RIGHT", btnTestSound, "LEFT", -75, 0)
+    soundCheck.text:SetText("Sound Alerts")
+    soundCheck.text:ClearAllPoints()
+    soundCheck.text:SetPoint("LEFT", soundCheck, "RIGHT", 3, 0)
+    soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
+    soundCheck:SetScript("OnClick", function(self)
+        if MarketSyncDB then
+            MarketSyncDB.EnableNotificationSounds = self:GetChecked() and true or false
         end
     end)
 
@@ -245,25 +246,25 @@ function MarketSync.CreateNotificationsPanel(parent)
     end)
 
     -- =========================================================
-    -- LEFT COLUMN: ALERT EDITOR (BOX 1)
+    -- LEFT COLUMN: ALERT EDITOR (BOX 1 - Height 216)
     -- =========================================================
-    local editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 245)
+    local editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 216)
 
     local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    editorTitle:SetPoint("TOPLEFT", 10, -8)
+    editorTitle:SetPoint("TOPLEFT", 10, -7)
     editorTitle:SetText("|cffffd700Alert Editor|r")
 
-    -- 36x36 Item Drop Slot
+    -- 32x32 Item Drop Slot
     local itemSlot = CreateFrame("Button", "MarketSyncItemDropSlot", editorBox)
-    itemSlot:SetSize(36, 36)
-    itemSlot:SetPoint("TOPLEFT", 10, -28)
+    itemSlot:SetSize(32, 32)
+    itemSlot:SetPoint("TOPLEFT", 10, -23)
 
     local itemSlotIcon = itemSlot:CreateTexture(nil, "BORDER")
     itemSlotIcon:SetAllPoints()
     itemSlotIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
 
     local itemSlotBorder = itemSlot:CreateTexture(nil, "OVERLAY")
-    itemSlotBorder:SetSize(40, 40)
+    itemSlotBorder:SetSize(36, 36)
     itemSlotBorder:SetPoint("CENTER")
     itemSlotBorder:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
     itemSlotBorder:SetBlendMode("ADD")
@@ -275,13 +276,13 @@ function MarketSync.CreateNotificationsPanel(parent)
     itemSlotHighlight:SetBlendMode("ADD")
 
     local itemSlotName = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    itemSlotName:SetPoint("TOPLEFT", itemSlot, "TOPRIGHT", 8, 0)
-    itemSlotName:SetPoint("RIGHT", editorBox, "RIGHT", -8, 0)
+    itemSlotName:SetPoint("TOPLEFT", itemSlot, "TOPRIGHT", 6, -1)
+    itemSlotName:SetPoint("RIGHT", editorBox, "RIGHT", -6, 0)
     itemSlotName:SetJustifyH("LEFT")
     itemSlotName:SetText("|cff888888Drag item here|r")
 
     local itemSlotMarket = editorBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    itemSlotMarket:SetPoint("BOTTOMLEFT", itemSlot, "BOTTOMRIGHT", 8, 2)
+    itemSlotMarket:SetPoint("BOTTOMLEFT", itemSlot, "BOTTOMRIGHT", 6, 1)
     itemSlotMarket:SetJustifyH("LEFT")
     itemSlotMarket:SetText("Market: |cff888888--|r")
 
@@ -325,12 +326,12 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Item Target EditBox
     local targetLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    targetLabel:SetPoint("TOPLEFT", 10, -70)
+    targetLabel:SetPoint("TOPLEFT", 10, -58)
     targetLabel:SetText("Item Name or ID:")
 
     local targetBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
     targetBox:SetSize(LEFT_W - 20, 18)
-    targetBox:SetPoint("TOPLEFT", 10, -86)
+    targetBox:SetPoint("TOPLEFT", 10, -72)
     targetBox:SetAutoFocus(false)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(targetBox, {
@@ -352,12 +353,12 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Threshold Input & Preset Buttons
     local threshLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    threshLabel:SetPoint("TOPLEFT", 10, -110)
+    threshLabel:SetPoint("TOPLEFT", 10, -94)
     threshLabel:SetText("Alert Below (Gold):")
 
     local threshBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
-    threshBox:SetSize(62, 18)
-    threshBox:SetPoint("TOPLEFT", 10, -126)
+    threshBox:SetSize(54, 18)
+    threshBox:SetPoint("TOPLEFT", 10, -108)
     threshBox:SetAutoFocus(false)
     threshBox:SetText("0")
     if MarketSync.RegisterLinkAwareEditBox then
@@ -365,19 +366,19 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
 
     local btn10Pct = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btn10Pct:SetSize(40, 18)
+    btn10Pct:SetSize(36, 18)
     btn10Pct:SetPoint("LEFT", threshBox, "RIGHT", 4, 0)
     btn10Pct:SetText("-10%")
 
     local btn20Pct = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btn20Pct:SetSize(40, 18)
+    btn20Pct:SetSize(36, 18)
     btn20Pct:SetPoint("LEFT", btn10Pct, "RIGHT", 2, 0)
     btn20Pct:SetText("-20%")
 
     local btnMarket = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btnMarket:SetSize(44, 18)
+    btnMarket:SetSize(38, 18)
     btnMarket:SetPoint("LEFT", btn20Pct, "RIGHT", 2, 0)
-    btnMarket:SetText("Market")
+    btnMarket:SetText("Mkt")
 
     local function ApplyThresholdPreset(multiplier)
         local mp = panel.editorMarketPrice or 0
@@ -391,42 +392,43 @@ function MarketSync.CreateNotificationsPanel(parent)
     btn20Pct:SetScript("OnClick", function() ApplyThresholdPreset(0.8) end)
     btnMarket:SetScript("OnClick", function() ApplyThresholdPreset(1.0) end)
 
-    -- Scope Dropdown & Cooldown Presets
+    -- Dedicated Scope Row
     local scopeLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    scopeLabel:SetPoint("TOPLEFT", 10, -148)
+    scopeLabel:SetPoint("TOPLEFT", 10, -130)
     scopeLabel:SetText("Scope:")
 
     local scopeDropdown = BuildScopeDropdown(
         "MarketSyncNotificationsScopeDropdown",
         editorBox,
-        85,
+        80,
         function() return panel.editorScope end,
         function(v) panel.editorScope = v end
     )
-    scopeDropdown:SetPoint("TOPLEFT", editorBox, "TOPLEFT", -6, -160)
+    scopeDropdown:SetPoint("TOPLEFT", editorBox, "TOPLEFT", 45, -125)
 
+    -- Dedicated Cooldown Row
     local cooldownLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    cooldownLabel:SetPoint("TOPLEFT", 112, -148)
+    cooldownLabel:SetPoint("TOPLEFT", 10, -150)
     cooldownLabel:SetText("Cooldown:")
 
     local cd5m = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd5m:SetSize(22, 18)
-    cd5m:SetPoint("TOPLEFT", 112, -164)
+    cd5m:SetSize(24, 18)
+    cd5m:SetPoint("LEFT", cooldownLabel, "RIGHT", 6, 0)
     cd5m:SetText("5m")
 
     local cd15m = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd15m:SetSize(26, 18)
-    cd15m:SetPoint("LEFT", cd5m, "RIGHT", 1, 0)
+    cd15m:SetSize(28, 18)
+    cd15m:SetPoint("LEFT", cd5m, "RIGHT", 2, 0)
     cd15m:SetText("15m")
 
     local cd30m = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd30m:SetSize(26, 18)
-    cd30m:SetPoint("LEFT", cd15m, "RIGHT", 1, 0)
+    cd30m:SetSize(28, 18)
+    cd30m:SetPoint("LEFT", cd15m, "RIGHT", 2, 0)
     cd30m:SetText("30m")
 
     local cd1h = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd1h:SetSize(22, 18)
-    cd1h:SetPoint("LEFT", cd30m, "RIGHT", 1, 0)
+    cd1h:SetSize(24, 18)
+    cd1h:SetPoint("LEFT", cd30m, "RIGHT", 2, 0)
     cd1h:SetText("1h")
 
     local function HighlightCooldownBtn(seconds)
@@ -445,8 +447,8 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Urgent Checkbox
     local urgentCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
-    urgentCheck:SetSize(20, 20)
-    urgentCheck:SetPoint("TOPLEFT", 10, -188)
+    urgentCheck:SetSize(18, 18)
+    urgentCheck:SetPoint("TOPLEFT", 10, -170)
     urgentCheck.text:SetText("Urgent (Raid Warning)")
     urgentCheck.text:ClearAllPoints()
     urgentCheck.text:SetPoint("LEFT", urgentCheck, "RIGHT", 4, 0)
@@ -454,46 +456,46 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Action Buttons
     local btnSave = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btnSave:SetSize(125, 22)
-    btnSave:SetPoint("TOPLEFT", 10, -214)
+    btnSave:SetSize(115, 20)
+    btnSave:SetPoint("TOPLEFT", 10, -190)
     btnSave:SetText("Add Alert")
 
     local btnClear = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btnClear:SetSize(65, 22)
-    btnClear:SetPoint("LEFT", btnSave, "RIGHT", 5, 0)
+    btnClear:SetSize(58, 20)
+    btnClear:SetPoint("LEFT", btnSave, "RIGHT", 4, 0)
     btnClear:SetText("Clear")
 
     -- =========================================================
-    -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2)
+    -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2 - Height 114)
     -- =========================================================
-    local importBox = CreateBox(panel, LEFT_X, TOP_Y - 253, LEFT_W, 115)
+    local importBox = CreateBox(panel, LEFT_X, TOP_Y - 224, LEFT_W, 114)
 
     local importTitle = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importTitle:SetPoint("TOPLEFT", 10, -8)
+    importTitle:SetPoint("TOPLEFT", 10, -7)
     importTitle:SetText("|cffffd700Preferred List Import|r")
 
     local importDropdown = CreateFrame("Frame", "MarketSyncNotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(importDropdown, LEFT_W - 35)
-    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", -6, -24)
+    UIDropDownMenu_SetWidth(importDropdown, LEFT_W - 40)
+    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", -6, -22)
 
     local discountLabel = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    discountLabel:SetPoint("TOPLEFT", 10, -56)
-    discountLabel:SetText("Threshold:")
+    discountLabel:SetPoint("TOPLEFT", 10, -53)
+    discountLabel:SetText("Discount:")
 
     local impBtn10 = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    impBtn10:SetSize(42, 18)
-    impBtn10:SetPoint("LEFT", discountLabel, "RIGHT", 6, 0)
+    impBtn10:SetSize(38, 18)
+    impBtn10:SetPoint("LEFT", discountLabel, "RIGHT", 4, 0)
     impBtn10:SetText("-10%")
 
     local impBtn20 = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    impBtn20:SetSize(42, 18)
+    impBtn20:SetSize(38, 18)
     impBtn20:SetPoint("LEFT", impBtn10, "RIGHT", 2, 0)
     impBtn20:SetText("-20%")
 
     local impBtnMarket = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    impBtnMarket:SetSize(45, 18)
+    impBtnMarket:SetSize(38, 18)
     impBtnMarket:SetPoint("LEFT", impBtn20, "RIGHT", 2, 0)
-    impBtnMarket:SetText("Market")
+    impBtnMarket:SetText("Mkt")
 
     local function HighlightImportDiscount(pct)
         panel.importDiscountPct = pct
@@ -508,16 +510,23 @@ function MarketSync.CreateNotificationsPanel(parent)
     HighlightImportDiscount(10)
 
     local btnDoImport = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    btnDoImport:SetSize(LEFT_W - 20, 22)
-    btnDoImport:SetPoint("TOPLEFT", 10, -82)
+    btnDoImport:SetSize(LEFT_W - 20, 20)
+    btnDoImport:SetPoint("TOPLEFT", 10, -78)
     btnDoImport:SetText("Import List into Watchlist")
 
+    local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    importStatusText:SetPoint("TOPLEFT", 10, -100)
+    importStatusText:SetText("")
+
     -- =========================================================
-    -- RIGHT COLUMN: SHARED SEARCH BAR & HEADER
+    -- RIGHT COLUMN: ENCLOSING RESULTS BOX (Height 338)
     -- =========================================================
-    local searchBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    searchBox:SetSize(180, 20)
-    searchBox:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, TOP_Y - 2)
+    local rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H)
+
+    -- Top Toolbar inside rightBox
+    local searchBox = CreateFrame("EditBox", nil, rightBox, "InputBoxTemplate")
+    searchBox:SetSize(180, 18)
+    searchBox:SetPoint("TOPLEFT", 10, -8)
     searchBox:SetAutoFocus(false)
     searchBox:SetText("")
 
@@ -558,9 +567,9 @@ function MarketSync.CreateNotificationsPanel(parent)
     end)
 
     -- History Action Buttons
-    local btnMarkAllRead = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnMarkAllRead:SetSize(100, 20)
-    btnMarkAllRead:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, TOP_Y - 2)
+    local btnMarkAllRead = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate")
+    btnMarkAllRead:SetSize(95, 20)
+    btnMarkAllRead:SetPoint("TOPLEFT", 10, -7)
     btnMarkAllRead:SetText("Mark All Read")
     btnMarkAllRead:SetScript("OnClick", function()
         if MarketSync.MarkAllNotificationsRead then
@@ -570,9 +579,9 @@ function MarketSync.CreateNotificationsPanel(parent)
         RefreshHistoryTable()
     end)
 
-    local btnClearHistory = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local btnClearHistory = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate")
     btnClearHistory:SetSize(90, 20)
-    btnClearHistory:SetPoint("LEFT", btnMarkAllRead, "RIGHT", 8, 0)
+    btnClearHistory:SetPoint("LEFT", btnMarkAllRead, "RIGHT", 6, 0)
     btnClearHistory:SetText("Clear History")
     btnClearHistory:SetScript("OnClick", function()
         if MarketSync.ClearNotificationLog then
@@ -583,9 +592,9 @@ function MarketSync.CreateNotificationsPanel(parent)
         RefreshHistoryTable()
     end)
 
-    -- Status label
-    local statusText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    statusText:SetPoint("LEFT", searchBox, "RIGHT", 15, 0)
+    -- Shared Status label
+    local statusText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    statusText:SetPoint("LEFT", searchBox, "RIGHT", 14, 0)
     statusText:SetText("")
 
     local function SetStatus(msg, isError)
@@ -599,61 +608,66 @@ function MarketSync.CreateNotificationsPanel(parent)
         end)
     end
 
-    -- =========================================================
-    -- RIGHT COLUMN: TABLE HEADERS
-    -- =========================================================
-    local headerFrame = CreateFrame("Frame", nil, panel)
-    headerFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, TOP_Y - 26)
-    headerFrame:SetSize(ROW_WIDTH, 20)
+    -- Horizontal separator bar above headers
+    local headerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
+    headerSep:SetColorTexture(1, 0.84, 0, 0.2)
+    headerSep:SetPoint("TOPLEFT", 0, -30)
+    headerSep:SetSize(ROW_WIDTH, 1)
+
+    -- Header background strip
+    local headerStrip = rightBox:CreateTexture(nil, "BACKGROUND", nil, 1)
+    headerStrip:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+    headerStrip:SetPoint("TOPLEFT", 0, -31)
+    headerStrip:SetSize(ROW_WIDTH, 18)
 
     -- Watchlist column headers
-    local wHdrIcon = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrIcon:SetPoint("LEFT", 4, 0)
+    local wHdrIcon = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    wHdrIcon:SetPoint("TOPLEFT", 10, -34)
     wHdrIcon:SetText("Item")
 
-    local wHdrThresh = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrThresh:SetPoint("LEFT", 240, 0)
+    local wHdrThresh = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    wHdrThresh:SetPoint("TOPLEFT", 235, -34)
     wHdrThresh:SetText("Threshold")
 
-    local wHdrScope = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrScope:SetPoint("LEFT", 335, 0)
+    local wHdrScope = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    wHdrScope:SetPoint("TOPLEFT", 335, -34)
     wHdrScope:SetText("Scope")
 
-    local wHdrCooldown = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrCooldown:SetPoint("LEFT", 395, 0)
+    local wHdrCooldown = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    wHdrCooldown:SetPoint("TOPLEFT", 405, -34)
     wHdrCooldown:SetText("Cooldown")
 
-    local wHdrActive = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrActive:SetPoint("LEFT", 465, 0)
+    local wHdrActive = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    wHdrActive:SetPoint("TOPLEFT", 475, -34)
     wHdrActive:SetText("Active")
 
-    local wHdrDel = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrDel:SetPoint("LEFT", 525, 0)
+    local wHdrDel = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    wHdrDel:SetPoint("TOPLEFT", 540, -34)
     wHdrDel:SetText("Del")
 
     -- History column headers
-    local hHdrTime = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrTime:SetPoint("LEFT", 4, 0)
+    local hHdrTime = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hHdrTime:SetPoint("TOPLEFT", 10, -34)
     hHdrTime:SetText("Time")
 
-    local hHdrItem = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrItem:SetPoint("LEFT", 70, 0)
+    local hHdrItem = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hHdrItem:SetPoint("TOPLEFT", 75, -34)
     hHdrItem:SetText("Item")
 
-    local hHdrPrice = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrPrice:SetPoint("LEFT", 270, 0)
+    local hHdrPrice = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hHdrPrice:SetPoint("TOPLEFT", 275, -34)
     hHdrPrice:SetText("Alert Price")
 
-    local hHdrThresh = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrThresh:SetPoint("LEFT", 365, 0)
+    local hHdrThresh = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hHdrThresh:SetPoint("TOPLEFT", 365, -34)
     hHdrThresh:SetText("Target")
 
-    local hHdrScope = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrScope:SetPoint("LEFT", 445, 0)
+    local hHdrScope = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hHdrScope:SetPoint("TOPLEFT", 450, -34)
     hHdrScope:SetText("Scope")
 
-    local hHdrSource = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrSource:SetPoint("LEFT", 505, 0)
+    local hHdrSource = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hHdrSource:SetPoint("TOPLEFT", 515, -34)
     hHdrSource:SetText("Source")
 
     local function UpdateHeaderVisibility()
@@ -677,26 +691,26 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
 
     -- =========================================================
-    -- RIGHT COLUMN: ROWS CONTAINER
+    -- TABLE ROWS (9 Rows, 27px height each)
     -- =========================================================
     local rows = {}
-    local emptyLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontDisable")
-    emptyLabel:SetPoint("CENTER", panel, "TOPLEFT", RESULTS_X + (ROW_WIDTH / 2), TOP_Y - 160)
+    local emptyLabel = rightBox:CreateFontString(nil, "ARTWORK", "GameFontDisable")
+    emptyLabel:SetPoint("CENTER", rightBox, "CENTER", 0, 10)
     emptyLabel:SetText("")
 
     for i = 1, ROWS_PER_PAGE do
-        local row = CreateFrame("Button", nil, panel)
-        row:SetSize(ROW_WIDTH, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, TOP_Y - 48 - ((i - 1) * (ROW_HEIGHT + 1)))
+        local row = CreateFrame("Button", nil, rightBox)
+        row:SetSize(ROW_WIDTH - 8, ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", rightBox, "TOPLEFT", 4, -51 - ((i - 1) * 28))
 
         local bg = row:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetColorTexture(i % 2 == 0 and 0.12 or 0.08, i % 2 == 0 and 0.12 or 0.08, i % 2 == 0 and 0.12 or 0.08, 0.5)
+        bg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.035 or 0.015)
         row.bg = bg
 
         local hl = row:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.08)
+        hl:SetColorTexture(1, 0.84, 0, 0.12)
 
         local accent = row:CreateTexture(nil, "OVERLAY")
         accent:SetSize(3, ROW_HEIGHT)
@@ -707,7 +721,7 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         -- Icon button (shared)
         local iconBtn = CreateFrame("Button", nil, row)
-        iconBtn:SetSize(22, 22)
+        iconBtn:SetSize(20, 20)
         iconBtn:SetPoint("LEFT", 4, 0)
         local iconTex = iconBtn:CreateTexture(nil, "BORDER")
         iconTex:SetAllPoints()
@@ -730,36 +744,36 @@ function MarketSync.CreateNotificationsPanel(parent)
         -- Watchlist items
         local wName = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         wName:SetPoint("LEFT", iconBtn, "RIGHT", 6, 0)
-        wName:SetSize(200, 20)
+        wName:SetSize(195, 20)
         wName:SetJustifyH("LEFT")
         row.wName = wName
 
         local wThresh = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wThresh:SetPoint("LEFT", 240, 0)
-        wThresh:SetSize(85, 20)
+        wThresh:SetPoint("LEFT", 231, 0)
+        wThresh:SetSize(90, 20)
         wThresh:SetJustifyH("LEFT")
         row.wThresh = wThresh
 
         local wScope = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wScope:SetPoint("LEFT", 335, 0)
-        wScope:SetSize(50, 20)
+        wScope:SetPoint("LEFT", 331, 0)
+        wScope:SetSize(60, 20)
         wScope:SetJustifyH("LEFT")
         row.wScope = wScope
 
         local wCooldown = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wCooldown:SetPoint("LEFT", 395, 0)
+        wCooldown:SetPoint("LEFT", 401, 0)
         wCooldown:SetSize(55, 20)
         wCooldown:SetJustifyH("LEFT")
         row.wCooldown = wCooldown
 
         local wActiveCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-        wActiveCheck:SetSize(20, 20)
-        wActiveCheck:SetPoint("LEFT", 468, 0)
+        wActiveCheck:SetSize(18, 18)
+        wActiveCheck:SetPoint("LEFT", 477, 0)
         row.wActiveCheck = wActiveCheck
 
         local wDelBtn = CreateFrame("Button", nil, row)
-        wDelBtn:SetSize(20, 20)
-        wDelBtn:SetPoint("LEFT", 526, 0)
+        wDelBtn:SetSize(18, 18)
+        wDelBtn:SetPoint("LEFT", 538, 0)
         local delText = wDelBtn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         delText:SetPoint("CENTER")
         delText:SetText("|cffff4444✕|r")
@@ -768,44 +782,43 @@ function MarketSync.CreateNotificationsPanel(parent)
         -- History items
         local hTime = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
         hTime:SetPoint("LEFT", 4, 0)
-        hTime:SetSize(62, 20)
+        hTime:SetSize(58, 20)
         hTime:SetJustifyH("LEFT")
         row.hTime = hTime
 
         local hName = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         hName:SetPoint("LEFT", iconBtn, "RIGHT", 6, 0)
-        hName:SetSize(170, 20)
+        hName:SetSize(165, 20)
         hName:SetJustifyH("LEFT")
         row.hName = hName
 
         local hPrice = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hPrice:SetPoint("LEFT", 270, 0)
+        hPrice:SetPoint("LEFT", 271, 0)
         hPrice:SetSize(85, 20)
         hPrice:SetJustifyH("LEFT")
         row.hPrice = hPrice
 
         local hThresh = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hThresh:SetPoint("LEFT", 365, 0)
-        hThresh:SetSize(70, 20)
+        hThresh:SetPoint("LEFT", 361, 0)
+        hThresh:SetSize(80, 20)
         hThresh:SetJustifyH("LEFT")
         row.hThresh = hThresh
 
         local hScope = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hScope:SetPoint("LEFT", 445, 0)
-        hScope:SetSize(50, 20)
+        hScope:SetPoint("LEFT", 446, 0)
+        hScope:SetSize(55, 20)
         hScope:SetJustifyH("LEFT")
         row.hScope = hScope
 
         local hSource = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-        hSource:SetPoint("LEFT", 505, 0)
-        hSource:SetSize(55, 20)
+        hSource:SetPoint("LEFT", 511, 0)
+        hSource:SetSize(58, 20)
         hSource:SetJustifyH("LEFT")
         row.hSource = hSource
 
         -- Row click handler (load into editor)
         row:SetScript("OnClick", function(self)
             if row.request then
-                -- Load existing request into editor
                 panel.editorEditingID = row.request.id
                 btnSave:SetText("Update Alert")
                 SetEditorItem(row.request.matchValue or row.request.displayName or row.itemID)
@@ -815,7 +828,6 @@ function MarketSync.CreateNotificationsPanel(parent)
                 HighlightCooldownBtn(tonumber(row.request.cooldownSec) or 300)
                 urgentCheck:SetChecked(row.request.urgent == true)
             elseif row.historyEntry then
-                -- Load item from alert history into editor
                 SetEditorItem(row.historyEntry.itemLink or row.historyEntry.itemID or row.historyEntry.itemName)
                 threshBox:SetText(FormatGoldInput(row.historyEntry.threshold))
             end
@@ -824,29 +836,30 @@ function MarketSync.CreateNotificationsPanel(parent)
         rows[i] = row
     end
 
-    -- Pagination controls
-    local footerFrame = CreateFrame("Frame", nil, panel)
-    footerFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, TOP_Y - 340)
-    footerFrame:SetSize(ROW_WIDTH, 24)
+    -- Footer inside rightBox
+    local footerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
+    footerSep:SetColorTexture(1, 0.84, 0, 0.2)
+    footerSep:SetPoint("BOTTOMLEFT", 0, 30)
+    footerSep:SetSize(ROW_WIDTH, 1)
 
-    local countText = footerFrame:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    countText:SetPoint("LEFT", 4, 0)
+    local countText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    countText:SetPoint("BOTTOMLEFT", 10, 8)
     countText:SetText("")
 
-    local btnPrev = CreateFrame("Button", nil, footerFrame, "UIPanelButtonTemplate")
-    btnPrev:SetSize(55, 20)
-    btnPrev:SetPoint("RIGHT", footerFrame, "RIGHT", -120, 0)
+    local btnPrev = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate")
+    btnPrev:SetSize(50, 18)
+    btnPrev:SetPoint("BOTTOMRIGHT", -105, 6)
     btnPrev:SetText("< Prev")
 
-    local pageText = footerFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    pageText:SetPoint("LEFT", btnPrev, "RIGHT", 8, 0)
-    pageText:SetPoint("RIGHT", footerFrame, "RIGHT", -55, 0)
+    local pageText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    pageText:SetPoint("LEFT", btnPrev, "RIGHT", 4, 0)
+    pageText:SetPoint("RIGHT", rightBox, "BOTTOMRIGHT", -54, 15)
     pageText:SetJustifyH("CENTER")
-    pageText:SetText("Page 1 / 1")
+    pageText:SetText("1 / 1")
 
-    local btnNext = CreateFrame("Button", nil, footerFrame, "UIPanelButtonTemplate")
-    btnNext:SetSize(55, 20)
-    btnNext:SetPoint("RIGHT", footerFrame, "RIGHT", 0, 0)
+    local btnNext = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate")
+    btnNext:SetSize(50, 18)
+    btnNext:SetPoint("BOTTOMRIGHT", -6, 6)
     btnNext:SetText("Next >")
 
     btnPrev:SetScript("OnClick", function()
@@ -932,7 +945,6 @@ function MarketSync.CreateNotificationsPanel(parent)
         panel.editorMarketPrice = marketPrice
         if marketPrice > 0 then
             itemSlotMarket:SetText("Market: " .. FormatMoneyColored(marketPrice))
-            -- If threshold is 0, auto-fill -10%
             local curThresh = ParseGoldToCopper(threshBox:GetText())
             if curThresh == 0 then
                 threshBox:SetText(FormatGoldInput(math.floor(marketPrice * 0.9)))
@@ -1057,11 +1069,10 @@ function MarketSync.CreateNotificationsPanel(parent)
     btnDoImport:SetScript("OnClick", function()
         local listName = panel.importSelectedList
         local discountPct = panel.importDiscountPct or 10
-        local thresholdMultiplier = (100 - discountPct) -- e.g. 90%
+        local thresholdMultiplier = (100 - discountPct)
         local imported = 0
         local err = nil
 
-        -- Prefer native MarketSync Favorites
         if MarketSync.ImportNotificationRequestsFromFavorites then
             imported, err = MarketSync.ImportNotificationRequestsFromFavorites(listName, {
                 thresholdPct = thresholdMultiplier,
@@ -1079,11 +1090,13 @@ function MarketSync.CreateNotificationsPanel(parent)
         end
 
         if imported and imported > 0 then
-            SetStatus(string.format("Imported %d alert(s)!", imported))
+            importStatusText:SetText(string.format("|cff00ff00Imported %d alert(s)!|r", imported))
             panel.watchlistPage = 0
             RefreshWatchlistTable()
+            C_Timer.After(4, function() importStatusText:SetText("") end)
         else
-            SetStatus(err or "No items imported.", true)
+            importStatusText:SetText("|cffff4444" .. tostring(err or "No items imported.") .. "|r")
+            C_Timer.After(4, function() importStatusText:SetText("") end)
         end
     end)
 
@@ -1117,7 +1130,7 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         btnPrev:SetEnabled(panel.watchlistPage > 0)
         btnNext:SetEnabled(panel.watchlistPage < maxPage)
-        pageText:SetText(string.format("Page %d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
+        pageText:SetText(string.format("%d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
 
         local startIndex = (panel.watchlistPage * ROWS_PER_PAGE) + 1
         local endIndex = math.min(total, startIndex + ROWS_PER_PAGE - 1)
@@ -1127,7 +1140,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             emptyLabel:SetText(panel.searchQuery ~= "" and "No matching tracked items." or "No tracked items.\nDrag an item to the editor or import a Preferred List.")
             emptyLabel:Show()
         else
-            countText:SetText(string.format("Showing %d-%d of %d tracked alerts", startIndex, endIndex, total))
+            countText:SetText(string.format("Showing %d-%d of %d alerts", startIndex, endIndex, total))
             emptyLabel:Hide()
         end
 
@@ -1228,7 +1241,7 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         btnPrev:SetEnabled(panel.historyPage > 0)
         btnNext:SetEnabled(panel.historyPage < maxPage)
-        pageText:SetText(string.format("Page %d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
+        pageText:SetText(string.format("%d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
 
         local startIndex = (panel.historyPage * ROWS_PER_PAGE) + 1
         local endIndex = math.min(total, startIndex + ROWS_PER_PAGE - 1)
@@ -1238,7 +1251,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             emptyLabel:SetText("No alerts recorded yet.\nAlerts will appear here when prices drop below your thresholds.")
             emptyLabel:Show()
         else
-            countText:SetText(string.format("Showing %d-%d of %d recorded alerts", startIndex, endIndex, total))
+            countText:SetText(string.format("Showing %d-%d of %d alerts", startIndex, endIndex, total))
             emptyLabel:Hide()
         end
 
@@ -1267,7 +1280,7 @@ function MarketSync.CreateNotificationsPanel(parent)
                 row.hTime:Show()
 
                 row.iconTex:SetTexture(entry.itemIcon or SafeGetItemIcon(entry.itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
-                row.iconBtn:SetPoint("LEFT", 70, 0)
+                row.iconBtn:SetPoint("LEFT", 68, 0)
                 row.iconBtn:Show()
 
                 local dName = entry.itemLink or entry.itemName or (entry.itemID and ("Item " .. entry.itemID)) or "Unknown"
