@@ -66,7 +66,7 @@ local CATEGORIES = {
     { name = "Recipe", classID = 9, subs = {
         {name="Book",subID=0}, {name="Leatherworking",subID=1}, {name="Tailoring",subID=2},
         {name="Engineering",subID=3}, {name="Blacksmithing",subID=4}, {name="Cooking",subID=5},
-        {name="Alchemy",subID=6}, {name="First Aid",subID=7}, {name="Enchanting",subID=8},
+        {name="Alchemy",subID=6}, {name="First Aid (Health)",subID=7}, {name="Enchanting",subID=8},
         {name="Fishing",subID=9}, {name="Jewelcrafting",subID=10},
     }},
     { name = "Gems", classID = 3, subs = {

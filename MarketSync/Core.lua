@@ -497,7 +497,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
 
     -- Keep known profession recipes in sync with the player's profession book.
-    elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_UPDATE" or event == "SKILL_LINES_CHANGED" then
+    elseif event == "TRADE_SKILL_SHOW"
+        or event == "TRADE_SKILL_DATA_SOURCE_CHANGED"
+        or event == "TRADE_SKILL_LIST_UPDATE"
+        or event == "TRADE_SKILL_UPDATE"
+        or event == "SKILL_LINES_CHANGED" then
         if MarketSync.RefreshKnownProfessionCache then
             MarketSync.RefreshKnownProfessionCache()
         end

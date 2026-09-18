@@ -388,19 +388,65 @@ MarketSync.DisenchantTable = TBC_DISENCHANT_FALLBACK
 MarketSync.GetDisenchantDropList = GetDisenchantDropList
 
 MarketSync.CraftingData = MarketSync.CraftingData or {
+    ["First Aid (Health)"] = {
+        -- First Aid Bandages
+        { name = "Linen Bandage", outputItemID = 1251, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2592, qty = 1 } } }, -- Linen Cloth
+        { name = "Heavy Linen Bandage", outputItemID = 2581, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2592, qty = 2 } } },
+        { name = "Wool Bandage", outputItemID = 3530, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2589, qty = 1 } } }, -- Wool Cloth
+        { name = "Heavy Wool Bandage", outputItemID = 3531, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2589, qty = 2 } } },
+        { name = "Silk Bandage", outputItemID = 6450, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 4306, qty = 1 } } }, -- Silk Cloth
+        { name = "Heavy Silk Bandage", outputItemID = 6451, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 4306, qty = 2 } } },
+        { name = "Mageweave Bandage", outputItemID = 8544, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 4338, qty = 1 } } }, -- Mageweave Cloth
+        { name = "Heavy Mageweave Bandage", outputItemID = 8545, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 4338, qty = 2 } } },
+        { name = "Runecloth Bandage", outputItemID = 14529, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 14047, qty = 1 } } }, -- Runecloth
+        { name = "Heavy Runecloth Bandage", outputItemID = 14530, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 14047, qty = 2 } } },
+        { name = "Netherweave Bandage", outputItemID = 21990, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 21877, qty = 1 } } }, -- Netherweave Cloth
+        { name = "Heavy Netherweave Bandage", outputItemID = 21991, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 21877, qty = 2 } } },
+        { name = "Anti-Venom", outputItemID = 6452, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 1475, qty = 1 } } }, -- Small Venom Sac
+        { name = "Strong Anti-Venom", outputItemID = 6453, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 1476, qty = 1 } } }, -- Large Venom Sac
+        -- Health & Rejuvenation Potions (secondary health craft support)
+        { name = "Minor Healing Potion", outputItemID = 118, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2447, qty = 1 }, { itemID = 765, qty = 1 }, { itemID = 3371, qty = 1 } } }, -- Peacebloom, Silverleaf, Empty Vial
+        { name = "Lesser Healing Potion", outputItemID = 858, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 118, qty = 1 }, { itemID = 2450, qty = 1 } } }, -- Minor Healing Potion, Briarthorn
+        { name = "Healing Potion", outputItemID = 929, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2453, qty = 1 }, { itemID = 2450, qty = 1 }, { itemID = 3372, qty = 1 } } }, -- Bruiseweed, Briarthorn, Leaded Vial
+        { name = "Greater Healing Potion", outputItemID = 1710, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 3355, qty = 1 }, { itemID = 3356, qty = 1 }, { itemID = 3372, qty = 1 } } }, -- Wild Steelbloom, Kingsblood, Leaded Vial
+        { name = "Superior Healing Potion", outputItemID = 3928, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 8838, qty = 1 }, { itemID = 3358, qty = 1 }, { itemID = 8925, qty = 1 } } }, -- Sungrass, Khadgar's Whisker, Crystal Vial
+        { name = "Major Healing Potion", outputItemID = 13446, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 13464, qty = 2 }, { itemID = 13463, qty = 1 }, { itemID = 8925, qty = 1 } } }, -- Mountain Silversage, Golden Sansam, Crystal Vial
+        { name = "Super Healing Potion", outputItemID = 22829, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 22791, qty = 2 }, { itemID = 22785, qty = 1 }, { itemID = 22849, qty = 1 } } }, -- Netherbloom, Felweed, Fel Glass Vial
+        { name = "Major Rejuvenation Potion", outputItemID = 18253, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 13466, qty = 4 }, { itemID = 13463, qty = 4 }, { itemID = 8925, qty = 1 } } }, -- Heart of the Wild, Golden Sansam, Crystal Vial
+        { name = "Powerful Rejuvenation Potion", outputItemID = 22850, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 22793, qty = 3 }, { itemID = 22794, qty = 1 }, { itemID = 22849, qty = 1 } } }, -- Mana Thistle, Fel Lotus, Fel Glass Vial
+    },
+    ["First Aid"] = nil, -- points dynamically to First Aid (Health) below
+    Cooking = {
+        { name = "Herb Baked Eggs", outputItemID = 6888, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 6889, qty = 1 } } }, -- Small Egg
+        { name = "Spiced Wolf Meat", outputItemID = 2679, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2672, qty = 1 }, { itemID = 2678, qty = 1 } } }, -- Wolf Meat, Mild Spices
+        { name = "Smoked Bear Meat", outputItemID = 2681, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2673, qty = 1 }, { itemID = 2678, qty = 1 } } }, -- Bear Meat, Mild Spices
+        { name = "Cooked Crab Claw", outputItemID = 2683, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2674, qty = 1 }, { itemID = 2678, qty = 1 } } }, -- Crawler Claw, Mild Spices
+        { name = "Seasoned Wolf Kebab", outputItemID = 1017, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 1015, qty = 2 }, { itemID = 7371, qty = 1 } } }, -- Lean Wolf Flank, Stormwind Seasoning Herbs
+        { name = "Curiously Tasty Omelet", outputItemID = 3662, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 3685, qty = 1 }, { itemID = 2692, qty = 1 } } }, -- Raptor Egg, Hot Spices
+        { name = "Roast Raptor", outputItemID = 12224, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 12202, qty = 1 }, { itemID = 2692, qty = 1 } } }, -- Raptor Flesh, Hot Spices
+        { name = "Monster Omelet", outputItemID = 12218, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 12207, qty = 1 }, { itemID = 3713, qty = 2 } } }, -- Giant Egg, Soothing Spices
+        { name = "Spiced Chili Crab", outputItemID = 12217, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 12206, qty = 2 }, { itemID = 2692, qty = 2 } } }, -- Tender Crab Meat, Hot Spices
+        { name = "Tender Wolf Steak", outputItemID = 18045, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 12208, qty = 1 }, { itemID = 3713, qty = 1 } } }, -- Tender Wolf Meat, Soothing Spices
+        { name = "Ravager Dog", outputItemID = 27655, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 27671, qty = 1 } } }, -- Ravager Flesh
+        { name = "Buzzard Bites", outputItemID = 27651, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 27674, qty = 1 } } }, -- Buzzard Meat
+        { name = "Talbuk Steak", outputItemID = 27658, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 27677, qty = 1 } } }, -- Talbuk Venison
+        { name = "Roasted Clefthoof", outputItemID = 27659, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 27678, qty = 1 } } }, -- Clefthoof Meat
+    },
     Alchemy = {
-        {
-            name = "Flask of Blinding Light",
-            outputItemID = 22861,
-            outputQty = 1,
-            outputQtyMin = 1,
-            outputQtyMax = 1,
-            mats = {
-                { itemID = 22791, qty = 7 }, -- Netherbloom
-                { itemID = 22793, qty = 3 }, -- Mana Thistle
-                { itemID = 22794, qty = 1 }, -- Fel Lotus
-            },
-        },
+        { name = "Minor Healing Potion", outputItemID = 118, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2447, qty = 1 }, { itemID = 765, qty = 1 }, { itemID = 3371, qty = 1 } } },
+        { name = "Lesser Healing Potion", outputItemID = 858, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 118, qty = 1 }, { itemID = 2450, qty = 1 } } },
+        { name = "Healing Potion", outputItemID = 929, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 2453, qty = 1 }, { itemID = 2450, qty = 1 }, { itemID = 3372, qty = 1 } } },
+        { name = "Greater Healing Potion", outputItemID = 1710, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 3355, qty = 1 }, { itemID = 3356, qty = 1 }, { itemID = 3372, qty = 1 } } },
+        { name = "Superior Healing Potion", outputItemID = 3928, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 8838, qty = 1 }, { itemID = 3358, qty = 1 }, { itemID = 8925, qty = 1 } } },
+        { name = "Major Healing Potion", outputItemID = 13446, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 13464, qty = 2 }, { itemID = 13463, qty = 1 }, { itemID = 8925, qty = 1 } } },
+        { name = "Super Healing Potion", outputItemID = 22829, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 22791, qty = 2 }, { itemID = 22785, qty = 1 }, { itemID = 22849, qty = 1 } } },
+        { name = "Minor Mana Potion", outputItemID = 2455, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 785, qty = 1 }, { itemID = 765, qty = 1 }, { itemID = 3371, qty = 1 } } },
+        { name = "Mana Potion", outputItemID = 3385, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 3820, qty = 1 }, { itemID = 2450, qty = 1 }, { itemID = 3372, qty = 1 } } },
+        { name = "Greater Mana Potion", outputItemID = 3827, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 3355, qty = 1 }, { itemID = 3356, qty = 1 }, { itemID = 3372, qty = 1 } } },
+        { name = "Superior Mana Potion", outputItemID = 6149, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 8838, qty = 2 }, { itemID = 8836, qty = 2 }, { itemID = 8925, qty = 1 } } },
+        { name = "Major Mana Potion", outputItemID = 13444, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 13465, qty = 3 }, { itemID = 13467, qty = 2 }, { itemID = 8925, qty = 1 } } },
+        { name = "Super Mana Potion", outputItemID = 22832, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 22786, qty = 2 }, { itemID = 22785, qty = 1 }, { itemID = 22849, qty = 1 } } },
+        { name = "Flask of Blinding Light", outputItemID = 22861, outputQty = 1, outputQtyMin = 1, outputQtyMax = 1, mats = { { itemID = 22791, qty = 7 }, { itemID = 22793, qty = 3 }, { itemID = 22794, qty = 1 } } },
     },
     Enchanting = {
         {
@@ -416,6 +462,7 @@ MarketSync.CraftingData = MarketSync.CraftingData or {
         },
     },
 }
+MarketSync.CraftingData["First Aid"] = MarketSync.CraftingData["First Aid (Health)"]
 
 local function ParseItemIDFromLink(link)
     if type(link) ~= "string" then return nil end
@@ -507,10 +554,20 @@ local function SetToSortedList(set)
     return out
 end
 
-local function HasTradeSkillRecipeAPI()
+local function HasModernTradeSkillAPI()
+    return C_TradeSkillUI ~= nil
+        and (type(C_TradeSkillUI.GetAllRecipeIDs) == "function"
+             or type(C_TradeSkillUI.GetFilteredRecipeIDs) == "function")
+end
+
+local function HasLegacyTradeSkillAPI()
     return type(GetTradeSkillLine) == "function"
         and type(GetNumTradeSkills) == "function"
         and type(GetTradeSkillInfo) == "function"
+end
+
+local function HasTradeSkillRecipeAPI()
+    return HasModernTradeSkillAPI() or HasLegacyTradeSkillAPI()
 end
 
 local NON_CRAFTING_PROFESSIONS = {
@@ -533,29 +590,77 @@ local CRAFTING_PROFESSIONS = {
     ["Tailoring"] = true,
     ["Cooking"] = true,
     ["First Aid"] = true,
+    ["First Aid (Health)"] = true,
 }
 
+local function NormalizeProfessionName(name)
+    local s = tostring(name or "")
+    if s == "" then return nil end
+    if s:find("First Aid") or s:find("Health") then
+        return "First Aid (Health)"
+    end
+    for prof in pairs(CRAFTING_PROFESSIONS) do
+        if prof ~= "First Aid" and prof ~= "First Aid (Health)" and s:find(prof) then
+            return prof
+        end
+    end
+    if CRAFTING_PROFESSIONS[s] then
+        return s
+    end
+    return nil
+end
+
 local function IsCraftingProfessionName(name)
-    local prof = tostring(name or "")
-    if prof == "" then return false end
-    if CRAFTING_PROFESSIONS[prof] then
-        return true
+    return NormalizeProfessionName(name) ~= nil
+end
+
+local function GetOpenTradeSkillProfessionName()
+    if C_TradeSkillUI then
+        if C_TradeSkillUI.GetBaseProfessionInfo then
+            local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+            if ok and type(info) == "table" then
+                local name = info.professionName or info.parentProfessionName or info.name
+                local normalized = NormalizeProfessionName(name)
+                if normalized then return normalized end
+            end
+        end
+        if C_TradeSkillUI.GetChildProfessionInfo then
+            local ok, info = pcall(C_TradeSkillUI.GetChildProfessionInfo)
+            if ok and type(info) == "table" then
+                local name = info.professionName or info.parentProfessionName or info.name
+                local normalized = NormalizeProfessionName(name)
+                if normalized then return normalized end
+            end
+        end
+        if C_TradeSkillUI.GetTradeSkillLine then
+            local ok, name = pcall(C_TradeSkillUI.GetTradeSkillLine)
+            if ok and type(name) == "string" and name ~= "" and name ~= "UNKNOWN" then
+                local normalized = NormalizeProfessionName(name)
+                if normalized then return normalized end
+            end
+        end
     end
-    if NON_CRAFTING_PROFESSIONS[prof] then
-        return false
+    if type(GetTradeSkillLine) == "function" then
+        local ok, name = pcall(GetTradeSkillLine)
+        if ok and type(name) == "string" and name ~= "" and name ~= "UNKNOWN" then
+            local normalized = NormalizeProfessionName(name)
+            if normalized then return normalized end
+        end
     end
-    return false
+    return nil
 end
 
 local function GetPlayerProfessionSet()
     local out = {}
     if type(GetProfessions) == "function" and type(GetProfessionInfo) == "function" then
-        local a, b, c, d, e = GetProfessions()
-        for _, idx in ipairs({ a, b, c, d, e }) do
+        local count = select("#", GetProfessions())
+        for i = 1, count do
+            local idx = select(i, GetProfessions())
             if idx then
                 local name = GetProfessionInfo(idx)
-                if name and name ~= "" and IsCraftingProfessionName(name) then
-                    out[tostring(name)] = true
+                local normalized = NormalizeProfessionName(name)
+                if normalized then
+                    out[normalized] = true
                 end
             end
         end
@@ -567,8 +672,11 @@ local function GetPlayerProfessionSet()
         local numLines = tonumber(numLinesRaw) or 0
         for i = 1, numLines do
             local name, isHeader = GetSkillLineInfo(i)
-            if name and not isHeader and IsCraftingProfessionName(name) then
-                out[tostring(name)] = true
+            if name and not isHeader then
+                local normalized = NormalizeProfessionName(name)
+                if normalized then
+                    out[normalized] = true
+                end
             end
         end
     end
@@ -583,8 +691,9 @@ function MarketSync.RefreshKnownProfessionCache()
     if next(liveSet) ~= nil then
         store.professions = {}
         for name in pairs(liveSet) do
-            if IsCraftingProfessionName(name) then
-                store.professions[tostring(name)] = true
+            local normalized = NormalizeProfessionName(name)
+            if normalized then
+                store.professions[normalized] = true
             end
         end
         store.updatedAt = time()
@@ -605,68 +714,211 @@ local function ScanCurrentTradeSkillRecipes()
         return nil, {}
     end
 
-    local professionName = GetTradeSkillLine and GetTradeSkillLine() or nil
-    if not professionName or professionName == "" or professionName == "UNKNOWN" then
+    local professionName = GetOpenTradeSkillProfessionName()
+    if not professionName then
         return nil, {}
     end
 
     local recipes = {}
     local seen = {}
 
-    local numSkillsRaw = (GetNumTradeSkills and GetNumTradeSkills()) or 0
-    local numSkills = tonumber(numSkillsRaw) or 0
-    for i = 1, numSkills do
-        local recipeName, skillType, _, _, _, numSkillUps = GetTradeSkillInfo(i)
-        if recipeName and skillType ~= "header" and skillType ~= "subheader" then
-            local outputLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i) or nil
-            local outputItemID = ParseItemIDFromLink(outputLink)
-            local outputQtyMinRaw, outputQtyMaxRaw = 1, 1
-            if GetTradeSkillNumMade then
-                outputQtyMinRaw, outputQtyMaxRaw = GetTradeSkillNumMade(i)
+    -- 1. Modern C_TradeSkillUI Path
+    if HasModernTradeSkillAPI() then
+        local recipeIDs = nil
+        if C_TradeSkillUI.GetAllRecipeIDs then
+            local okIDs, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+            if okIDs and type(ids) == "table" and #ids > 0 then
+                recipeIDs = ids
             end
-            local outputQtyMin = math.max(1, math.floor(tonumber(outputQtyMinRaw) or 1))
-            local outputQtyMax = math.max(outputQtyMin, math.floor(tonumber(outputQtyMaxRaw) or outputQtyMin))
-            local outputQty = (outputQtyMin + outputQtyMax) / 2
+        end
+        if (not recipeIDs or #recipeIDs == 0) and C_TradeSkillUI.GetFilteredRecipeIDs then
+            local okFiltered, ids = pcall(C_TradeSkillUI.GetFilteredRecipeIDs)
+            if okFiltered and type(ids) == "table" and #ids > 0 then
+                recipeIDs = ids
+            end
+        end
 
-            local mats = {}
-            local reagentCountRaw = (GetTradeSkillNumReagents and GetTradeSkillNumReagents(i)) or 0
-            local reagentCount = tonumber(reagentCountRaw) or 0
-            for r = 1, reagentCount do
-                local reagentLink = GetTradeSkillReagentItemLink and GetTradeSkillReagentItemLink(i, r) or nil
-                local reagentItemID = ParseItemIDFromLink(reagentLink)
-
-                local qty = 1
-                if GetTradeSkillReagentInfo then
-                    local _, _, numRequired = GetTradeSkillReagentInfo(i, r)
-                    qty = tonumber(numRequired) or qty
-                elseif GetTradeSkillReagentCount then
-                    local qtyRaw = GetTradeSkillReagentCount(i, r)
-                    qty = tonumber(qtyRaw) or qty
-                end
-
-                if reagentItemID then
-                    mats[#mats + 1] = {
-                        itemID = reagentItemID,
-                        qty = math.max(1, math.floor(tonumber(qty) or 1)),
-                    }
+        for _, recipeID in ipairs(recipeIDs or {}) do
+            local recipeInfo = nil
+            if C_TradeSkillUI.GetRecipeInfo then
+                local okInfo, info = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+                if okInfo and type(info) == "table" then
+                    recipeInfo = info
                 end
             end
 
-            if outputItemID and #mats > 0 then
-                local dedupeKey = tostring(outputItemID) .. ":" .. tostring(recipeName)
-                if not seen[dedupeKey] then
-                    seen[dedupeKey] = true
-                    recipes[#recipes + 1] = {
-                        name = recipeName,
-                        outputItemID = outputItemID,
-                        outputQty = outputQty,
-                        outputQtyMin = outputQtyMin,
-                        outputQtyMax = outputQtyMax,
-                        skillType = tostring(skillType or ""),
-                        numSkillUps = tonumber(numSkillUps),
-                        mats = mats,
-                        recipeIndex = i,
-                    }
+            -- Only include learned, non-disabled recipes
+            local isLearned = (not recipeInfo) or (recipeInfo.learned == nil) or (recipeInfo.learned == true)
+            local isDisabled = recipeInfo and recipeInfo.disabled
+
+            if isLearned and not isDisabled then
+                local recipeName = (recipeInfo and recipeInfo.name) or ("Recipe " .. tostring(recipeID))
+
+                -- Output Item
+                local outputLink = nil
+                if C_TradeSkillUI.GetRecipeItemLink then
+                    local okLink, link = pcall(C_TradeSkillUI.GetRecipeItemLink, recipeID)
+                    if okLink then outputLink = link end
+                end
+                local outputItemID = ParseItemIDFromLink(outputLink)
+                if not outputItemID and recipeInfo then
+                    outputItemID = tonumber(recipeInfo.productID) or tonumber(recipeInfo.outputItemID)
+                end
+
+                -- Output Quantity
+                local outputQtyMin = 1
+                local outputQtyMax = 1
+                if recipeInfo and recipeInfo.minMade and recipeInfo.maxMade then
+                    outputQtyMin = tonumber(recipeInfo.minMade) or 1
+                    outputQtyMax = tonumber(recipeInfo.maxMade) or outputQtyMin
+                elseif C_TradeSkillUI.GetRecipeNumMade then
+                    local okMade, qMin, qMax = pcall(C_TradeSkillUI.GetRecipeNumMade, recipeID)
+                    if okMade and qMin then
+                        outputQtyMin = tonumber(qMin) or 1
+                        outputQtyMax = tonumber(qMax) or outputQtyMin
+                    end
+                end
+
+                -- Reagents
+                local mats = {}
+                -- Try Schematic first
+                if C_TradeSkillUI.GetRecipeSchematic then
+                    local okSchematic, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+                    if okSchematic and type(schematic) == "table" then
+                        if not outputItemID and schematic.outputItemID and tonumber(schematic.outputItemID) > 0 then
+                            outputItemID = tonumber(schematic.outputItemID)
+                        end
+                        if schematic.quantityMin and schematic.quantityMax then
+                            outputQtyMin = tonumber(schematic.quantityMin) or outputQtyMin
+                            outputQtyMax = tonumber(schematic.quantityMax) or outputQtyMax
+                        end
+                        if type(schematic.reagentSlotSchematics) == "table" then
+                            for _, slot in ipairs(schematic.reagentSlotSchematics) do
+                                local reqQty = tonumber(slot.quantityRequired) or 1
+                                if type(slot.reagents) == "table" and #slot.reagents > 0 then
+                                    local firstReagent = slot.reagents[1]
+                                    local rItemID = firstReagent and tonumber(firstReagent.itemID)
+                                    if rItemID and rItemID > 0 then
+                                        mats[#mats + 1] = {
+                                            itemID = rItemID,
+                                            qty = math.max(1, math.floor(reqQty)),
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- Fallback to GetRecipeNumReagents / GetRecipeReagentInfo
+                if #mats == 0 and C_TradeSkillUI.GetRecipeNumReagents then
+                    local okNum, numReagents = pcall(C_TradeSkillUI.GetRecipeNumReagents, recipeID)
+                    if okNum and type(numReagents) == "number" and numReagents > 0 then
+                        for r = 1, numReagents do
+                            local rLink = nil
+                            if C_TradeSkillUI.GetRecipeReagentItemLink then
+                                local okRLink, link = pcall(C_TradeSkillUI.GetRecipeReagentItemLink, recipeID, r)
+                                if okRLink then rLink = link end
+                            end
+                            local rItemID = ParseItemIDFromLink(rLink)
+                            local qty = 1
+                            if C_TradeSkillUI.GetRecipeReagentInfo then
+                                local okRInfo, _, _, reqCount = pcall(C_TradeSkillUI.GetRecipeReagentInfo, recipeID, r)
+                                if okRInfo and reqCount then
+                                    qty = tonumber(reqCount) or 1
+                                end
+                            end
+                            if rItemID then
+                                mats[#mats + 1] = {
+                                    itemID = rItemID,
+                                    qty = math.max(1, math.floor(tonumber(qty) or 1)),
+                                }
+                            end
+                        end
+                    end
+                end
+
+                outputQtyMin = math.max(1, math.floor(tonumber(outputQtyMin) or 1))
+                outputQtyMax = math.max(outputQtyMin, math.floor(tonumber(outputQtyMax) or outputQtyMin))
+                local outputQty = (outputQtyMin + outputQtyMax) / 2
+
+                if outputItemID and #mats > 0 then
+                    local dedupeKey = tostring(outputItemID) .. ":" .. tostring(recipeName)
+                    if not seen[dedupeKey] then
+                        seen[dedupeKey] = true
+                        recipes[#recipes + 1] = {
+                            name = recipeName,
+                            outputItemID = outputItemID,
+                            outputQty = outputQty,
+                            outputQtyMin = outputQtyMin,
+                            outputQtyMax = outputQtyMax,
+                            skillType = tostring(recipeInfo and (recipeInfo.relativeDifficulty or recipeInfo.difficulty) or ""),
+                            numSkillUps = tonumber(recipeInfo and recipeInfo.numSkillUps) or 1,
+                            mats = mats,
+                            recipeIndex = recipeID,
+                        }
+                    end
+                end
+            end
+        end
+
+    -- 2. Legacy GetTradeSkillInfo Path
+    elseif HasLegacyTradeSkillAPI() then
+        local numSkillsRaw = (GetNumTradeSkills and GetNumTradeSkills()) or 0
+        local numSkills = tonumber(numSkillsRaw) or 0
+        for i = 1, numSkills do
+            local recipeName, skillType, _, _, _, numSkillUps = GetTradeSkillInfo(i)
+            if recipeName and skillType ~= "header" and skillType ~= "subheader" then
+                local outputLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i) or nil
+                local outputItemID = ParseItemIDFromLink(outputLink)
+                local outputQtyMinRaw, outputQtyMaxRaw = 1, 1
+                if GetTradeSkillNumMade then
+                    outputQtyMinRaw, outputQtyMaxRaw = GetTradeSkillNumMade(i)
+                end
+                local outputQtyMin = math.max(1, math.floor(tonumber(outputQtyMinRaw) or 1))
+                local outputQtyMax = math.max(outputQtyMin, math.floor(tonumber(outputQtyMaxRaw) or outputQtyMin))
+                local outputQty = (outputQtyMin + outputQtyMax) / 2
+
+                local mats = {}
+                local reagentCountRaw = (GetTradeSkillNumReagents and GetTradeSkillNumReagents(i)) or 0
+                local reagentCount = tonumber(reagentCountRaw) or 0
+                for r = 1, reagentCount do
+                    local reagentLink = GetTradeSkillReagentItemLink and GetTradeSkillReagentItemLink(i, r) or nil
+                    local reagentItemID = ParseItemIDFromLink(reagentLink)
+
+                    local qty = 1
+                    if GetTradeSkillReagentInfo then
+                        local _, _, numRequired = GetTradeSkillReagentInfo(i, r)
+                        qty = tonumber(numRequired) or qty
+                    elseif GetTradeSkillReagentCount then
+                        local qtyRaw = GetTradeSkillReagentCount(i, r)
+                        qty = tonumber(qtyRaw) or qty
+                    end
+
+                    if reagentItemID then
+                        mats[#mats + 1] = {
+                            itemID = reagentItemID,
+                            qty = math.max(1, math.floor(tonumber(qty) or 1)),
+                        }
+                    end
+                end
+
+                if outputItemID and #mats > 0 then
+                    local dedupeKey = tostring(outputItemID) .. ":" .. tostring(recipeName)
+                    if not seen[dedupeKey] then
+                        seen[dedupeKey] = true
+                        recipes[#recipes + 1] = {
+                            name = recipeName,
+                            outputItemID = outputItemID,
+                            outputQty = outputQty,
+                            outputQtyMin = outputQtyMin,
+                            outputQtyMax = outputQtyMax,
+                            skillType = tostring(skillType or ""),
+                            numSkillUps = tonumber(numSkillUps),
+                            mats = mats,
+                            recipeIndex = i,
+                        }
+                    end
                 end
             end
         end
@@ -689,6 +941,9 @@ function MarketSync.RefreshKnownCraftingRecipes()
         updatedAt = time(),
         recipes = recipes or {},
     }
+    if professionName == "First Aid (Health)" then
+        store["First Aid"] = store[professionName]
+    end
     return type(recipes) == "table" and #recipes > 0
 end
 
@@ -701,8 +956,8 @@ local function BuildProfessionResyncQueue()
     local seen = {}
 
     local function Add(name)
-        local prof = tostring(name or "")
-        if prof == "" or not IsCraftingProfessionName(prof) or seen[prof] then
+        local prof = NormalizeProfessionName(name)
+        if not prof or seen[prof] then
             return
         end
         seen[prof] = true
@@ -710,8 +965,9 @@ local function BuildProfessionResyncQueue()
     end
 
     if type(GetProfessions) == "function" and type(GetProfessionInfo) == "function" then
-        local a, b, c, d, e = GetProfessions()
-        for _, idx in ipairs({ a, b, c, d, e }) do
+        local count = select("#", GetProfessions())
+        for i = 1, count do
+            local idx = select(i, GetProfessions())
             if idx then
                 local name = GetProfessionInfo(idx)
                 Add(name)
@@ -734,7 +990,7 @@ local function CountIndexedResyncProfessions(queue)
     local missing = {}
 
     for _, prof in ipairs(queue or {}) do
-        local cached = store[prof]
+        local cached = store[prof] or (prof == "First Aid (Health)" and store["First Aid"])
         if type(cached) == "table"
             and tonumber(cached.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION
             and type(cached.recipes) == "table"
@@ -764,8 +1020,8 @@ function MarketSync.ResyncProfessionCache(onComplete)
     -- Protected spell-cast APIs cannot be safely invoked from addon timers.
     -- Resync now captures whichever profession window is currently open.
     local scannedNow = 0
-    local openProfession = HasTradeSkillRecipeAPI() and (GetTradeSkillLine and GetTradeSkillLine() or nil) or nil
-    if openProfession and openProfession ~= "" and openProfession ~= "UNKNOWN" and IsCraftingProfessionName(openProfession) then
+    local openProfession = GetOpenTradeSkillProfessionName()
+    if openProfession and IsCraftingProfessionName(openProfession) then
         local ok, refreshed = pcall(MarketSync.RefreshKnownCraftingRecipes)
         if ok and refreshed == true then
             scannedNow = 1
@@ -793,12 +1049,89 @@ function MarketSync.ResyncProfessionCache(onComplete)
     return success, msg, #queue
 end
 
+local HEALTH_POTION_IDS = {
+    [118] = true,    -- Minor Healing Potion
+    [858] = true,    -- Lesser Healing Potion
+    [929] = true,    -- Healing Potion
+    [1710] = true,   -- Greater Healing Potion
+    [3928] = true,   -- Superior Healing Potion
+    [13446] = true,  -- Major Healing Potion
+    [22829] = true,  -- Super Healing Potion
+    [33447] = true,  -- Runic Healing Potion
+    [18253] = true,  -- Major Rejuvenation Potion
+    [22850] = true,  -- Powerful Rejuvenation Potion
+    [34440] = true,  -- Mad Alchemist's Potion
+    [40067] = true,  -- Potion of Nightmares
+    [40077] = true,  -- Crazy Alchemist's Potion
+}
+
+local function IsHealthConsumableRecipe(recipe)
+    if not recipe then return false end
+    if recipe.outputItemID and HEALTH_POTION_IDS[recipe.outputItemID] then
+        return true
+    end
+    local name = string.lower(tostring(recipe.name or ""))
+    if name:find("healing potion")
+        or name:find("health potion")
+        or name:find("rejuvenation potion")
+        or name:find("restorative potion")
+        or name:find("healing draught") then
+        return true
+    end
+    return false
+end
+
 local function GetRecipesForProfession(professionName)
     local prof = professionName and tostring(professionName) or nil
     if not prof or prof == "" then return {} end
 
+    local normalized = NormalizeProfessionName(prof) or prof
     local store = GetKnownCraftingStore()
-    local cached = store[prof]
+    local out = {}
+    local seen = {}
+
+    local function AddRecipe(r)
+        if type(r) ~= "table" or not r.outputItemID or not r.mats or #r.mats == 0 then
+            return
+        end
+        local key = tostring(r.outputItemID)
+        if not seen[key] then
+            seen[key] = true
+            out[#out + 1] = r
+        end
+    end
+
+    -- Special secondary consolidation: First Aid (Health) combines First Aid bandages with Health Potions
+    if normalized == "First Aid (Health)" or normalized == "First Aid" then
+        -- 1. Scanned First Aid recipes from character
+        local cachedFA = store["First Aid (Health)"] or store["First Aid"]
+        if cachedFA and tonumber(cachedFA.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION and type(cachedFA.recipes) == "table" then
+            for _, r in ipairs(cachedFA.recipes) do
+                AddRecipe(r)
+            end
+        end
+
+        -- 2. Scanned health potions from character's Alchemy (if character knows Alchemy)
+        local cachedAlch = store["Alchemy"]
+        if cachedAlch and tonumber(cachedAlch.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION and type(cachedAlch.recipes) == "table" then
+            for _, r in ipairs(cachedAlch.recipes) do
+                if IsHealthConsumableRecipe(r) then
+                    AddRecipe(r)
+                end
+            end
+        end
+
+        -- 3. Built-in recipes for First Aid bandages & Health Potions (guarantees complete health craft coverage)
+        local builtin = (MarketSync.CraftingData and (MarketSync.CraftingData["First Aid (Health)"] or MarketSync.CraftingData["First Aid"])) or {}
+        for _, r in ipairs(builtin) do
+            AddRecipe(r)
+        end
+
+        return out
+    end
+
+    -- Standard profession path:
+    local cached = store[normalized] or store[prof]
     if cached
         and tonumber(cached.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION
         and type(cached.recipes) == "table"
@@ -806,9 +1139,10 @@ local function GetRecipesForProfession(professionName)
         return cached.recipes
     end
 
-    -- Fallback only when trade-skill introspection isn't available on this client.
-    if not HasTradeSkillRecipeAPI() then
-        return (MarketSync.CraftingData and MarketSync.CraftingData[prof]) or {}
+    -- Fallback recipes
+    local fallback = MarketSync.CraftingData and (MarketSync.CraftingData[normalized] or MarketSync.CraftingData[prof])
+    if fallback and type(fallback) == "table" and #fallback > 0 then
+        return fallback
     end
 
     return {}
@@ -1018,14 +1352,21 @@ function MarketSync.GetProcessingProfessions()
     local knownProfessionSet = {}
 
     for name in pairs(playerProfSet) do
-        if IsCraftingProfessionName(name) then
-            knownProfessionSet[tostring(name)] = true
+        local normalized = NormalizeProfessionName(name)
+        if normalized then
+            knownProfessionSet[normalized] = true
         end
     end
     for _, name in ipairs(cachedProfessions or {}) do
-        if IsCraftingProfessionName(name) then
-            knownProfessionSet[tostring(name)] = true
+        local normalized = NormalizeProfessionName(name)
+        if normalized then
+            knownProfessionSet[normalized] = true
         end
+    end
+
+    if knownProfessionSet["First Aid"] then
+        knownProfessionSet["First Aid (Health)"] = true
+        knownProfessionSet["First Aid"] = nil
     end
 
     local hasKnownProfs = next(knownProfessionSet) ~= nil
@@ -1033,8 +1374,9 @@ function MarketSync.GetProcessingProfessions()
     local seen = {}
 
     local function AddProfessionIfEligible(name)
-        local prof = tostring(name or "")
+        local prof = NormalizeProfessionName(name) or tostring(name or "")
         if prof == "" then return end
+        if prof == "First Aid" then prof = "First Aid (Health)" end
         if seen[prof] then return end
         if hasKnownProfs and not knownProfessionSet[prof] then
             return
@@ -1057,7 +1399,7 @@ function MarketSync.GetProcessingProfessions()
         end
     end
 
-    -- Fallback path if profession APIs are unavailable.
+    -- Fallback path if profession APIs are unavailable or no profs scanned.
     if #out == 0 and not hasKnownProfs then
         for name in pairs(MarketSync.CraftingData or {}) do
             AddProfessionIfEligible(name)
@@ -1798,7 +2140,7 @@ local function OnTooltipSetItem(tooltip, data)
     end
 end
 
-if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, OnTooltipSetItem)
 else
     GameTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
