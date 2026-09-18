@@ -1,0 +1,15 @@
+## Interface: 11509
+## Title: MarketSync Forever Scanner (prototype)
+## Notes: Native search capture, watched scans, a portable saved-price window, and an auction-house launcher.
+## Author: MarketSync contributors
+## Version: 0.2.0
+## SavedVariables: MarketSyncForeverScanDB
+## AllowLoadGameType: camelot
+## X-Forever-Target: 1.60.1 (69893)
+## X-Interface-Status: unverified-draft; 11509 is a Classic Era baseline, not a verified Forever TOC number
+
+Store.lua [AllowLoadGameType camelot]
+Scanner.lua [AllowLoadGameType camelot]
+Window.lua [AllowLoadGameType camelot]
+AuctionHouse.lua [AllowLoadGameType camelot]
+Core.lua [AllowLoadGameType camelot]
