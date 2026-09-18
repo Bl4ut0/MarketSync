@@ -75,6 +75,11 @@ function AH.Attach()
         panel.ScannerPanel:SetAllPoints(panel)
     end
 
+    -- Attach MarketSync Breakout Sidecar to AuctionHouseFrame
+    if MarketSync.CreateAHSidecar then
+        AH.Sidecar = MarketSync.CreateAHSidecar(frame)
+    end
+
     -- Hook display mode switching
     hooksecurefunc(frame, "SetDisplayMode", function()
         local selected = (frame:GetDisplayMode() == displayMode) and frame:IsShown()
@@ -85,6 +90,16 @@ function AH.Attach()
                 panel.ScannerPanel:OnShow()
             end
         end
+
+        -- Auto-switch sidecar view depending on whether user is browsing or selling
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetMode then
+            local currentMode = frame:GetDisplayMode()
+            if frame.Tabs and frame.Tabs[2] and currentMode == frame.Tabs[2].displayMode then
+                MarketSync.AHSidecar.SetMode("sell")
+            elseif frame.Tabs and frame.Tabs[1] and currentMode == frame.Tabs[1].displayMode then
+                MarketSync.AHSidecar.SetMode("lists")
+            end
+        end
     end)
 
     hooksecurefunc(frame, "UpdateTitle", function()
@@ -93,8 +108,18 @@ function AH.Attach()
         end
     end)
 
+    frame:HookScript("OnShow", function()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetExpanded then
+            local expanded = (MarketSyncDB and MarketSyncDB.AHSidecarExpanded ~= nil) and MarketSyncDB.AHSidecarExpanded or true
+            MarketSync.AHSidecar.SetExpanded(expanded)
+        end
+    end)
+
     frame:HookScript("OnHide", function()
         panel:Hide()
+        if AH.Sidecar then
+            AH.Sidecar:Hide()
+        end
         MarketSync.IsAuctionHouseOpen = false
         if MarketSync.Scanner and MarketSync.Scanner.Active then
             MarketSync.Scanner.Cancel("Auction House closed")

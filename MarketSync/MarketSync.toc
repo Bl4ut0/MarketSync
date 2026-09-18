@@ -49,8 +49,9 @@ UI_Processing.lua
 UI_Notifications.lua
 UI_ItemDetail.lua
 
-# Native Auction House Embedded Panel & Scanner UI
+# Native Auction House Embedded Panel, Scanner & Sidecar UI
 UI_AHScanner.lua
+UI_AHSidecar.lua
 AuctionHouse.lua
 
 # UI Main: frame shell, tabs, settings
