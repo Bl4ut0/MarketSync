@@ -99,8 +99,8 @@ end
 
 -- Hook ADDON_LOADED or AUCTION_HOUSE_SHOW
 local ahLoader = CreateFrame("Frame")
-ahLoader:RegisterEvent("ADDON_LOADED")
-ahLoader:RegisterEvent("AUCTION_HOUSE_SHOW")
+pcall(ahLoader.RegisterEvent, ahLoader, "ADDON_LOADED")
+pcall(ahLoader.RegisterEvent, ahLoader, "AUCTION_HOUSE_SHOW")
 ahLoader:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == "Blizzard_AuctionHouseUI" then
         AH.Attach()

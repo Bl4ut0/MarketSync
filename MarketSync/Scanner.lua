@@ -296,9 +296,9 @@ end
 -- EVENT FRAME: Handle Search Results
 -- ================================================================
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
-eventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
-eventFrame:RegisterEvent("AUCTION_HOUSE_CLOSED")
+pcall(eventFrame.RegisterEvent, eventFrame, "ITEM_SEARCH_RESULTS_UPDATED")
+pcall(eventFrame.RegisterEvent, eventFrame, "COMMODITY_SEARCH_RESULTS_UPDATED")
+pcall(eventFrame.RegisterEvent, eventFrame, "AUCTION_HOUSE_CLOSED")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "AUCTION_HOUSE_CLOSED" then

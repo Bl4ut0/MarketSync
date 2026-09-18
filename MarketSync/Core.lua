@@ -206,10 +206,16 @@ local function RegisterAuctionatorHooks()
     auctionatorHooksInstalled = true
 end
 
+local function SafeRegisterEvent(frame, eventName)
+    if frame and eventName then
+        pcall(frame.RegisterEvent, frame, eventName)
+    end
+end
+
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("ADDON_LOADED")
-eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
-eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+SafeRegisterEvent(eventFrame, "ADDON_LOADED")
+SafeRegisterEvent(eventFrame, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+SafeRegisterEvent(eventFrame, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 == "Auctionator" then
@@ -350,16 +356,18 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end)
 
         -- Register for AH events so we can invalidate the scan cache dynamically
-        self:RegisterEvent("AUCTION_HOUSE_CLOSED")
-        self:RegisterEvent("AUCTION_HOUSE_SHOW")
+        SafeRegisterEvent(self, "AUCTION_HOUSE_CLOSED")
+        SafeRegisterEvent(self, "AUCTION_HOUSE_SHOW")
 
         -- Register for Smart Rules state tracking (combat/instance transitions)
-        self:RegisterEvent("PLAYER_REGEN_DISABLED")   -- Entering combat
-        self:RegisterEvent("PLAYER_REGEN_ENABLED")    -- Leaving combat
-        self:RegisterEvent("ZONE_CHANGED_NEW_AREA")   -- Entering/leaving instances
-        self:RegisterEvent("SKILL_LINES_CHANGED")
-        self:RegisterEvent("TRADE_SKILL_SHOW")
-        self:RegisterEvent("TRADE_SKILL_UPDATE")
+        SafeRegisterEvent(self, "PLAYER_REGEN_DISABLED")   -- Entering combat
+        SafeRegisterEvent(self, "PLAYER_REGEN_ENABLED")    -- Leaving combat
+        SafeRegisterEvent(self, "ZONE_CHANGED_NEW_AREA")   -- Entering/leaving instances
+        SafeRegisterEvent(self, "SKILL_LINES_CHANGED")
+        SafeRegisterEvent(self, "TRADE_SKILL_SHOW")
+        SafeRegisterEvent(self, "TRADE_SKILL_DATA_SOURCE_CHANGED")
+        SafeRegisterEvent(self, "TRADE_SKILL_LIST_UPDATE")
+        SafeRegisterEvent(self, "TRADE_SKILL_UPDATE")
         if MarketSync.RefreshKnownProfessionCache then
             MarketSync.RefreshKnownProfessionCache()
         end
