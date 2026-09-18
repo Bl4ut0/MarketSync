@@ -18,16 +18,18 @@ class PackageTests(unittest.TestCase):
             self.assertIsNone(manifest["interface"])
             self.assertEqual(manifest["interfaceStatus"], "unverified-draft")
             with zipfile.ZipFile(output) as archive:
-                self.assertEqual(len(archive.namelist()), 8)
+                self.assertEqual(len(archive.namelist()), 9)
                 self.assertTrue(all(n.startswith("MarketSyncForeverScanner/") for n in archive.namelist()))
                 toc = archive.read("MarketSyncForeverScanner/MarketSyncForeverScanner.toc").decode()
                 self.assertNotIn("Dependencies:", toc)
                 self.assertIn("unverified-draft", toc)
                 self.assertIn("## AllowLoadGameType: camelot", toc)
                 self.assertIn("AuctionHouse.lua [AllowLoadGameType camelot]", toc)
-                self.assertIn("## Version: 0.2.0", toc)
-            self.assertEqual(manifest["auctionHouseEntry"], "portable-launcher")
-            self.assertFalse(manifest["embeddedAuctionHousePanel"])
+                self.assertIn("## Version: 0.3.0", toc)
+                self.assertIn("Browser.lua [AllowLoadGameType camelot]", toc)
+            self.assertEqual(manifest["auctionHouseEntry"], "embedded-tab")
+            self.assertTrue(manifest["embeddedAuctionHousePanel"])
+            self.assertEqual(manifest["portableDesign"], "native-portrait")
             self.assertFalse(manifest["alerts"])
 
     def test_supplied_interface_does_not_claim_native_acceptance(self):

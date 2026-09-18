@@ -1,5 +1,5 @@
 -- GPL-3.0-or-later. Native price provider prototype, independent of Auctionator's schema.
-MarketSyncForeverScanner = {Version = "0.2.0", Status = "Offline browsing", Active = false}
+MarketSyncForeverScanner = {Version = "0.3.0", Status = "Offline browsing", Active = false}
 local S = MarketSyncForeverScanner
 
 function S.CopyKey(key)

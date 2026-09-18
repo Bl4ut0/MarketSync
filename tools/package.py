@@ -17,7 +17,7 @@ def build(output, interface=None):
     if interface is not None and (not 1 <= interface <= 999999 or interface == 69893):
         raise ValueError("Supply the fourth GetBuildInfo() value; build 69893 is not an Interface number")
     files = {}
-    for name in ["Store.lua", "Scanner.lua", "Window.lua", "AuctionHouse.lua", "Core.lua", ADDON + ".toc"]:
+    for name in ["Store.lua", "Scanner.lua", "Browser.lua", "Window.lua", "AuctionHouse.lua", "Core.lua", ADDON + ".toc"]:
         files[ADDON + "/" + name] = (ROOT / ADDON / name).read_bytes()
     files[ADDON + "/README.md"] = (ROOT / "README.md").read_bytes()
     files[ADDON + "/LICENSE"] = (ROOT / "LICENSE").read_bytes()
@@ -39,11 +39,12 @@ def build(output, interface=None):
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, contents)
     manifest = {
-        "prototype": "0.2.0", "targetVersion": "1.60.1", "targetBuild": "69893",
+        "prototype": "0.3.0", "targetVersion": "1.60.1", "targetBuild": "69893",
         "interface": interface, "draftBaselineInterface": 11509 if interface is None else None,
         "interfaceStatus": "unverified-draft" if interface is None else "supplied-for-local-test",
         "nativeAcceptance": "pending", "fullMarketScan": False, "guildSync": False,
-        "auctionHouseEntry": "portable-launcher", "embeddedAuctionHousePanel": False, "alerts": False,
+        "auctionHouseEntry": "embedded-tab", "embeddedAuctionHousePanel": True, "alerts": False,
+        "portableDesign": "native-portrait",
         "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())},
     }

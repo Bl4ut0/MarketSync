@@ -2,7 +2,7 @@
 
 **Built for an initial test of Forever beta 1.60.1 (69893).** This separate addon records native auction searches, refreshes a small watch list, and provides a draggable saved-price window. It requires neither Auctionator nor the existing MarketSync addon. The original MarketSync worktree and installed addons are unchanged.
 
-**0.2.0 adds a MarketSync launcher beside Blizzard's auction-house tabs.** It opens the same portable window; the embedded alert/settings panel and full guild integration are later stages. The source track contains an [implementation guide](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/IMPLEMENTATION_GUIDE.md) and a [restart checklist/pasteable handoff](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/RESUME.md). Those development guides are stored with the source, outside the client ZIP.
+**0.3.0 embeds a MarketSync control panel directly beside Blizzard's auction-house tabs.** It uses Blizzard's `SetDisplayMode` and `AuctionHouseFrameTabTemplate` while sharing a unified browser (`Browser.lua`) with the portable portrait window. The source track contains an [implementation guide](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/IMPLEMENTATION_GUIDE.md) and a [restart checklist/pasteable handoff](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/RESUME.md). Those development guides are stored with the source, outside the client ZIP.
 
 The native Forever interface already covers grouped browsing, commodity quantity selection, buying, posting, and viewing your auctions. MarketSync can concentrate on collecting observations, preserving their identity and history, and displaying them away from an auctioneer.
 
@@ -14,7 +14,7 @@ The draft TOC deliberately uses **11509 as an older Classic Era baseline**, not 
 2. Start the beta, enable this addon, and enable **Load out of date AddOns** for the draft if needed. Enable errors using `/console scriptErrors 1`.
 3. After login, run `/msf report`. This prints the actual Interface number and saves diagnostics on logout. An absent modern frame before visiting an auctioneer is expected.
 4. Open an auctioneer. Browse/search with Blizzard's interface, then open individual commodity and equipment listings. The scanner records those native results without initiating purchases or listings.
-5. Click **MarketSync** beside the native tabs or run `/msf` to open the portable window. The launcher leaves the native tab selection unchanged and repeated clicks keep the window open. Use `+` beside an item to watch its exact native key. Select **Refresh watched** while the auctioneer is open. The list is limited to **50 keys** and requests are at least **1.1 seconds apart**, also waiting for native throttle readiness. Ordinary native searches stop the watch queue.
+5. Click **MarketSync** beside the native tabs to display the embedded MarketSync browser pane, or run `/msf` to open the portable window. Both views share watched keys, price records, and scanning state. Use `+` beside an item to watch its exact native key. Select **Refresh watched** while the auctioneer is open. The list is limited to **50 keys** and requests are at least **1.1 seconds apart**, also waiting for native throttle readiness. Ordinary native searches stop the watch queue.
 6. Close the auctioneer and open `/msf` again elsewhere. Saved prices, result quantities, observation ages, coverage, price depth, and recent complete observations remain available. Quantities are observations at their stated time.
 7. Reload/relog and confirm persistence. Data is in `MarketSyncForeverScanDB` in the account's beta `SavedVariables\MarketSyncForeverScanner.lua`. Its schema is independent of `MarketSyncDB` and Auctionator's stores.
 
@@ -66,7 +66,7 @@ python -m unittest discover -s .\MarketSync-Forever\tests -p 'test_*.py' -v
 
 The runtime harness uses the existing Lua parser/Fengari development dependencies in `../ItemRack-Forever/node_modules`. There is no in-game dependency on ItemRack. Mock tests establish local lifecycle/calculation behavior; they do not establish server availability, native event order, loader acceptance, market topology, restrictions, or visual layout.
 
-The 0.2.0 checkpoint passes **23 runtime cases**, four packaging tests, and Lua 5.1 parsing for five production modules. Contract checks cover 16 referenced auction functions, 13 registered events, and the physical window/tab templates. Runtime tests include late AH addon loading, a single launcher across reopen events, native selection preservation, and the portable window remaining open after auctioneer closure.
+The 0.3.0 checkpoint passes **29 runtime cases**, four packaging tests, and Lua 5.1 parsing for six production modules. Contract checks cover 16 referenced auction functions, 13 registered events, and the physical window/tab templates. Runtime tests include late AH addon loading, a single launcher across reopen events, native selection preservation, and the portable window remaining open after auctioneer closure.
 
 ## Auctionator research
 

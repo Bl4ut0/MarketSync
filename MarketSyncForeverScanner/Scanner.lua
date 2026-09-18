@@ -193,6 +193,7 @@ function S.StartWatched()
   if #queue > 50 then S.Status = "Watch list exceeds the 50-key test limit"; S.Notify(); return false end
   S.Generation = S.Generation + 1
   S.Queue, S.QueueIndex, S.CompletedCount, S.Active = queue, 0, 0, true
+  S.Notify()
   S.Schedule()
   return true
 end

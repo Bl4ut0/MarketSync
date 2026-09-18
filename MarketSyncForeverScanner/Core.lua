@@ -38,7 +38,9 @@ function S.Report()
     replicateAPI = C_AuctionHouse and type(C_AuctionHouse.ReplicateItems) == "function" or false,
     fullMarketScanImplemented = false, guildSyncEnabled = false,
     auctionHouseEntryAttached = S.AuctionHouseEntry ~= nil,
-    auctionHouseEntryMode = "portable-launcher", embeddedAuctionHousePanel = false,
+    auctionHouseEntryMode = "embedded-tab", embeddedAuctionHousePanel = S.AuctionHousePanel ~= nil,
+    auctionHousePanelVisible = S.AuctionHousePanel and S.AuctionHousePanel:IsVisible() or false,
+    portableDesign = "native-portrait",
     alertsEnabled = false,
   }
   if MarketSyncForeverScanDB then MarketSyncForeverScanDB.diagnostics = report end
@@ -100,6 +102,7 @@ frame:SetScript("OnEvent", function(self, event, arg)
     elseif event == "AUCTION_HOUSE_CLOSED"
       or event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and arg == Enum.PlayerInteractionType.Auctioneer then
       S.AuctioneerOpen = false
+      S.HideAuctionHousePanel()
       S.Cancel("Auctioneer closed; saved prices remain available")
     elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
       S.CaptureBrowse()
