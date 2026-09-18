@@ -230,9 +230,10 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
-    if not MarketSyncDB.PerNotificationSounds then MarketSyncDB.PerNotificationSounds = {} end
-    if MarketSyncDB.PurgeCycleDays == nil then MarketSyncDB.PurgeCycleDays = 30 end
-    
+    -- Legacy PurgeCycleDays is superseded by tiered retention (Hot/Warm/Cold/Purge).
+    -- Default to 180 days (6 months of weekly macro-history) if not set.
+    if MarketSyncDB.PurgeCycleDays == nil then MarketSyncDB.PurgeCycleDays = 180 end
+    if MarketSyncDB.RetentionVersion == nil then MarketSyncDB.RetentionVersion = 1 end
     -- Persistent item info cache (global, not per-realm — item metadata is universal)
     -- Stores name/icon/rarity/classID so items only need to be fetched from WoW server once
     if not MarketSyncDB.ItemInfoCache then MarketSyncDB.ItemInfoCache = {} end
@@ -484,6 +485,86 @@ function MarketSync.GetLatestSyncContributor(forceRebuild)
 end
 
 -- ================================================================
+-- TIERED RETENTION: Compact Record Helpers
+-- ================================================================
+-- Compact format uses prefix markers to distinguish from raw bucket strings:
+--   Raw:    "5:b4:a,11:b2:c,23:b6:8"   (bucketOffset:b36price:b36qty, ...)
+--   Daily:  "D:b36min:b36max:b36avg:b36vol"   (D = daily summary)
+--   Weekly: "W:b36min:b36max:b36avg:b36vol"   (W = weekly summary)
+
+-- Tier boundaries (days from current scan day)
+MarketSync.RETENTION_HOT_DAYS  = 7    -- Full 30-min resolution (synced)
+MarketSync.RETENTION_WARM_DAYS = 30   -- Daily summaries (local)
+MarketSync.RETENTION_COLD_DAYS = 180  -- Weekly summaries (local, 6 months)
+
+function MarketSync.IsCompactRecord(str)
+    if not str or type(str) ~= "string" or #str < 2 then return false end
+    local prefix = str:sub(1, 2)
+    return prefix == "D:" or prefix == "W:"
+end
+
+-- Compacts a raw 30-min bucket string into a daily summary "D:min:max:avg:vol"
+function MarketSync.CompactDayString(histStr)
+    if not histStr or histStr == "" then return nil end
+    if MarketSync.IsCompactRecord(histStr) then return histStr end
+
+    local minPrice, maxPrice, sumPrice, totalVol, count = math.huge, 0, 0, 0, 0
+    for _, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+        local price = MarketSync.FromBase36(p_b36)
+        local qty = MarketSync.FromBase36(q_b36)
+        if price > 0 then
+            if price < minPrice then minPrice = price end
+            if price > maxPrice then maxPrice = price end
+            sumPrice = sumPrice + price
+            totalVol = totalVol + qty
+            count = count + 1
+        end
+    end
+    if count == 0 then return nil end
+    local avg = math.floor(sumPrice / count)
+    return string.format("D:%s:%s:%s:%s",
+        MarketSync.ToBase36(minPrice), MarketSync.ToBase36(maxPrice),
+        MarketSync.ToBase36(avg), MarketSync.ToBase36(totalVol))
+end
+
+-- Parses a compact record string. Returns nil if not compact.
+-- Returns: { type="daily"|"weekly", min=N, max=N, avg=N, volume=N }
+function MarketSync.ParseCompactRecord(str)
+    if not str or type(str) ~= "string" or #str < 2 then return nil end
+    local prefix = str:sub(1, 1)
+    if prefix ~= "D" and prefix ~= "W" then return nil end
+    local minB36, maxB36, avgB36, volB36 = str:match("^[DW]:([%w%-]+):([%w%-]+):([%w%-]+):([%w%-]+)$")
+    if not minB36 then return nil end
+    return {
+        type = (prefix == "D") and "daily" or "weekly",
+        min = MarketSync.FromBase36(minB36),
+        max = MarketSync.FromBase36(maxB36),
+        avg = MarketSync.FromBase36(avgB36),
+        volume = MarketSync.FromBase36(volB36),
+    }
+end
+
+-- Merges two compact records into one combined weekly summary.
+-- Used when aggregating daily compacts into weekly summaries.
+function MarketSync.MergeCompactRecords(a, b)
+    if not a then return b end
+    if not b then return a end
+    local aVol = a.volume or 1
+    local bVol = b.volume or 1
+    local totalVol = aVol + bVol
+    local aWeight = (a.avg or 0) * aVol
+    local bWeight = (b.avg or 0) * bVol
+    local mergedAvg = totalVol > 0 and math.floor((aWeight + bWeight) / totalVol) or math.floor(((a.avg or 0) + (b.avg or 0)) / 2)
+    return {
+        type = "weekly",
+        min = math.min(a.min or math.huge, b.min or math.huge),
+        max = math.max(a.max or 0, b.max or 0),
+        avg = mergedAvg,
+        volume = totalVol,
+    }
+end
+
+-- ================================================================
 -- METADATA PRUNING (Hybrid Retention Policy)
 -- ================================================================
 -- Prevents unbounded RAM growth from ItemMetadata accumulation.
@@ -668,7 +749,10 @@ function MarketSync.ScanDayToTimestamp(scanDay)
 end
 
 function MarketSync.ScanDayToDate(scanDay)
-    local ts = MarketSync.ScanDayToTimestamp(scanDay)
+    if not scanDay then return "" end
+    local sDay = tonumber(scanDay)
+    if not sDay then return tostring(scanDay) end
+    local ts = MarketSync.ScanDayToTimestamp(sDay)
     return date("%b %d", ts)
 end
 

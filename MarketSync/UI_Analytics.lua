@@ -335,7 +335,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     local listTitle = leftHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     listTitle:SetPoint("LEFT", 4, 0)
-    listTitle:SetText("|cFFFFD100Tracked Items|r")
+    listTitle:SetText("|cFFFFD100Scanned Items|r")
 
     -- Mode Switcher: [ Recent ] [ Favorites ]
     local recentBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
@@ -435,11 +435,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     local emptyListText = itemsScroll:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     emptyListText:SetPoint("CENTER", 0, 0)
-    emptyListText:SetText("No items recorded.\nScan or drop an item above.")
+    emptyListText:SetText("No scanned items recorded.\nRun an AH scan or drop an item above.")
 
     local function RefreshItemsList()
         itemsList = {}
         if currentMode == "recent" then
+            listTitle:SetText("|cFFFFD100Scanned Items|r")
+            emptyListText:SetText("No scanned items recorded.\nRun an AH scan or drop an item above.")
             recentBtn:Disable()
             favBtn:Enable()
             local seen = {}
@@ -454,6 +456,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
                         icon = r.icon,
                         quality = r.quality,
                         price = r.unitPrice,
+                        sourceText = "Live Scan Feed",
                     })
                 end
             end
@@ -477,12 +480,15 @@ function MarketSync.CreateAnalyticsPanel(parent)
                             icon = icon or 134400,
                             quality = qual or 1,
                             price = p,
+                            sourceText = "AH Scan Database",
                         })
                         if #itemsList >= 40 then break end
                     end
                 end
             end
         else
+            listTitle:SetText("|cFFFFD100Favorite Items|r")
+            emptyListText:SetText("No favorite items saved.\nAdd items to your Favorites list.")
             recentBtn:Enable()
             favBtn:Disable()
             if MarketSync.Favorites and MarketSync.Favorites.GetList then
@@ -501,6 +507,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
                         icon = icon or 134400,
                         quality = qual or 1,
                         price = p,
+                        sourceText = "User Favorites",
                     })
                 end
             end
@@ -586,6 +593,9 @@ function MarketSync.CreateAnalyticsPanel(parent)
                     end
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddLine("|cFF00FF00Click|r: View price analytics & trends", 0.8, 0.8, 0.8)
+                    if item.sourceText then
+                        GameTooltip:AddLine("|cFF888888Source: " .. item.sourceText .. "|r", 0.7, 0.7, 0.7)
+                    end
                     GameTooltip:Show()
                 end)
 
@@ -652,19 +662,19 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     local itemName = banner:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     itemName:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -2)
-    itemName:SetPoint("RIGHT", -120, 0)
+    itemName:SetPoint("RIGHT", -215, 0)
     itemName:SetJustifyH("LEFT")
     panel.name = itemName
 
     local itemSub = banner:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     itemSub:SetPoint("TOPLEFT", itemName, "BOTTOMLEFT", 0, -4)
-    itemSub:SetPoint("RIGHT", -120, 0)
+    itemSub:SetPoint("RIGHT", -215, 0)
     itemSub:SetJustifyH("LEFT")
     itemSub:SetText("Price Analytics & Historiography")
     panel.subtitle = itemSub
 
     local searchAHBtn = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
-    searchAHBtn:SetSize(110, 22)
+    searchAHBtn:SetSize(100, 22)
     searchAHBtn:SetPoint("RIGHT", -2, 0)
     searchAHBtn:SetText("Search in AH")
     searchAHBtn:SetScript("OnClick", function()
@@ -679,6 +689,46 @@ function MarketSync.CreateAnalyticsPanel(parent)
         GameTooltip:Show()
     end)
     searchAHBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local favBannerBtn = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
+    favBannerBtn:SetSize(96, 22)
+    favBannerBtn:SetPoint("RIGHT", searchAHBtn, "LEFT", -4, 0)
+    favBannerBtn:SetText("+ Favorite")
+    panel.favBannerBtn = favBannerBtn
+
+    local function UpdateFavBannerBtn()
+        if not panel.currentItem or not panel.currentItem.itemID then
+            favBannerBtn:Disable()
+            favBannerBtn:SetText("+ Favorite")
+            return
+        end
+        favBannerBtn:Enable()
+        local isFav = MarketSync.Favorites and MarketSync.Favorites.IsItemInList and MarketSync.Favorites.IsItemInList("Favorites", panel.currentItem.itemID)
+        if isFav then
+            favBannerBtn:SetText("|cFFFFD100★ Favorited|r")
+        else
+            favBannerBtn:SetText("+ Favorite")
+        end
+    end
+    panel.UpdateFavBannerBtn = UpdateFavBannerBtn
+
+    favBannerBtn:SetScript("OnClick", function()
+        if panel.currentItem and panel.currentItem.itemID and MarketSync.Favorites and MarketSync.Favorites.ToggleItemInList then
+            MarketSync.Favorites.ToggleItemInList("Favorites", panel.currentItem.itemID)
+            UpdateFavBannerBtn()
+            if currentMode == "favorites" then
+                RefreshItemsList()
+            end
+        end
+    end)
+    favBannerBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Toggle Favorite", 1, 1, 1)
+        GameTooltip:AddLine("Add or remove this item from your Favorites list.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    favBannerBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(searchAHBtn, {
             name = "Search in Auction House",
@@ -689,6 +739,16 @@ function MarketSync.CreateAnalyticsPanel(parent)
             end,
             tooltipTitle = "Search in Auction House",
             tooltipText = "Switches to the native AH Buy tab and queries this item directly.",
+        })
+        MarketSync.SetAccessibility(favBannerBtn, {
+            name = "Toggle Favorite",
+            context = "Button",
+            description = function()
+                local n = panel.currentItem and panel.currentItem.name or "current item"
+                return "Toggle " .. n .. " in Favorites list"
+            end,
+            tooltipTitle = "Toggle Favorite",
+            tooltipText = "Add or remove this item from your Favorites list.",
         })
     end
 
@@ -833,6 +893,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
         }
 
         emptyState:Hide()
+        if self.UpdateFavBannerBtn then self:UpdateFavBannerBtn() end
         self.icon:SetTexture(iconPath)
         self.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(nameStr, qual) or nameStr)
 

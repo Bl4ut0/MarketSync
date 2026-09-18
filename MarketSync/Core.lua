@@ -103,7 +103,7 @@ end
 -- Main Panel
 local panel = CreateFrame("Frame", "MarketSyncConfig", UIParent)
 panel.name = "MarketSync"
-category = Settings and Settings.RegisterCanvasLayoutCategory(panel, panel.name) or InterfaceOptions_AddCategory(panel)
+category = (Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterCanvasLayoutCategory(panel, panel.name)) or (InterfaceOptions_AddCategory and InterfaceOptions_AddCategory(panel))
 if Settings then Settings.RegisterAddOnCategory(category) end
 
 local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -211,6 +211,157 @@ local function SafeRegisterEvent(frame, eventName)
         pcall(frame.RegisterEvent, frame, eventName)
     end
 end
+-- ================================================================
+-- TIERED RETENTION DOWNSAMPLER
+-- Hot (0-7d):    full 30-min resolution (synced via guild swarm)
+-- Warm (8-30d):  daily compact summaries (D:min:max:avg:vol, local)
+-- Cold (31-180d): weekly compact summaries (W:min:max:avg:vol, local)
+-- Purge (>180d): hard deleted
+-- Fixes memory leak: strips data.vh older than Hot cutoff (7d)
+-- ================================================================
+function MarketSync.DownsampleRetention(onComplete)
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if not realmDB or not realmDB.PersonalData then
+        if onComplete then onComplete(0, 0, 0, 0) end
+        return
+    end
+
+    local currentDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(time() / 86400)
+    local hotDays = MarketSync.RETENTION_HOT_DAYS or 7
+    local warmDays = MarketSync.RETENTION_WARM_DAYS or 30
+    local coldDays = MarketSync.RETENTION_COLD_DAYS or 180
+
+    local hotCutoff  = currentDay - hotDays
+    local warmCutoff = currentDay - warmDays
+    local coldCutoff = currentDay - coldDays
+
+    local compactedDailyCount = 0
+    local compactedWeeklyCount = 0
+    local purgedCount = 0
+    local vhPrunedCount = 0
+
+    if MarketSyncDB and MarketSyncDB.DebugMode then
+        print(string.format("|cFF00FF00[MarketSync]|r Downsampling retention (Hot: %dd, Warm: %dd, Cold: %dd)",
+            hotDays, warmDays, coldDays))
+    end
+
+    local co = coroutine.create(function()
+        local i = 0
+        for dbKey, data in pairs(realmDB.PersonalData) do
+            if type(data) == "table" and data.h then
+                local weeklyBuckets = {}
+
+                for dayKey, histStr in pairs(data.h) do
+                    if type(dayKey) == "string" and dayKey:sub(1, 2) == "W_" then
+                        -- Cold weekly record
+                        local weekNum = tonumber(dayKey:sub(3))
+                        if weekNum then
+                            local weekAnchorDay = weekNum * 7
+                            if weekAnchorDay < coldCutoff then
+                                data.h[dayKey] = nil
+                                purgedCount = purgedCount + 1
+                            end
+                        end
+                    else
+                        local dayNum = tonumber(dayKey)
+                        if dayNum then
+                            if dayNum < coldCutoff then
+                                -- Beyond cold tier: hard purge
+                                data.h[dayKey] = nil
+                                purgedCount = purgedCount + 1
+                            elseif dayNum < warmCutoff then
+                                -- Warm -> Cold: accumulate into weekly summary
+                                local weekNum = math.floor(dayNum / 7)
+                                local weekKey = "W_" .. tostring(weekNum)
+                                local rec = MarketSync.ParseCompactRecord(histStr)
+                                if not rec and not MarketSync.IsCompactRecord(histStr) then
+                                    local compacted = MarketSync.CompactDayString(histStr)
+                                    if compacted then
+                                        rec = MarketSync.ParseCompactRecord(compacted)
+                                    end
+                                end
+                                if rec then
+                                    weeklyBuckets[weekKey] = MarketSync.MergeCompactRecords(
+                                        weeklyBuckets[weekKey], rec)
+                                end
+                                data.h[dayKey] = nil
+                                compactedWeeklyCount = compactedWeeklyCount + 1
+                            elseif dayNum < hotCutoff then
+                                -- Hot -> Warm: convert raw buckets to daily summary
+                                if not MarketSync.IsCompactRecord(histStr) then
+                                    local compacted = MarketSync.CompactDayString(histStr)
+                                    if compacted then
+                                        data.h[dayKey] = compacted
+                                        compactedDailyCount = compactedDailyCount + 1
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- Flush accumulated weekly records
+                for weekKey, wRec in pairs(weeklyBuckets) do
+                    local existingStr = data.h[weekKey]
+                    if existingStr then
+                        local existingRec = MarketSync.ParseCompactRecord(existingStr)
+                        if existingRec then
+                            wRec = MarketSync.MergeCompactRecords(existingRec, wRec)
+                        end
+                    end
+                    data.h[weekKey] = string.format("W:%s:%s:%s:%s",
+                        MarketSync.ToBase36(wRec.min),
+                        MarketSync.ToBase36(wRec.max),
+                        MarketSync.ToBase36(wRec.avg),
+                        MarketSync.ToBase36(wRec.volume))
+                end
+
+                -- Prune vh (verified history) leak: only keep hot tier for outbound sync
+                if type(data.vh) == "table" then
+                    for vhDayKey, _ in pairs(data.vh) do
+                        local vhDayNum = tonumber(vhDayKey)
+                        if not vhDayNum or vhDayNum < hotCutoff or (type(vhDayKey) == "string" and vhDayKey:sub(1, 2) == "W_") then
+                            data.vh[vhDayKey] = nil
+                            vhPrunedCount = vhPrunedCount + 1
+                        end
+                    end
+                    if not next(data.vh) then
+                        data.vh = nil
+                    end
+                end
+            end
+
+            i = i + 1
+            if i % 500 == 0 then coroutine.yield() end
+        end
+
+        if MarketSyncDB and MarketSyncDB.DebugMode and (compactedDailyCount > 0 or compactedWeeklyCount > 0 or purgedCount > 0 or vhPrunedCount > 0) then
+            print(string.format(
+                "|cFF00FF00[MarketSync]|r Retention Downsampler: %d daily, %d weekly, %d purged, %d vh pruned",
+                compactedDailyCount, compactedWeeklyCount, purgedCount, vhPrunedCount))
+        end
+        if onComplete then
+            onComplete(compactedDailyCount, compactedWeeklyCount, purgedCount, vhPrunedCount)
+        end
+    end)
+
+    local function RunChunk()
+        if coroutine.status(co) ~= "dead" then
+            local ok, err = coroutine.resume(co)
+            if not ok then
+                if MarketSync.Debug then MarketSync.Debug("Error in Retention Downsampler coroutine: " .. tostring(err)) end
+                error("Error in Retention Downsampler coroutine: " .. tostring(err))
+            else
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0.02, RunChunk)
+                else
+                    RunChunk()
+                end
+            end
+        end
+    end
+    RunChunk()
+end
 
 local eventFrame = CreateFrame("Frame")
 SafeRegisterEvent(eventFrame, "ADDON_LOADED")
@@ -302,57 +453,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end)
 
-        -- STAGE 4: Time-Series Purge (120s) â€” cleanly prune granular history older than PurgeCycle
+        -- STAGE 4: Tiered Retention Downsampler (120s)
+        -- Hot (0-7d):    full 30-min resolution (synced via guild swarm)
+        -- Warm (8-30d):  daily compact summaries (D:min:max:avg:vol, local)
+        -- Cold (31-180d): weekly compact summaries (W:min:max:avg:vol, local)
+        -- Purge (>180d): deleted
         C_Timer.After(120, function()
-            if not MarketSyncDB or type(MarketSyncDB.PurgeCycleDays) ~= "number" then return end
-            -- "Infinite" translates to e.g. 9999 or simply not pruning if set to 0. 
-            -- Let's say if it's 0, it means infinite.
-            if MarketSyncDB.PurgeCycleDays <= 0 then return end
-
-            local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-            if not realmDB or not realmDB.PersonalData then return end
-
-            local currentDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(time() / 86400)
-            local cutoffDay = currentDay - MarketSyncDB.PurgeCycleDays
-            local deletedStringCount = 0
-
-            if MarketSyncDB.DebugMode then
-                print("|cFF00FF00[MarketSync]|r Stage 4: Pruning History Strings older than Day " .. cutoffDay)
+            if MarketSync.DownsampleRetention then
+                MarketSync.DownsampleRetention()
             end
-
-            -- Coroutine to prevent execution stall when iterating thousands of items
-            local co = coroutine.create(function()
-                local i = 0
-                for _, data in pairs(realmDB.PersonalData) do
-                    if type(data) == "table" and data.h then
-                        for dayStr, _ in pairs(data.h) do
-                            local dayNum = tonumber(dayStr)
-                            if dayNum and dayNum < cutoffDay then
-                                data.h[dayStr] = nil
-                                deletedStringCount = deletedStringCount + 1
-                            end
-                        end
-                    end
-                    i = i + 1
-                    if i % 1000 == 0 then coroutine.yield() end
-                end
-
-                if MarketSyncDB.DebugMode and deletedStringCount > 0 then
-                    print("|cFF00FF00[MarketSync]|r Pruned " .. deletedStringCount .. " stale history string points.")
-                end
-            end)
-            
-            local function RunChunk()
-                if coroutine.status(co) ~= "dead" then
-                    local ok, err = coroutine.resume(co)
-                    if not ok then
-                        MarketSync.Debug("Error in Timeseries Purge coroutine: " .. tostring(err))
-                    else
-                        C_Timer.After(0.05, RunChunk)
-                    end
-                end
-            end
-            RunChunk()
         end)
 
         -- Register for AH events so we can invalidate the scan cache dynamically

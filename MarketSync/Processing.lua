@@ -2188,37 +2188,72 @@ function MarketSync.GetItemHistory(dbKey)
     -- Track which days have granular data so we don't double-count
     local granularDays = {}
 
-    -- 1. Unpack granular timeseries strings from PersonalData
+    -- 1. Unpack granular timeseries strings and compact summaries from PersonalData
     if pData and pData.h then
         for dayStr, histStr in pairs(pData.h) do
-            local day = tonumber(dayStr)
-            if day and histStr and histStr ~= "" then
-                granularDays[dayStr] = true
-                for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
-                    local bucketOffset = tonumber(b_offs)
-                    local price = FromBase36(p_b36)
-                    local qty = FromBase36(q_b36)
-                    if price and price > 0 then
-                        -- Per-day source attribution
-                        local source = "Personal"
-                        if meta and meta.days and meta.days[dayStr] then
-                            local s = meta.days[dayStr].source
-                            if s then source = s:match("^([^%-]+)") or s end
+            if histStr and histStr ~= "" then
+                if MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr) then
+                    local parsed = MarketSync.ParseCompactRecord and MarketSync.ParseCompactRecord(histStr)
+                    if parsed then
+                        local day = tonumber(dayStr)
+                        local isWeekly = false
+                        if not day and type(dayStr) == "string" and dayStr:sub(1, 2) == "W_" then
+                            local weekNum = tonumber(dayStr:sub(3))
+                            if weekNum then
+                                day = weekNum * 7
+                                isWeekly = true
+                            end
                         end
+                        if day then
+                            granularDays[tostring(day)] = true
+                            local timeLabel = isWeekly and "Weekly Avg" or "Daily Avg"
+                            table.insert(history, {
+                                day = day,
+                                bucketOffset = nil,
+                                sortKey = (day * 100) + 48,
+                                high = parsed.max,
+                                low = parsed.min,
+                                price = parsed.avg,
+                                quantity = parsed.volume,
+                                source = "Personal",
+                                timeLabel = timeLabel,
+                                isGranular = false,
+                                isCompact = true,
+                                isWeekly = isWeekly,
+                            })
+                        end
+                    end
+                else
+                    local day = tonumber(dayStr)
+                    if day then
+                        granularDays[dayStr] = true
+                        for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                            local bucketOffset = tonumber(b_offs)
+                            local price = FromBase36(p_b36)
+                            local qty = FromBase36(q_b36)
+                            if price and price > 0 then
+                                -- Per-day source attribution
+                                local source = "Personal"
+                                if meta and meta.days and meta.days[dayStr] then
+                                    local s = meta.days[dayStr].source
+                                    if s then source = s:match("^([^%-]+)") or s end
+                                end
 
-                        table.insert(history, {
-                            day = day,
-                            bucketOffset = bucketOffset,
-                            -- sortKey: scanDay * 100 + bucketOffset gives chronological ordering
-                            sortKey = (day * 100) + bucketOffset,
-                            high = price,
-                            low = price,
-                            price = price,
-                            quantity = qty,
-                            source = source,
-                            timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
-                            isGranular = true,
-                        })
+                                table.insert(history, {
+                                    day = day,
+                                    bucketOffset = bucketOffset,
+                                    -- sortKey: scanDay * 100 + bucketOffset gives chronological ordering
+                                    sortKey = (day * 100) + bucketOffset,
+                                    high = price,
+                                    low = price,
+                                    price = price,
+                                    quantity = qty,
+                                    source = source,
+                                    timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
+                                    isGranular = true,
+                                })
+                            end
+                        end
                     end
                 end
             end
@@ -2262,6 +2297,7 @@ function MarketSync.GetItemHistory(dbKey)
 end
 
 -- Returns ONLY the granular 30-min data points for analytics algorithms.
+-- Compact daily/weekly records are skipped to preserve intraday accuracy.
 -- Each entry: { day, bucketOffset, price, quantity, timestamp }
 function MarketSync.GetGranularHistory(dbKey)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
@@ -2272,31 +2308,34 @@ function MarketSync.GetGranularHistory(dbKey)
     local points = {}
 
     for dayStr, histStr in pairs(pData.h) do
-        local day = tonumber(dayStr)
-        if day and histStr and histStr ~= "" then
-            for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
-                local bucketOffset = tonumber(b_offs)
-                local price = FromBase36(p_b36)
-                local qty = FromBase36(q_b36)
-                if price and price > 0 then
-                    -- Reconstruct approximate UNIX timestamp for this data point
-                    local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
-                    if not dayTimestamp then
-                        local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
-                            or (MarketSync and MarketSync.SCAN_DAY_0)
-                            or 1577836800
-                        dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
-                    end
-                    local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
+        -- Skip compact summaries (not 30-min bucket points)
+        if not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr)) and not (type(dayStr) == "string" and dayStr:sub(1, 2) == "W_") then
+            local day = tonumber(dayStr)
+            if day and histStr and histStr ~= "" then
+                for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                    local bucketOffset = tonumber(b_offs)
+                    local price = FromBase36(p_b36)
+                    local qty = FromBase36(q_b36)
+                    if price and price > 0 then
+                        -- Reconstruct approximate UNIX timestamp for this data point
+                        local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
+                        if not dayTimestamp then
+                            local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
+                                or (MarketSync and MarketSync.SCAN_DAY_0)
+                                or 1577836800
+                            dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
+                        end
+                        local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
 
-                    table.insert(points, {
-                        day = day,
-                        bucketOffset = bucketOffset,
-                        price = price,
-                        quantity = qty,
-                        timestamp = pointTimestamp,
-                        timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
-                    })
+                        table.insert(points, {
+                            day = day,
+                            bucketOffset = bucketOffset,
+                            price = price,
+                            quantity = qty,
+                            timestamp = pointTimestamp,
+                            timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
+                        })
+                    end
                 end
             end
         end

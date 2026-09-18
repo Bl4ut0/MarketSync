@@ -774,6 +774,152 @@ test('Accessibility helpers and narrator protocol support', () => {
   }
 });
 
+test('Tiered retention downsampler, compact records, and analytics clarity', () => {
+  // 1. Verify UI_Analytics terminology decoupling
+  const analyticsLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Analytics.lua'), 'utf8');
+  if (analyticsLua.includes('|cFFFFD100Tracked Items|r')) {
+    throw new Error('UI_Analytics should not label scanned items as Tracked Items');
+  }
+  if (!analyticsLua.includes('|cFFFFD100Scanned Items|r')) {
+    throw new Error('UI_Analytics should label scan results as Scanned Items');
+  }
+  if (!analyticsLua.includes('favBannerBtn')) {
+    throw new Error('UI_Analytics should have a Favorite toggle button on the banner');
+  }
+
+  // 2. Lua environment testing for compaction and downsampling
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    time = function() return 20714 * 86400 end
+    hooksecurefunc = function() end
+    CreateFrame = function()
+      local f = {
+        SetScript = function() end,
+        SetBackdrop = function() end,
+        SetSize = function() end,
+        SetPoint = function() end,
+        SetText = function() end,
+        Show = function() end,
+        Hide = function() end,
+        CreateFontString = function() return { SetPoint = function() end, SetText = function() end } end
+      }
+      return f
+    end
+    C_Timer = { After = function(delay, fn) fn() end }
+    GetGameTime = function() return 12, 0 end
+    date = function(fmt, t) return "Sep 18" end
+    LibStub = function() return { NewDataObject = function() end, Register = function() end } end
+    InterfaceOptions_AddCategory = function() end
+    SlashCmdList = {}
+    GetBuildInfo = function() return "1.15.2", "54321", "Apr 1 2024", 11502 end
+    GetNormalizedRealmName = function() return "TestRealm" end
+    GetRealmName = function() return "TestRealm" end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const coreLua = fs.readFileSync(path.join(marketSyncDir, 'Core.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(coreLua)) !== 0) {
+    throw new Error('Failed to load Core.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const processingLua = fs.readFileSync(path.join(marketSyncDir, 'Processing.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(processingLua)) !== 0) {
+    throw new Error('Failed to load Processing.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    -- A. Test CompactDayString and ParseCompactRecord
+    local raw = "0:2s:1,12:2u:2,24:30:1" -- 100 copper (1x), 102 copper (2x), 108 copper (1x)
+    assert(MarketSync.IsCompactRecord(raw) == false, "raw bucket string should not be compact")
+    local compacted = MarketSync.CompactDayString(raw)
+    assert(compacted ~= nil, "CompactDayString should return a string")
+    assert(MarketSync.IsCompactRecord(compacted) == true, "compacted string should be compact")
+    assert(compacted:sub(1, 2) == "D:", "compacted string should have D: prefix")
+
+    local parsed = MarketSync.ParseCompactRecord(compacted)
+    assert(parsed ~= nil, "ParseCompactRecord should succeed")
+    assert(parsed.type == "daily", "type should be daily")
+    assert(parsed.min == 100, "min should be 100, got: " .. tostring(parsed.min))
+    assert(parsed.max == 108, "max should be 108, got: " .. tostring(parsed.max))
+    assert(parsed.avg == 103, "avg should be 103, got: " .. tostring(parsed.avg))
+    assert(parsed.volume == 4, "volume should be 4, got: " .. tostring(parsed.volume))
+
+    -- B. Test MergeCompactRecords
+    local rec2 = { type = "daily", min = 90, max = 120, avg = 110, volume = 6 }
+    local weekly = MarketSync.MergeCompactRecords(parsed, rec2)
+    assert(weekly.type == "weekly", "merged record type should be weekly")
+    assert(weekly.min == 90, "merged min should be 90")
+    assert(weekly.max == 120, "merged max should be 120")
+    assert(weekly.volume == 10, "merged volume should be 10")
+    -- weighted avg: (103*4 + 110*6) / 10 = (412 + 660) / 10 = 107.2 -> 107
+    assert(weekly.avg == 107, "merged avg should be 107, got: " .. tostring(weekly.avg))
+
+    -- C. Test DownsampleRetention Transitions & vh cleanup
+    local currentDay = 20714
+    MarketSync.GetCurrentScanDay = function() return currentDay end
+
+    MarketSync.InitializeDB()
+    local realmDB = MarketSync.GetRealmDB()
+    realmDB.PersonalData = {
+      ["4471"] = {
+        h = {
+          ["20714"] = "5:b4:a,11:b2:c", -- Today (Hot: 0d): keep raw
+          ["20700"] = "2:2s:1,14:30:1", -- 14 days ago (Warm): compact to D:
+          ["20670"] = "D:2s:30:2v:4",  -- 44 days ago (Cold): compact to W_2952
+          ["W_2910"] = "W:10:20:15:10", -- ~20370 (344 days ago): older than 180d, PURGE!
+        },
+        vh = {
+          ["20714"] = "5:b4:a",         -- Today: keep in vh
+          ["20700"] = "2:2s:1",         -- 14 days ago: strip from vh!
+          ["20670"] = "D:2s:30:2v:4",   -- 44 days ago: strip from vh!
+        }
+      }
+    }
+
+    MarketSync.DownsampleRetention()
+
+    local entry = realmDB.PersonalData["4471"]
+    -- Hot tier preserved
+    assert(entry.h["20714"] == "5:b4:a,11:b2:c", "Hot tier should stay raw")
+    -- Warm tier compacted to daily
+    assert(entry.h["20700"] ~= nil, "Day 20700 should exist")
+    assert(entry.h["20700"]:sub(1, 2) == "D:", "Day 20700 should be compacted to D:")
+    -- Cold tier aggregated to weekly
+    assert(entry.h["20670"] == nil, "Day 20670 should be removed after weekly aggregation")
+    local weekKey = "W_" .. tostring(math.floor(20670 / 7))
+    assert(entry.h[weekKey] ~= nil, "Weekly bucket " .. weekKey .. " should exist")
+    assert(entry.h[weekKey]:sub(1, 2) == "W:", "Weekly bucket should start with W:")
+    -- Purge tier deleted
+    assert(entry.h["W_2910"] == nil, "Stale weekly record older than 180d should be purged")
+    -- vh leak fixed: only hot tier remains in vh
+    assert(entry.vh["20714"] == "5:b4:a", "Hot tier vh preserved for sync")
+    assert(entry.vh["20700"] == nil, "Older vh entry should be pruned")
+    assert(entry.vh["20670"] == nil, "Cold vh entry should be pruned")
+
+    -- D. Test GetItemHistory and GetGranularHistory reading of compact records
+    local fullHistory = MarketSync.GetItemHistory("4471")
+    assert(#fullHistory >= 3, "Expected at least 3 points in full history, got: " .. tostring(#fullHistory))
+
+    local granularHistory = MarketSync.GetGranularHistory("4471")
+    -- Granular history must only contain 30-min bucket points from today, skipping D: and W:
+    assert(#granularHistory == 2, "Expected exactly 2 granular points, got: " .. tostring(#granularHistory))
+    for _, pt in ipairs(granularHistory) do
+      assert(pt.bucketOffset ~= nil, "Granular points must have bucketOffset")
+    end
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('Tiered retention validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {

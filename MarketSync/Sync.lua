@@ -1583,6 +1583,8 @@ function MarketSync.RespondToPull(sinceBucket, requester)
         end
 
         local dayCutoff = math.floor(sinceBucket / 48)
+        local currentScanDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(time() / 86400)
+        local hotCutoff = currentScanDay - (MarketSync.RETENTION_HOT_DAYS or 7)
 
         for dbKey, data in pairs(pData) do
             scanned = scanned + 1
@@ -1593,7 +1595,7 @@ function MarketSync.RespondToPull(sinceBucket, requester)
             if (hasBucket or hasLegacy) and data.h then
                 for dayStr, histStr in pairs(data.h) do
                     local d = tonumber(dayStr)
-                    if d and d >= dayCutoff then
+                    if d and d >= dayCutoff and d >= hotCutoff and not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr)) then
                         -- Transmit natively. Replace commas with periods so we don't break BRES splitting
                         local safeHistStr = string.gsub(histStr, ",", ".")
                         local itemStr = tostring(dbKey) .. "_" .. MarketSync.ToBase36(d) .. "_" .. safeHistStr
@@ -1886,6 +1888,8 @@ local function FreezeTransferSource(scope, realmDB, baseRevision, revision)
     if scope == "M" then
         local dayCutoff = BucketToScanDay(since)
         local upperDay = BucketToScanDay(upperRevision)
+        local currentScanDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(time() / 86400)
+        local hotCutoff = currentScanDay - (MarketSync.RETENTION_HOT_DAYS or 7)
         for dbKey, data in pairs((realmDB and realmDB.PersonalData) or {}) do
             local latestBucket = tonumber(data and data.latestBucket) or 0
             local verifiedHistory = data and data.vh
@@ -1894,8 +1898,9 @@ local function FreezeTransferSource(scope, realmDB, baseRevision, revision)
                 if encodedKey then
                     for dayText, history in pairs(verifiedHistory) do
                         local day = tonumber(dayText)
-                        if day and day >= dayCutoff and day <= upperDay and type(history) == "string"
-                            and history ~= "" then
+                        if day and day >= dayCutoff and day >= hotCutoff and day <= upperDay
+                            and type(history) == "string" and history ~= ""
+                            and not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(history)) then
                             table.insert(frozen, {
                                 encodedKey = encodedKey,
                                 day = day,
