@@ -45,9 +45,17 @@ function AH.Attach()
     AH.Panel = panel
 
     -- Create Tab Button
-    local entry = CreateFrame("Button", "MarketSyncAuctionHouseTab", frame, "AuctionHouseFrameTabTemplate")
+    local entry
+    local ok, res = pcall(CreateFrame, "Button", "MarketSyncAuctionHouseTab", frame, "AuctionHouseFrameTabTemplate")
+    if ok and res then
+        entry = res
+    else
+        entry = CreateFrame("Button", "MarketSyncAuctionHouseTab", frame, "PanelTabButtonTemplate")
+    end
     entry:SetText("MarketSync")
-    PanelTemplates_TabResize(entry, 20, nil, 70)
+    if PanelTemplates_TabResize then
+        PanelTemplates_TabResize(entry, 20, nil, 70)
+    end
     table.insert(frame.Tabs, entry)
     local tabIndex = #frame.Tabs
     entry:SetID(tabIndex)

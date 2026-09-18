@@ -197,7 +197,7 @@ local function CreateMainFrame()
     -- ================================================================
     -- BOTTOM TABS
     -- ================================================================
-    local tabNames = {"Scanner", "Personal Scan", "Guild Sync", "Neutral AH", "Processing", "Notifications", "Settings"}
+    local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Processing", "Notifications", "Settings"}
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -228,11 +228,11 @@ local function CreateMainFrame()
 
         -- LOW RAM MODE: Load caches on demand
         if MarketSyncDB and MarketSyncDB.LowRamMode then
-            if id == 2 and MarketSyncDB.OnDemandPersonal and MarketSync.LoadPersonalCache then
+            if id == 1 and MarketSyncDB.OnDemandPersonal and MarketSync.LoadPersonalCache then
                 MarketSync.LoadPersonalCache()
-            elseif id == 3 and MarketSyncDB.OnDemandGuild and MarketSync.LoadGuildCache then
+            elseif id == 2 and MarketSyncDB.OnDemandGuild and MarketSync.LoadGuildCache then
                 MarketSync.LoadGuildCache()
-            elseif id == 4 and MarketSyncDB.OnDemandNeutral and MarketSync.LoadNeutralCache then
+            elseif id == 3 and MarketSyncDB.OnDemandNeutral and MarketSync.LoadNeutralCache then
                 MarketSync.LoadNeutralCache()
             end
         end
@@ -251,7 +251,6 @@ local function CreateMainFrame()
             end
         end
         local titles = {
-            "Scanner",
             "Personal Scan",
             "Guild Sync",
             "Neutral AH",
@@ -261,7 +260,6 @@ local function CreateMainFrame()
         }
         
         local tooltips = {
-            "Native Auction House scanner and preferred lists manager.",
             "Browse your natively scanned Auction House data.",
             "Browse composite Auction House data synced from guild members.",
             "Browse data from the Neutral Auction House.",
@@ -312,9 +310,9 @@ local function CreateMainFrame()
         
         -- Check if tab should be hidden based on settings
         local isHidden = false
-        if i == 3 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
+        if i == 2 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
             isHidden = true
-        elseif i == 4 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
+        elseif i == 3 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
             isHidden = true
         end
         
@@ -345,9 +343,9 @@ local function CreateMainFrame()
         local lastVisible = nil
         for i, tab in ipairs(MainFrame.tabs) do
             local shouldHide = false
-            if i == 3 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
+            if i == 2 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
                 shouldHide = true
-            elseif i == 4 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
+            elseif i == 3 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
                 shouldHide = true
             end
 
@@ -375,15 +373,7 @@ local function CreateMainFrame()
     MainFrame.RefreshTabVisibility = RefreshTabVisibility
 
     -- ================================================================
-    -- TAB 1: SCANNER & QUICK LISTS
-    -- ================================================================
-    local ScannerContent = MarketSync.CreateAHScannerPanel and MarketSync.CreateAHScannerPanel(MainFrame) or CreateFrame("Frame", nil, MainFrame)
-    ScannerContent:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 18, -72)
-    ScannerContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -18, 40)
-    table.insert(contentFrames, ScannerContent)
-
-    -- ================================================================
-    -- TAB 2, 3, 4: BROWSE PANELS (Personal / Guild / Neutral)
+    -- TAB 1, 2, 3: BROWSE PANELS (Personal / Guild / Neutral)
     -- ================================================================
     BrowseContent = MarketSync.CreateBrowsePanel(MainFrame, "personal")
     BrowseContent:Hide()
@@ -422,11 +412,11 @@ local function CreateMainFrame()
     ItemHistoryPanel.backBtn:SetScript("OnClick", function()
         ItemHistoryPanel:Hide()
         -- Show the correct browse content based on active tab
-        if activeBrowseTab == 2 then
+        if activeBrowseTab == 1 then
             BrowseContent:Show()
-        elseif activeBrowseTab == 3 then
+        elseif activeBrowseTab == 2 then
             SyncContent:Show()
-        elseif activeBrowseTab == 4 then
+        elseif activeBrowseTab == 3 then
             NeutralContent:Show()
         end
         SelectTab(activeBrowseTab) -- Refreshes the title natively
@@ -437,11 +427,11 @@ local function CreateMainFrame()
         MarketSync.HideAllTabContent()
 
         if not sourceTab then
-            if activeBrowseTab == 2 then
+            if activeBrowseTab == 1 then
                 sourceTab = "personal"
-            elseif activeBrowseTab == 3 then
+            elseif activeBrowseTab == 2 then
                 sourceTab = "guild"
-            elseif activeBrowseTab == 4 then
+            elseif activeBrowseTab == 3 then
                 sourceTab = "neutral"
             end
         end
