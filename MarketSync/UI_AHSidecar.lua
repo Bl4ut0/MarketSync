@@ -228,6 +228,15 @@ function MarketSync.CreateAHSidecar(parent)
         self:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
         GameTooltip:Hide()
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(toggleBtn, {
+            name = "MarketSync Sidecar",
+            context = "Button",
+            description = "Expand MarketSync Shopping Lists and Bag Selling drawer",
+            tooltipTitle = "MarketSync Sidecar",
+            tooltipText = "Click to open Shopping Lists & Bag Selling",
+        })
+    end
 
     -- 2. Breakout Sidecar Frame -- aligned neatly with AH frame inset
     local frame = CreateFrame("Frame", "MarketSyncAHSidecarFrame", ahFrame, "BackdropTemplate")
@@ -262,6 +271,13 @@ function MarketSync.CreateAHSidecar(parent)
     closeBtn:SetScript("OnClick", function()
         Sidecar.SetExpanded(false)
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(closeBtn, {
+            name = "Close Sidecar",
+            context = "Button",
+            description = "Collapse MarketSync Shopping Lists and Bag Selling drawer",
+        })
+    end
 
     -- Separator line under header
     local headerSep = frame:CreateTexture(nil, "ARTWORK")
@@ -296,6 +312,21 @@ function MarketSync.CreateAHSidecar(parent)
     tabBags.label = tabBags:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tabBags.label:SetPoint("CENTER")
     tabBags.label:SetText("Bag Selling")
+
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(tabLists, {
+            name = "Shopping Lists",
+            context = "Tab",
+            description = "Switch to Shopping Lists panel",
+            getIndexInfo = function() return { index = 1, total = 2 } end,
+        })
+        MarketSync.SetAccessibility(tabBags, {
+            name = "Bag Selling",
+            context = "Tab",
+            description = "Switch to Inventory Bag Selling panel",
+            getIndexInfo = function() return { index = 2, total = 2 } end,
+        })
+    end
 
     -- Content Containers
     local listsContainer = CreateFrame("Frame", nil, frame)
@@ -401,6 +432,13 @@ function MarketSync.CreateAHSidecar(parent)
     dropdownBtn:SetScript("OnClick", function()
         ToggleDropDownMenu(1, nil, hiddenDropdown, dropdownBtn, 0, 0)
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(dropdownBtn, {
+            name = function() return "Shopping List: " .. (currentListName or "Favorites") end,
+            context = "Button",
+            description = "Select active shopping list",
+        })
+    end
 
     -- New List Button
     local newListBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
@@ -431,6 +469,13 @@ function MarketSync.CreateAHSidecar(parent)
         }
         StaticPopup_Show("MARKETSYNC_SIDECAR_NEW_LIST")
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(newListBtn, {
+            name = "New Shopping List",
+            context = "Button",
+            description = "Create a new shopping list",
+        })
+    end
 
     -- Delete List Button
     local delListBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
@@ -449,6 +494,13 @@ function MarketSync.CreateAHSidecar(parent)
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         end
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(delListBtn, {
+            name = "Delete Shopping List",
+            context = "Button",
+            description = function() return "Delete shopping list " .. (currentListName or "") end,
+        })
+    end
 
     -- Search Entire List Button
     local searchAllBtn = CreateFrame("Button", nil, listsContainer, "UIPanelButtonTemplate")
@@ -469,6 +521,13 @@ function MarketSync.CreateAHSidecar(parent)
             end
         end
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(searchAllBtn, {
+            name = function() return (MarketSync.Scanner and MarketSync.Scanner.Active) and "Stop Scan" or "Scan Entire List" end,
+            context = "Button",
+            description = function() return "Scan all items in " .. (currentListName or "") .. " on the Auction House" end,
+        })
+    end
 
     -- Unified Drag & Drop Handler for Item Adding
     local function HandleSidecarItemDrop()
@@ -515,6 +574,13 @@ function MarketSync.CreateAHSidecar(parent)
             self:ClearFocus()
         end
     end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(addBox, {
+            name = "Add Item",
+            context = "Edit Box",
+            description = "Drop an item or type name or ID to add to current shopping list",
+        })
+    end
 
     -- Recessed Inset for List Items
     local listInset = CreateFrame("Frame", nil, listsContainer, "BackdropTemplate")
@@ -655,6 +721,24 @@ function MarketSync.CreateAHSidecar(parent)
                     end
                 end)
 
+                if MarketSync.SetAccessibility then
+                    MarketSync.SetAccessibility(row, {
+                        name = function() return item.name or "Item" end,
+                        context = "Button",
+                        description = function()
+                            local price = (item.itemID and MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(item.itemID)) or 0
+                            local priceSpoken = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(price) or (price .. " copper")
+                            return string.format("%s, Market price %s. Left-click to search in Auction House, Right-click for analytics.", item.name or "", priceSpoken)
+                        end,
+                        getIndexInfo = function() return { index = i, total = #items } end,
+                    })
+                    MarketSync.SetAccessibility(row.delBtn, {
+                        name = "Remove from list",
+                        context = "Button",
+                        description = function() return "Remove " .. (item.name or "item") .. " from shopping list" end,
+                    })
+                end
+
                 row:Show()
             elseif row then
                 row:Hide()
@@ -691,6 +775,19 @@ function MarketSync.CreateAHSidecar(parent)
     refreshBagsBtn:SetScript("OnClick", function()
         if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
     end)
+
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(sellFilterBox, {
+            name = "Filter Inventory",
+            context = "Edit Box",
+            description = "Type to filter bag items by name",
+        })
+        MarketSync.SetAccessibility(refreshBagsBtn, {
+            name = "Refresh Bags",
+            context = "Button",
+            description = "Scan player bags for auctionable items",
+        })
+    end
 
     -- Recessed Inset for Bag Selling
     local sellInset = CreateFrame("Frame", nil, sellContainer, "BackdropTemplate")
@@ -891,6 +988,24 @@ function MarketSync.CreateAHSidecar(parent)
                             end
                         end
                     end)
+
+                    if MarketSync.SetAccessibility then
+                        MarketSync.SetAccessibility(btn, {
+                            name = function() return item.name or "Bag Item" end,
+                            context = "Button",
+                            description = function()
+                                local countStr = item.stackCount > 1 and (item.stackCount .. " items") or "1 item"
+                                local priceDesc = ""
+                                if item.marketPrice and item.marketPrice > 0 then
+                                    local pSpoken = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(item.marketPrice) or (item.marketPrice .. " copper")
+                                    local uSpoken = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(math.max(1, item.marketPrice - 1)) or (math.max(1, item.marketPrice - 1) .. " copper")
+                                    priceDesc = string.format("Market price %s, suggested undercut %s. ", pSpoken, uSpoken)
+                                end
+                                return string.format("%s, %s, %s slot %d. %sLeft-click to select into sell slot, Right-click to search in Auction House.", item.name or "", countStr, bag.name or "Bag", item.slot or 1, priceDesc)
+                            end,
+                            getIndexInfo = function() return { index = idx, total = #matching } end,
+                        })
+                    end
 
                     btn:Show()
                 end

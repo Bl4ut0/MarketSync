@@ -120,27 +120,21 @@ function MarketSync.CreateAHScannerPanel(parent)
     listScrollContent:SetSize(232, 1)
     listScroll:SetScrollChild(listScrollContent)
 
-    -- Batch selection buttons
-    local selectAllBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
-    selectAllBtn:SetSize(54, 20)
-    selectAllBtn:SetPoint("TOPLEFT", listScroll, "BOTTOMLEFT", 2, -6)
-    selectAllBtn:SetText("All")
+    -- Batch selection and scan CTA toolbar
+    local toggleSelectBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
+    toggleSelectBtn:SetSize(78, 22)
+    toggleSelectBtn:SetPoint("TOPLEFT", listScroll, "BOTTOMLEFT", 2, -6)
+    toggleSelectBtn:SetText("Select All")
 
-    local deselectAllBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
-    deselectAllBtn:SetSize(54, 20)
-    deselectAllBtn:SetPoint("LEFT", selectAllBtn, "RIGHT", 4, 0)
-    deselectAllBtn:SetText("None")
-
-    -- Scan Selected Lists CTA Button
     local scanSelectedBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
-    scanSelectedBtn:SetPoint("TOPLEFT", selectAllBtn, "BOTTOMLEFT", 0, -4)
+    scanSelectedBtn:SetPoint("LEFT", toggleSelectBtn, "RIGHT", 4, 0)
     scanSelectedBtn:SetPoint("RIGHT", -6, 0)
-    scanSelectedBtn:SetHeight(24)
-    scanSelectedBtn:SetText("Scan Selected Lists")
+    scanSelectedBtn:SetHeight(22)
+    scanSelectedBtn:SetText("Scan Selected")
 
     -- Divider between Lists Checklist and Active List Items
     local divider = leftInset:CreateTexture(nil, "ARTWORK")
-    divider:SetPoint("TOPLEFT", scanSelectedBtn, "BOTTOMLEFT", -2, -8)
+    divider:SetPoint("TOPLEFT", toggleSelectBtn, "BOTTOMLEFT", -2, -8)
     divider:SetPoint("RIGHT", -4, 0)
     divider:SetHeight(1)
     divider:SetColorTexture(0.20, 0.22, 0.26, 0.90)
@@ -343,11 +337,35 @@ function MarketSync.CreateAHScannerPanel(parent)
                     RefreshActiveItemsView()
                 end)
 
+                if MarketSync.SetAccessibility then
+                    MarketSync.SetAccessibility(row.cb, {
+                        name = listName,
+                        context = function() return checkedLists[listName] and "Check Button, Checked" or "Check Button, Unchecked" end,
+                        description = "Include " .. listName .. " list in batch scans.",
+                        tooltipTitle = listName .. " List",
+                        tooltipText = "Toggle inclusion for batch scanning.",
+                    })
+                    MarketSync.SetAccessibility(row.btn, {
+                        name = listName,
+                        context = "Button",
+                        description = string.format("Select %s list to view and manage items. Contains %d items.", listName, count),
+                    })
+                end
+
                 row:Show()
             elseif row then
                 row:Hide()
             end
         end
+
+        local allChecked = (#lists > 0)
+        for _, name in ipairs(lists) do
+            if not checkedLists[name] then
+                allChecked = false
+                break
+            end
+        end
+        toggleSelectBtn:SetText(allChecked and "Clear All" or "Select All")
 
         listScrollContent:SetHeight(math.max(1, #lists * rowH))
         scanSelectedBtn:SetText(string.format("Scan Selected (%d items)", totalSelectedItems))
@@ -409,6 +427,16 @@ function MarketSync.CreateAHScannerPanel(parent)
                     end
                 end)
 
+                if MarketSync.SetAccessibility then
+                    MarketSync.SetAccessibility(row.delBtn, {
+                        name = "Remove " .. (item.name or "item"),
+                        context = "Button",
+                        description = "Removes " .. (item.name or "item") .. " from " .. selectedListName .. " list.",
+                        tooltipTitle = "Remove Item",
+                        tooltipText = "Remove " .. (item.name or "item") .. " from this list.",
+                    })
+                end
+
                 row:Show()
             elseif row then
                 row:Hide()
@@ -418,16 +446,22 @@ function MarketSync.CreateAHScannerPanel(parent)
         itemsScrollContent:SetHeight(math.max(1, #items * rowH))
     end
 
-    selectAllBtn:SetScript("OnClick", function()
+    toggleSelectBtn:SetScript("OnClick", function()
         local lists = (MarketSync.Favorites and MarketSync.Favorites.GetLists()) or {}
+        local allChecked = true
         for _, name in ipairs(lists) do
-            checkedLists[name] = true
+            if not checkedLists[name] then
+                allChecked = false
+                break
+            end
         end
-        RefreshListsView()
-    end)
-
-    deselectAllBtn:SetScript("OnClick", function()
-        checkedLists = {}
+        if allChecked then
+            checkedLists = {}
+        else
+            for _, name in ipairs(lists) do
+                checkedLists[name] = true
+            end
+        end
         RefreshListsView()
     end)
 
@@ -477,26 +511,6 @@ function MarketSync.CreateAHScannerPanel(parent)
     scanAllBtn:SetPoint("RIGHT", scanWatchedBtn, "LEFT", -5, 0)
     scanAllBtn:SetText("Scan All (Full AH)")
 
-    -- Analytics Button
-    local analyticsBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
-    analyticsBtn:SetSize(80, 22)
-    analyticsBtn:SetPoint("RIGHT", scanAllBtn, "LEFT", -5, 0)
-    analyticsBtn:SetText("Analytics")
-    analyticsBtn:SetScript("OnClick", function()
-        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
-            MarketSync.AuctionHouse.ShowAuctionHousePanel("analytics")
-        elseif MarketSync.ShowAnalytics then
-            MarketSync.ShowAnalytics()
-        end
-    end)
-    analyticsBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Price Analytics & Historiography", 1, 1, 1)
-        GameTooltip:AddLine("Open the Analytics tab to view historical price charts, volatility, and intraday purchasing patterns.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    analyticsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
     -- Row 2: Status Text (Full width across header below buttons)
     local statusText = rightHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     statusText:SetPoint("TOPLEFT", rightHeader, "TOPLEFT", 2, -28)
@@ -522,6 +536,72 @@ function MarketSync.CreateAHScannerPanel(parent)
             MarketSync.Scanner.Cancel("Stopped by user")
         end
     end)
+
+    -- Accessibility narration & tooltips for scan controls
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(newListBtn, {
+            name = "Create New Shopping List",
+            context = "Button",
+            description = "Creates a new custom shopping list for organized scans.",
+            tooltipTitle = "New Shopping List",
+            tooltipText = "Create a custom list of items for targeted scanning.",
+        })
+        MarketSync.SetAccessibility(delListBtn, {
+            name = "Delete Shopping List",
+            context = "Button",
+            description = "Deletes the currently selected custom shopping list.",
+            tooltipTitle = "Delete List",
+            tooltipText = "Delete the currently active shopping list. Default Favorites cannot be deleted.",
+        })
+        MarketSync.SetAccessibility(toggleSelectBtn, {
+            name = function() return toggleSelectBtn:GetText() or "Select All Lists" end,
+            context = "Button",
+            description = "Toggles selection of all shopping lists for batch scanning.",
+            tooltipTitle = "Toggle Selection",
+            tooltipText = "Select all lists or clear selection.",
+        })
+        MarketSync.SetAccessibility(scanSelectedBtn, {
+            name = function() return scanSelectedBtn:GetText() or "Scan Selected Lists" end,
+            context = "Button",
+            description = "Queries the Auction House for all items across checked shopping lists.",
+            tooltipTitle = "Scan Selected Lists",
+            tooltipText = "Scans market prices for all items in checked lists.",
+        })
+        MarketSync.SetAccessibility(addBox, {
+            name = "Quick Add Item",
+            context = "Edit Box",
+            description = "Drop an item here or type an item name or ID to add to active list.",
+            tooltipTitle = "Quick Add Item",
+            tooltipText = "Drop an item from bags or type name/ID and press Enter.",
+        })
+        MarketSync.SetAccessibility(stopBtn, {
+            name = "Stop Scan",
+            context = "Button",
+            description = "Immediately halts any currently running auction scan.",
+            tooltipTitle = "Stop Scan",
+            tooltipText = "Cancel the active scan in progress.",
+        })
+        MarketSync.SetAccessibility(scanWatchedBtn, {
+            name = "Scan Watched Items",
+            context = "Button",
+            description = "Queries the Auction House for all items currently on your active watchlist.",
+            tooltipTitle = "Scan Watched Items",
+            tooltipText = "Queries the Auction House for all items on your Watchlist.",
+        })
+        MarketSync.SetAccessibility(scanAllBtn, {
+            name = "Scan All Auctions",
+            context = "Button",
+            description = function()
+                local cd = (MarketSync.Scanner and MarketSync.Scanner.GetFullScanCooldownRemaining and MarketSync.Scanner.GetFullScanCooldownRemaining()) or 0
+                if cd > 0 then
+                    return string.format("Replicates all realm auctions. Cooldown remaining: %d minutes %d seconds.", math.floor(cd / 60), cd % 60)
+                end
+                return "Replicates all realm auctions. Ready to scan."
+            end,
+            tooltipTitle = "Scan All (Full AH)",
+            tooltipText = "Performs a full Auction House replication scan. Subject to a 15-minute server cooldown.",
+        })
+    end
 
     -- Progress Bar
     local progressBar = CreateFrame("StatusBar", nil, rightInset, "BackdropTemplate")
@@ -568,6 +648,13 @@ function MarketSync.CreateAHScannerPanel(parent)
             hdr.label:SetText(col.name)
         end
         hdr:SetPoint("TOPLEFT", colContainer, "TOPLEFT", startX, 0)
+        if MarketSync.SetAccessibility then
+            MarketSync.SetAccessibility(hdr, {
+                name = col.name,
+                context = "Button",
+                description = "Sort table by " .. col.name,
+            })
+        end
         startX = startX + col.width
     end
 
@@ -677,6 +764,23 @@ function MarketSync.CreateAHScannerPanel(parent)
                         end
                     end
                 end)
+
+                if MarketSync.SetAccessibility then
+                    MarketSync.SetAccessibility(row, {
+                        name = function()
+                            return data.name or "Scanned Item"
+                        end,
+                        context = "Button",
+                        description = function()
+                            local priceStr = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(data.unitPrice) or (tostring(data.unitPrice) .. " copper")
+                            local qtyStr = (data.available or 1) .. " available"
+                            return string.format("%s, Unit buyout: %s, %s. Left-click to search in Auction House, Right-click for analytics.", data.name or "", priceStr, qtyStr)
+                        end,
+                        getIndexInfo = function()
+                            return { index = i, total = #results }
+                        end,
+                    })
+                end
 
                 row:Show()
             elseif row then

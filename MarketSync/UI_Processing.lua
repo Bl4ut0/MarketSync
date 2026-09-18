@@ -431,6 +431,29 @@ function MarketSync.CreateProcessingPanel(parent)
         })
     end
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(modeButtons.target, {
+            name = "Target Material Mode",
+            context = "Button",
+            description = "Calculate profitability for a specific target material",
+        })
+        MarketSync.SetAccessibility(modeButtons.process, {
+            name = "Process Type Mode",
+            context = "Button",
+            description = "Calculate profitability across all materials for a processing method",
+        })
+        MarketSync.SetAccessibility(modeButtons.craft, {
+            name = "Profession Crafting Mode",
+            context = "Button",
+            description = "Calculate profitability across recipes for a selected profession",
+        })
+        MarketSync.SetAccessibility(targetInputBox, {
+            name = "Target Material Input",
+            context = "Edit Box",
+            description = "Enter item name, item link, or item ID to evaluate",
+        })
+    end
+
     local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
     local targetDropdown
     targetDropdown = BuildDropdown(parentPrefix .. "ProcessingTargetDropdown", leftTopBox, LEFT_W - 26, function(self, level)
@@ -552,6 +575,34 @@ function MarketSync.CreateProcessingPanel(parent)
     btnTrack:SetSize(100, 22)
     btnTrack:SetPoint("LEFT", btnExport, "RIGHT", 6, 0)
     btnTrack:SetText("Track")
+
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(btnRun, {
+            name = function() return btnRun:GetText() or "Run" end,
+            context = "Button",
+            description = "Execute processing profitability calculation",
+        })
+        MarketSync.SetAccessibility(btnExport, {
+            name = "Export",
+            context = "Button",
+            description = "Export processing results to CSV or clipboard",
+        })
+        MarketSync.SetAccessibility(btnTrack, {
+            name = "Track",
+            context = "Button",
+            description = "Add selected items to tracking and alerts",
+        })
+        MarketSync.SetAccessibility(marginBox, {
+            name = "Margin Percentage",
+            context = "Edit Box",
+            description = "Minimum target profit margin percentage",
+        })
+        MarketSync.SetAccessibility(minMarginGoldBox, {
+            name = "Minimum Margin Gold",
+            context = "Edit Box",
+            description = "Minimum gold profit required for craft",
+        })
+    end
 
     local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     statusSummary:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -66)
@@ -932,6 +983,26 @@ function MarketSync.CreateProcessingPanel(parent)
         GameTooltip:Hide()
     end)
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(prevBtn, {
+            name = "Previous Page",
+            context = "Button",
+            description = "Navigate to previous page of results",
+        })
+        MarketSync.SetAccessibility(nextBtn, {
+            name = "Next Page",
+            context = "Button",
+            description = "Navigate to next page of results",
+        })
+        MarketSync.SetAccessibility(btnResyncProf, {
+            name = "Resync Professions",
+            context = "Button",
+            description = "Refreshes profession recipe cache for currently open trade skill window",
+            tooltipTitle = "Resync profession cache",
+            tooltipText = "Refreshes cache for the profession window currently open.",
+        })
+    end
+
     local customTitle = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     customTitle:SetPoint("TOPLEFT", 8, -8)
     customTitle:SetText("|cffffd700Custom Selections|r")
@@ -1121,6 +1192,24 @@ function MarketSync.CreateProcessingPanel(parent)
                 row.craftID = data.recipeName
                 if row.selectedBg then
                     row.selectedBg:SetShown(data.isSelected and true or false)
+                end
+
+                if MarketSync.SetAccessibility then
+                    MarketSync.SetAccessibility(row, {
+                        name = function()
+                            return MarketSync.StripColorCodes(data.nameText or "Item")
+                        end,
+                        context = "Button",
+                        description = function()
+                            local val = MarketSync.StripColorCodes(data.valueText or "")
+                            local status = MarketSync.StripColorCodes(data.statusText or "")
+                            local typ = MarketSync.StripColorCodes(data.typeText or "")
+                            return string.format("%s, Type: %s, Value: %s, Status: %s. Click to select or view details.", MarketSync.StripColorCodes(data.nameText or ""), typ, val, status)
+                        end,
+                        getIndexInfo = function()
+                            return { index = firstIndex + i - 1, total = total }
+                        end,
+                    })
                 end
 
                 row:Show()

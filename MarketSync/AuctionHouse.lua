@@ -174,6 +174,31 @@ function AH.Attach()
         AH.ProcessingTab = libAHTab:GetButton("MarketSyncProcessing")
         AH.AlertsTab = libAHTab:GetButton("MarketSyncAlerts")
         AH.AnalyticsTab = libAHTab:GetButton("MarketSyncAnalytics")
+
+        if MarketSync.SetAccessibility then
+            local customTabs = {
+                { btn = AH.ScannerTab, name = "Scanner", desc = "MarketSync Auction House scanner panel" },
+                { btn = AH.ProcessingTab, name = "Processing", desc = "MarketSync crafting and disenchanting profitability panel" },
+                { btn = AH.AlertsTab, name = "Alerts", desc = "MarketSync market deal alerts and notification panel" },
+                { btn = AH.AnalyticsTab, name = "Analytics", desc = "MarketSync price history and item tracking analytics" },
+            }
+            local baseCount = (frame.Tabs and #frame.Tabs or 0)
+            local totalAH = baseCount + #customTabs
+            for i, tabInfo in ipairs(customTabs) do
+                if tabInfo.btn then
+                    MarketSync.SetAccessibility(tabInfo.btn, {
+                        name = tabInfo.name,
+                        context = "Tab",
+                        description = tabInfo.desc,
+                        getIndexInfo = function()
+                            return { index = baseCount + i, total = totalAH }
+                        end,
+                        tooltipTitle = tabInfo.name .. " Tab",
+                        tooltipText = tabInfo.desc,
+                    })
+                end
+            end
+        end
     end
 
     -- Attach MarketSync Breakout Sidecar to AuctionHouseFrame

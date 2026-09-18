@@ -200,6 +200,33 @@ function MarketSync.CreateNotificationsPanel(parent)
         end
     end)
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(btnTabWatchlist, {
+            name = "Tracked Watchlist",
+            context = "Tab",
+            description = "View and manage tracked item price alerts",
+            getIndexInfo = function() return { index = 1, total = 2 } end,
+        })
+        MarketSync.SetAccessibility(btnTabHistory, {
+            name = "Alert History",
+            context = "Tab",
+            description = "View history of triggered price alerts",
+            getIndexInfo = function() return { index = 2, total = 2 } end,
+        })
+        MarketSync.SetAccessibility(btnTestSound, {
+            name = "Test Sound",
+            context = "Button",
+            description = "Play notification alert test sound",
+        })
+        MarketSync.SetAccessibility(soundCheck, {
+            name = "Sound Alerts",
+            context = function(self)
+                return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked"
+            end,
+            description = "Toggle audio notifications for market alerts",
+        })
+    end
+
     local function UpdateSubTabButtons()
         if panel.currentView == "watchlist" then
             btnTabWatchlist:Disable()
@@ -308,6 +335,16 @@ function MarketSync.CreateNotificationsPanel(parent)
     end)
     itemSlot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(itemSlot, {
+            name = function()
+                return panel.editorItemName or "Item Drop Slot"
+            end,
+            context = "Button",
+            description = "Drop an item from your bags or click with an item to configure price alerts",
+        })
+    end
+
     -- Item Target EditBox
     local targetLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     targetLabel:SetPoint("TOPLEFT", 10, -58)
@@ -335,6 +372,14 @@ function MarketSync.CreateNotificationsPanel(parent)
         })
     end
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(targetBox, {
+            name = "Item Target",
+            context = "Edit Box",
+            description = "Enter item name or item ID for price alert",
+        })
+    end
+
     -- Threshold Input & Preset Buttons
     local threshLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     threshLabel:SetPoint("TOPLEFT", 10, -94)
@@ -347,6 +392,14 @@ function MarketSync.CreateNotificationsPanel(parent)
     threshBox:SetText("0")
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(threshBox)
+    end
+
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(threshBox, {
+            name = "Alert Threshold Gold",
+            context = "Edit Box",
+            description = "Notify when price drops below this gold amount",
+        })
     end
 
     local btn10Pct = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
@@ -448,6 +501,26 @@ function MarketSync.CreateNotificationsPanel(parent)
     btnClear:SetSize(58, 20)
     btnClear:SetPoint("LEFT", btnSave, "RIGHT", 4, 0)
     btnClear:SetText("Clear")
+
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(urgentCheck, {
+            name = "Urgent Alert",
+            context = function(self)
+                return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked"
+            end,
+            description = "Show raid warning popup on screen when this alert triggers",
+        })
+        MarketSync.SetAccessibility(btnSave, {
+            name = function() return btnSave:GetText() or "Add Alert" end,
+            context = "Button",
+            description = "Save or update this price alert",
+        })
+        MarketSync.SetAccessibility(btnClear, {
+            name = "Clear Form",
+            context = "Button",
+            description = "Reset alert editor fields",
+        })
+    end
 
     -- =========================================================
     -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2 - Height 114)
@@ -846,6 +919,19 @@ function MarketSync.CreateNotificationsPanel(parent)
     btnNext:SetPoint("BOTTOMRIGHT", -6, 6)
     btnNext:SetText("Next >")
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(btnPrev, {
+            name = "Previous Page",
+            context = "Button",
+            description = "Go to previous page of alerts",
+        })
+        MarketSync.SetAccessibility(btnNext, {
+            name = "Next Page",
+            context = "Button",
+            description = "Go to next page of alerts",
+        })
+    end
+
     btnPrev:SetScript("OnClick", function()
         if panel.currentView == "watchlist" then
             if panel.watchlistPage > 0 then
@@ -1195,6 +1281,36 @@ function MarketSync.CreateNotificationsPanel(parent)
                 end)
                 row.wDelBtn:Show()
 
+                if MarketSync.SetAccessibility then
+                    local displayName = MarketSync.StripColorCodes(req.displayName or req.matchValue or "Item")
+                    MarketSync.SetAccessibility(row, {
+                        name = function()
+                            return displayName
+                        end,
+                        context = "Button",
+                        description = function()
+                            local thresh = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(req.thresholdCopper) or (tostring(req.thresholdCopper or 0) .. " copper")
+                            local stateStr = (req.enabled ~= false) and "Active" or "Disabled"
+                            return string.format("%s, Alert threshold below %s, Status: %s. Click to load into alert editor.", displayName, thresh, stateStr)
+                        end,
+                        getIndexInfo = function()
+                            return { index = reqIndex, total = total }
+                        end,
+                    })
+                    MarketSync.SetAccessibility(row.wActiveCheck, {
+                        name = "Enable Alert: " .. displayName,
+                        context = function(self)
+                            return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked"
+                        end,
+                        description = "Toggle active monitoring for " .. displayName,
+                    })
+                    MarketSync.SetAccessibility(row.wDelBtn, {
+                        name = "Delete Alert: " .. displayName,
+                        context = "Button",
+                        description = "Remove " .. displayName .. " from price alert watchlist",
+                    })
+                end
+
                 row:Show()
             else
                 row.request = nil
@@ -1285,6 +1401,24 @@ function MarketSync.CreateNotificationsPanel(parent)
 
                 row.hSource:SetText(entry.source or "Scan")
                 row.hSource:Show()
+
+                if MarketSync.SetAccessibility then
+                    local cleanHistName = MarketSync.StripColorCodes(entry.itemName or (entry.itemID and ("Item " .. entry.itemID)) or "Alert")
+                    MarketSync.SetAccessibility(row, {
+                        name = function()
+                            return cleanHistName
+                        end,
+                        context = "Button",
+                        description = function()
+                            local priceStr = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(entry.price) or (tostring(entry.price or 0) .. " copper")
+                            local threshStr = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(entry.threshold) or (tostring(entry.threshold or 0) .. " copper")
+                            return string.format("%s, Seen price: %s, Threshold was: %s, Source: %s. Click to search in Auction House.", cleanHistName, priceStr, threshStr, entry.source or "Scan")
+                        end,
+                        getIndexInfo = function()
+                            return { index = (panel.historyPage * ROWS_PER_PAGE) + i, total = total }
+                        end,
+                    })
+                end
 
                 row:Show()
             else

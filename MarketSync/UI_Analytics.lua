@@ -364,6 +364,24 @@ function MarketSync.CreateAnalyticsPanel(parent)
         if self:GetText() == "" then self:SetText("Drop item or enter name/ID...") end
     end)
 
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(recentBtn, {
+            name = "Recent Items",
+            context = "Button",
+            description = "Show recently scanned items list",
+        })
+        MarketSync.SetAccessibility(favBtn, {
+            name = "Favorite Items",
+            context = "Button",
+            description = "Show favorite items list",
+        })
+        MarketSync.SetAccessibility(searchBox, {
+            name = "Search Analytics",
+            context = "Edit Box",
+            description = "Drop item or enter name or ID to view analytics",
+        })
+    end
+
     local currentMode = "recent"
     local selectedDBKey = nil
     local itemsList = {}
@@ -582,6 +600,18 @@ function MarketSync.CreateAnalyticsPanel(parent)
                     GameTooltip:Hide()
                 end)
 
+                if MarketSync.SetAccessibility then
+                    MarketSync.SetAccessibility(row, {
+                        name = function() return item.name or "Item" end,
+                        context = "Button",
+                        description = function()
+                            local pSpoken = (item.price and item.price > 0) and (MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(item.price) or (item.price .. " copper")) or "No price data"
+                            return string.format("%s, Latest price: %s. Click to view price analytics and trends.", item.name or "", pSpoken)
+                        end,
+                        getIndexInfo = function() return { index = i, total = #itemsList } end,
+                    })
+                end
+
                 row:Show()
             elseif row then
                 row:Hide()
@@ -649,6 +679,18 @@ function MarketSync.CreateAnalyticsPanel(parent)
         GameTooltip:Show()
     end)
     searchAHBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(searchAHBtn, {
+            name = "Search in Auction House",
+            context = "Button",
+            description = function()
+                local n = panel.currentItem and panel.currentItem.name or "current item"
+                return "Query " .. n .. " in Auction House Buy tab"
+            end,
+            tooltipTitle = "Search in Auction House",
+            tooltipText = "Switches to the native AH Buy tab and queries this item directly.",
+        })
+    end
 
     -- 2. Historical Trend Card
     local graphCard = MarketSync.CreateModernInset and MarketSync.CreateModernInset(rightInset)

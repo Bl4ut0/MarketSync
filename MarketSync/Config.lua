@@ -699,6 +699,113 @@ function MarketSync.FormatMoneyColored(amount)
     return str
 end
 
+-- Strip WoW color codes, hyperlinks, and texture escapes for clean narrator text
+function MarketSync.StripColorCodes(text)
+    if not text or type(text) ~= "string" then return "" end
+    local clean = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    clean = clean:gsub("|H.-|h(.-)|h", "%1")
+    clean = clean:gsub("|T.-|t", "")
+    clean = clean:gsub("|A.-|a", "")
+    return clean:match("^%s*(.-)%s*$") or clean
+end
+
+-- Convert copper amount to spoken words for screen readers (e.g. "4 gold, 20 silver, 15 copper")
+function MarketSync.FormatNarrationMoney(amount)
+    if not amount or amount <= 0 then return "0 copper" end
+    local gold = math.floor(amount / 10000)
+    local silver = math.floor((amount % 10000) / 100)
+    local copper = amount % 100
+    local parts = {}
+    if gold > 0 then
+        table.insert(parts, gold .. " gold")
+    end
+    if silver > 0 then
+        table.insert(parts, silver .. " silver")
+    end
+    if copper > 0 or #parts == 0 then
+        table.insert(parts, copper .. " copper")
+    end
+    return table.concat(parts, ", ")
+end
+
+-- Attach official Blizzard Narration methods and accessible GameTooltips to UI regions
+function MarketSync.SetAccessibility(region, opts)
+    if not region then return end
+    opts = opts or {}
+
+    -- Official Blizzard Narration interface (Blizzard_Narration)
+    region.NarrationGetName = function(self)
+        local n = opts.name
+        if type(n) == "function" then n = n(self) end
+        if not n and self.GetText then n = self:GetText() end
+        return MarketSync.StripColorCodes(n or "")
+    end
+
+    region.NarrationGetContext = function(self)
+        local c = opts.context
+        if type(c) == "function" then c = c(self) end
+        if c then return c end
+        local objType = self.GetObjectType and self:GetObjectType() or "Button"
+        if objType == "CheckButton" or self.GetChecked then
+            local checked = self.GetChecked and self:GetChecked()
+            return checked and "Check Button, Checked" or "Check Button, Unchecked"
+        end
+        return objType
+    end
+
+    region.NarrationGetDescription = function(self)
+        local d = opts.description
+        if type(d) == "function" then d = d(self) end
+        return MarketSync.StripColorCodes(d or "")
+    end
+
+    if opts.getIndexInfo then
+        region.NarrationGetIndexInfo = function(self)
+            return opts.getIndexInfo(self)
+        end
+    end
+
+    -- Setup or enhance GameTooltip for mouse-driven screen narration (Blizzard_NarrationSourceMouse)
+    if (opts.tooltipTitle or opts.tooltipText or opts.tooltipHint) and region.SetScript then
+        local prevEnter = region:GetScript("OnEnter")
+        local prevLeave = region:GetScript("OnLeave")
+
+        region:SetScript("OnEnter", function(self)
+            if prevEnter then prevEnter(self) end
+            if not GameTooltip:IsOwned(self) then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                local title = opts.tooltipTitle
+                if type(title) == "function" then title = title(self) end
+                if not title then title = region:NarrationGetName() end
+
+                local desc = opts.tooltipText or opts.description
+                if type(desc) == "function" then desc = desc(self) end
+
+                local hint = opts.tooltipHint
+                if type(hint) == "function" then hint = hint(self) end
+
+                if title and title ~= "" then
+                    GameTooltip:SetText(title, 1, 0.82, 0)
+                end
+                if desc and desc ~= "" then
+                    GameTooltip:AddLine(desc, 0.9, 0.9, 0.9, true)
+                end
+                if hint and hint ~= "" then
+                    GameTooltip:AddLine(hint, 0, 0.8, 1, true)
+                end
+                GameTooltip:Show()
+            end
+        end)
+
+        region:SetScript("OnLeave", function(self)
+            if prevLeave then prevLeave(self) end
+            if GameTooltip:IsOwned(self) then
+                GameTooltip:Hide()
+            end
+        end)
+    end
+end
+
 function MarketSync.FormatRelativeTime(epochTime, fallbackDays)
     if epochTime and epochTime > 0 then
         local diff = math.max(0, time() - epochTime)

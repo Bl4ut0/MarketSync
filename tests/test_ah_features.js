@@ -706,6 +706,74 @@ test('Analytics and Processing history decoupling from Auctionator', () => {
   }
 });
 
+test('Accessibility helpers and narrator protocol support', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+  const mockEnv = `
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    time = function() return 1773780000 end
+    hooksecurefunc = function() end
+    CreateFrame = function() return { SetScript = function() end, SetBackdrop = function() end, SetSize = function() end, SetPoint = function() end, Show = function() end, Hide = function() end } end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    -- 1. Test StripColorCodes
+    local clean1 = MarketSync.StripColorCodes("|cffffd100MarketSync|r")
+    assert(clean1 == "MarketSync", "Expected 'MarketSync', got: " .. tostring(clean1))
+    local clean2 = MarketSync.StripColorCodes("|cff00ff00Left-Click|r: Search |TInterface\\\\Icons\\\\INV_Misc_Herb:16:16|t")
+    assert(clean2 == "Left-Click: Search", "Expected 'Left-Click: Search', got: " .. tostring(clean2))
+    local clean3 = MarketSync.StripColorCodes("|cff9d9d9d|Hitem:7073::::::::1:1445::1:28:2044|h[Broken Fang]|h|r")
+    assert(clean3 == "[Broken Fang]", "Expected '[Broken Fang]', got: " .. tostring(clean3))
+
+    -- 2. Test FormatNarrationMoney
+    local m0 = MarketSync.FormatNarrationMoney(0)
+    assert(m0 == "0 copper", "Expected '0 copper', got: " .. tostring(m0))
+    local m50 = MarketSync.FormatNarrationMoney(50)
+    assert(m50 == "50 copper", "Expected '50 copper', got: " .. tostring(m50))
+    local mSilver = MarketSync.FormatNarrationMoney(125)
+    assert(mSilver == "1 silver, 25 copper", "Expected '1 silver, 25 copper', got: " .. tostring(mSilver))
+    local mGold = MarketSync.FormatNarrationMoney(4502015)
+    assert(mGold == "450 gold, 20 silver, 15 copper", "Expected '450 gold, 20 silver, 15 copper', got: " .. tostring(mGold))
+
+    -- 3. Test SetAccessibility
+    local mockBtn = {
+      text = "|cFFFFD100Click Me|r",
+      GetText = function(self) return self.text end,
+      GetObjectType = function() return "Button" end
+    }
+    MarketSync.SetAccessibility(mockBtn, {
+      name = function(self) return self:GetText() end,
+      context = "Button",
+      description = "|cff00ff00Performs action|r",
+      getIndexInfo = function() return { index = 2, total = 5 } end,
+    })
+
+    assert(mockBtn:NarrationGetName() == "Click Me", "NarrationGetName should strip color codes")
+    assert(mockBtn:NarrationGetContext() == "Button", "NarrationGetContext should match")
+    assert(mockBtn:NarrationGetDescription() == "Performs action", "NarrationGetDescription should strip colors")
+    local idxInfo = mockBtn:NarrationGetIndexInfo()
+    assert(idxInfo.index == 2 and idxInfo.total == 5, "NarrationGetIndexInfo should return 2 of 5")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('Accessibility helpers validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 4. Verify UI_AHScanner button streamlining
+  const scannerLua = fs.readFileSync(path.join(marketSyncDir, 'UI_AHScanner.lua'), 'utf8');
+  if (scannerLua.includes('local analyticsBtn = CreateFrame')) {
+    throw new Error('Redundant analyticsBtn should be removed from UI_AHScanner.lua');
+  }
+  if (!scannerLua.includes('toggleSelectBtn')) {
+    throw new Error('Consolidated toggleSelectBtn should be present in UI_AHScanner.lua');
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {
