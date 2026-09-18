@@ -18,11 +18,26 @@ MarketSync.Scanner = {
 }
 
 local S = MarketSync.Scanner
-local A = C_AuctionHouse
+
+local function GetAHAPI()
+    return C_AuctionHouse or _G.C_AuctionHouse
+end
+
+local function GetReplicateFuncs()
+    local api = GetAHAPI()
+    local repl = (api and type(api.ReplicateItems) == "function" and api.ReplicateItems)
+        or (type(_G.ReplicateItems) == "function" and _G.ReplicateItems)
+    local getNum = (api and type(api.GetNumReplicateItems) == "function" and api.GetNumReplicateItems)
+        or (type(_G.GetNumReplicateItems) == "function" and _G.GetNumReplicateItems)
+    local getInfo = (api and type(api.GetReplicateItemInfo) == "function" and api.GetReplicateItemInfo)
+        or (type(_G.GetReplicateItemInfo) == "function" and _G.GetReplicateItemInfo)
+    return repl, getNum, getInfo
+end
 
 local function SafeCall(name, ...)
-    if not A or type(A[name]) ~= "function" then return nil end
-    local ok, result = pcall(A[name], ...)
+    local api = GetAHAPI()
+    if not api or type(api[name]) ~= "function" then return nil end
+    local ok, result = pcall(api[name], ...)
     if not ok then
         MarketSync.Debug("C_AuctionHouse." .. name .. " error: " .. tostring(result))
         return nil
@@ -43,7 +58,11 @@ function S.Notify()
 end
 
 function S.IsAvailable()
-    return MarketSync.IsAuctionHouseOpen == true and A ~= nil and type(A.SendSearchQuery) == "function"
+    local frameOpen = MarketSync.IsAuctionHouseOpen == true
+        or (_G.AuctionHouseFrame and _G.AuctionHouseFrame:IsShown())
+        or (_G.AuctionFrame and _G.AuctionFrame:IsShown())
+    local api = GetAHAPI()
+    return (frameOpen == true) and api ~= nil and type(api.SendSearchQuery) == "function"
 end
 
 function S.CopyKey(key)
@@ -63,8 +82,26 @@ function S.ToItemKey(keyOrID)
     local id = tonumber(keyOrID)
     if not id and type(keyOrID) == "string" then
         id = tonumber(keyOrID:match("item:(%d+)") or keyOrID:match("^(%d+)$"))
+        if not id then
+            local cleanName = keyOrID:match("%[(.-)%]") or keyOrID
+            cleanName = cleanName:match("^%s*(.-)%s*$")
+            if cleanName and cleanName ~= "" then
+                if C_Item and C_Item.GetItemInfoInstant then
+                    local ok, iid = pcall(C_Item.GetItemInfoInstant, cleanName)
+                    if ok and tonumber(iid) then id = tonumber(iid) end
+                elseif GetItemInfoInstant then
+                    local ok, iid = pcall(GetItemInfoInstant, cleanName)
+                    if ok and tonumber(iid) then id = tonumber(iid) end
+                end
+            end
+        end
     end
     if id and id > 0 then
+        local api = GetAHAPI()
+        if api and type(api.MakeItemKey) == "function" then
+            local ok, k = pcall(api.MakeItemKey, id, 0, 0, 0)
+            if ok and k then return k end
+        end
         return {
             itemID = id,
             itemLevel = 0,
@@ -169,38 +206,46 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     end
 end
 
-local function SummarizeSearchResults(key, commodity)
-    local argument = commodity and key.itemID or key
-    local countName = commodity and "GetNumCommoditySearchResults" or "GetNumItemSearchResults"
-    local infoName = commodity and "GetCommoditySearchResultInfo" or "GetItemSearchResultInfo"
-    local completeName = commodity and "HasFullCommoditySearchResults" or "HasFullItemSearchResults"
+local function SummarizeSearchResults(key, isCommodityHint)
+    local tries = isCommodityHint and { true, false } or { false, true }
+    for _, isCommodity in ipairs(tries) do
+        local argument = isCommodity and key.itemID or key
+        local countName = isCommodity and "GetNumCommoditySearchResults" or "GetNumItemSearchResults"
+        local infoName = isCommodity and "GetCommoditySearchResultInfo" or "GetItemSearchResultInfo"
+        local completeName = isCommodity and "HasFullCommoditySearchResults" or "HasFullItemSearchResults"
 
-    local count = SafeCall(countName, argument) or 0
-    local isComplete = SafeCall(completeName, argument)
+        local count = SafeCall(countName, argument) or 0
+        if count > 0 then
+            local isComplete = SafeCall(completeName, argument)
+            local minUnitPrice = nil
+            local totalAvailable = 0
 
-    local minUnitPrice = nil
-    local totalAvailable = 0
-
-    for index = 1, count do
-        local row = SafeCall(infoName, argument, index)
-        if row then
-            local quantity = tonumber(row.quantity) or 0
-            if quantity > 0 then
-                totalAvailable = totalAvailable + quantity
-                local unitPrice = commodity and row.unitPrice or nil
-                if not commodity and row.buyoutAmount and row.buyoutAmount > 0 then
-                    unitPrice = row.buyoutAmount / quantity
-                end
-                if type(unitPrice) == "number" and unitPrice > 0 then
-                    if not minUnitPrice or unitPrice < minUnitPrice then
-                        minUnitPrice = unitPrice
+            for index = 1, count do
+                local row = SafeCall(infoName, argument, index)
+                if row then
+                    local quantity = tonumber(row.quantity) or 0
+                    if quantity > 0 then
+                        totalAvailable = totalAvailable + quantity
+                        local unitPrice = isCommodity and row.unitPrice or nil
+                        if not isCommodity and row.buyoutAmount and row.buyoutAmount > 0 then
+                            unitPrice = row.buyoutAmount / quantity
+                        end
+                        if type(unitPrice) == "number" and unitPrice > 0 then
+                            if not minUnitPrice or unitPrice < minUnitPrice then
+                                minUnitPrice = unitPrice
+                            end
+                        end
                     end
                 end
+            end
+
+            if minUnitPrice and minUnitPrice > 0 then
+                return minUnitPrice, totalAvailable, isComplete, isCommodity
             end
         end
     end
 
-    return minUnitPrice, totalAvailable, isComplete
+    return nil, 0, false, isCommodityHint
 end
 
 function S.ScheduleNext()
@@ -232,10 +277,26 @@ function S.ScheduleNext()
         S.NextRequestAt = GetTime() + 1.1
 
         local sorts = {}
-        local ok = pcall(A.SendSearchQuery, itemKey, sorts, false)
+        local api = GetAHAPI()
+        local ok = false
+        if api and type(api.SendSearchQuery) == "function" then
+            ok = pcall(api.SendSearchQuery, itemKey, sorts, false)
+        end
         if not ok then
             MarketSync.Debug("SendSearchQuery failed for " .. tostring(itemKey.itemID))
+            S.Pending = nil
             S.ScheduleNext()
+        else
+            -- Watchdog: advance queue if server drops event or throttles longer than 6 seconds
+            local currentPending = itemKey
+            local currentGen = S.Generation
+            C_Timer.After(6, function()
+                if S.Active and S.Generation == currentGen and S.Pending == currentPending then
+                    MarketSync.Debug("Search timeout for item " .. tostring(currentPending.itemID) .. "; advancing queue")
+                    S.Pending = nil
+                    S.ScheduleNext()
+                end
+            end)
         end
         S.Notify()
     end)
@@ -245,6 +306,7 @@ function S.StartScan(itemsOrKeys, label)
     if not S.IsAvailable() then
         S.Status = "Auctioneer must be open to scan"
         S.Notify()
+        print("|cFFFF4444[MarketSync]|r Auctioneer must be open to scan.")
         return false
     end
 
@@ -282,7 +344,13 @@ function S.ScanList(listName)
     local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(listName) or {}
     local ids = {}
     for _, item in ipairs(items) do
-        table.insert(ids, item.itemID)
+        if item.itemID then table.insert(ids, item.itemID) end
+    end
+    if #ids == 0 then
+        S.Status = "No items in list '" .. listName .. "'"
+        S.Notify()
+        print(string.format("|cFFFF4444[MarketSync]|r List '%s' has no items to scan. Drag an item or type its name to add items.", listName))
+        return false
     end
     return S.StartScan(ids, "Scanning " .. listName .. " (" .. #ids .. " items)...")
 end
@@ -295,7 +363,16 @@ function S.ScanWatched()
         end
     end
     if #ids == 0 and MarketSync.Favorites then
-        return S.ScanList("Favorites")
+        local items = MarketSync.Favorites.GetListItems("Favorites") or {}
+        for _, it in ipairs(items) do
+            if it.itemID then table.insert(ids, it.itemID) end
+        end
+    end
+    if #ids == 0 then
+        S.Status = "No watched or favorite items to scan"
+        S.Notify()
+        print("|cFFFF4444[MarketSync]|r No watched items or favorites to scan. Add items to Favorites first.")
+        return false
     end
     return S.StartScan(ids, "Scanning Watched Items (" .. #ids .. " items)...")
 end
@@ -325,6 +402,7 @@ function S.ScanMultipleLists(listNames)
     if #ids == 0 then
         S.Status = "No items in selected lists"
         S.Notify()
+        print("|cFFFF4444[MarketSync]|r Selected lists contain no items to scan. Drag or type items into lists first.")
         return false
     end
     local title = string.format("Scanning %d Lists (%d items)...", #listNames, #ids)
@@ -335,6 +413,7 @@ function S.StartFullScan()
     if not S.IsAvailable() then
         S.Status = "Auctioneer must be open to scan"
         S.Notify()
+        print("|cFFFF4444[MarketSync]|r Auctioneer must be open to scan.")
         return false
     end
 
@@ -344,12 +423,15 @@ function S.StartFullScan()
         local secs = cd % 60
         S.Status = string.format("Full scan on cooldown (%dm %02ds remaining)", mins, secs)
         S.Notify()
+        print(string.format("|cFFFF4444[MarketSync]|r Full AH scan on cooldown (%dm %02ds remaining).", mins, secs))
         return false
     end
 
-    if not A or type(A.ReplicateItems) ~= "function" then
+    local replFunc, getNumFunc, getInfoFunc = GetReplicateFuncs()
+    if not replFunc then
         S.Status = "Full scan (ReplicateItems) not supported on this client"
         S.Notify()
+        print("|cFFFF4444[MarketSync]|r Full AH scan (ReplicateItems) not supported on this client. Use Scan Watched or Scan Lists instead.")
         return false
     end
 
@@ -363,11 +445,12 @@ function S.StartFullScan()
     S.Status = "Requesting full AH snapshot from server..."
     S.Notify()
 
-    local ok = pcall(A.ReplicateItems)
+    local ok = pcall(replFunc)
     if not ok then
         S.Active = false
         S.Status = "ReplicateItems request failed"
         S.Notify()
+        print("|cFFFF4444[MarketSync]|r ReplicateItems request failed.")
         return false
     end
 
@@ -379,7 +462,10 @@ end
 -- ================================================================
 local eventFrame = CreateFrame("Frame")
 pcall(eventFrame.RegisterEvent, eventFrame, "ITEM_SEARCH_RESULTS_UPDATED")
+pcall(eventFrame.RegisterEvent, eventFrame, "ITEM_SEARCH_RESULTS_ADDED")
 pcall(eventFrame.RegisterEvent, eventFrame, "COMMODITY_SEARCH_RESULTS_UPDATED")
+pcall(eventFrame.RegisterEvent, eventFrame, "COMMODITY_SEARCH_RESULTS_ADDED")
+pcall(eventFrame.RegisterEvent, eventFrame, "AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 pcall(eventFrame.RegisterEvent, eventFrame, "REPLICATE_ITEM_LIST_UPDATE")
 pcall(eventFrame.RegisterEvent, eventFrame, "AUCTION_HOUSE_CLOSED")
 
@@ -392,8 +478,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     end
 
     if event == "REPLICATE_ITEM_LIST_UPDATE" then
-        if not S.Active or not A or type(A.GetNumReplicateItems) ~= "function" then return end
-        local totalItems = A.GetNumReplicateItems() or 0
+        local replFunc, getNumFunc, getInfoFunc = GetReplicateFuncs()
+        if not S.Active or not getNumFunc or not getInfoFunc then return end
+        local totalItems = getNumFunc() or 0
         if totalItems == 0 then
             S.Status = "Replicate returned 0 items"
             S.Active = false
@@ -419,7 +506,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
             local stopIndex = math.min(totalItems, currentIndex + SLICE_SIZE)
             for idx = currentIndex + 1, stopIndex do
-                local name, texture, count, qualityID, canUse, level, levelColHeader, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, bidderFullName, owner, ownerFullName, saleStatus, itemID = A.GetReplicateItemInfo(idx - 1)
+                local name, texture, count, qualityID, canUse, level, levelColHeader, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, bidderFullName, owner, ownerFullName, saleStatus, itemID = getInfoFunc(idx - 1)
                 if not itemID and type(name) == "table" and name.itemID then
                     local info = name
                     itemID = info.itemID
@@ -477,17 +564,30 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
-    if not S.Active or not S.Pending then return end
+    if event == "ITEM_SEARCH_RESULTS_UPDATED"
+        or event == "ITEM_SEARCH_RESULTS_ADDED"
+        or event == "COMMODITY_SEARCH_RESULTS_UPDATED"
+        or event == "COMMODITY_SEARCH_RESULTS_ADDED" then
 
-    local isCommodity = (event == "COMMODITY_SEARCH_RESULTS_UPDATED")
-    local updatedItemID = arg1
+        if not S.Active or not S.Pending then return end
 
-    if updatedItemID and S.Pending.itemID and updatedItemID == S.Pending.itemID then
-        local minPrice, available = SummarizeSearchResults(S.Pending, isCommodity)
-        if minPrice and minPrice > 0 then
-            RecordScanObservation(S.Pending, minPrice, available, isCommodity, false)
+        local isCommodity = (event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_ADDED")
+        local updatedItemID = nil
+        if type(arg1) == "table" and arg1.itemID then
+            updatedItemID = tonumber(arg1.itemID)
+        elseif type(arg1) == "number" or type(arg1) == "string" then
+            updatedItemID = tonumber(arg1)
         end
-        S.Pending = nil
-        S.ScheduleNext()
+
+        -- If updated item matches our pending item (or arg1 is omitted), process and advance queue
+        if not updatedItemID or (S.Pending.itemID and updatedItemID == S.Pending.itemID) then
+            local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(S.Pending, isCommodity)
+            if minPrice and minPrice > 0 then
+                RecordScanObservation(S.Pending, minPrice, available, resolvedCommodity, false)
+            end
+            S.Pending = nil
+            S.ScheduleNext()
+        end
+        return
     end
 end)

@@ -83,6 +83,19 @@ local function ExtractItemID(itemOrLink)
     if type(itemOrLink) == "string" then
         local idStr = itemOrLink:match("item:(%d+)") or itemOrLink:match("^(%d+)$")
         if idStr then return tonumber(idStr) end
+
+        -- Fallback: resolve item name
+        local cleanName = itemOrLink:match("%[(.-)%]") or itemOrLink
+        cleanName = cleanName:match("^%s*(.-)%s*$")
+        if cleanName and cleanName ~= "" then
+            if C_Item and C_Item.GetItemInfoInstant then
+                local ok, id = pcall(C_Item.GetItemInfoInstant, cleanName)
+                if ok and tonumber(id) then return tonumber(id) end
+            elseif GetItemInfoInstant then
+                local ok, id = pcall(GetItemInfoInstant, cleanName)
+                if ok and tonumber(id) then return tonumber(id) end
+            end
+        end
     end
     if type(itemOrLink) == "table" and itemOrLink.itemID then
         return tonumber(itemOrLink.itemID)

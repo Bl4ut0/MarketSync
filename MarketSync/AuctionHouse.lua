@@ -114,6 +114,7 @@ function AH.Attach()
     end)
 
     frame:HookScript("OnShow", function()
+        MarketSync.IsAuctionHouseOpen = true
         if MarketSync.AHSidecar and MarketSync.AHSidecar.SetExpanded then
             local expanded = (MarketSyncDB and MarketSyncDB.AHSidecarExpanded ~= nil) and MarketSyncDB.AHSidecarExpanded or true
             MarketSync.AHSidecar.SetExpanded(expanded)

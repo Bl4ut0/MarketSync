@@ -460,10 +460,27 @@ function MarketSync.CreateAHSidecar(parent)
             if MarketSync.Scanner.Active then
                 MarketSync.Scanner.Cancel("User stopped scan")
             else
+                local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(currentListName) or {}
+                if #items == 0 then
+                    print(string.format("|cFFFF4444[MarketSync]|r List '%s' has no items to scan. Drag an item or type its name to add items.", currentListName))
+                    return
+                end
                 MarketSync.Scanner.ScanList(currentListName)
             end
         end
     end)
+
+    -- Unified Drag & Drop Handler for Item Adding
+    local function HandleSidecarItemDrop()
+        local infoType, itemID, itemLink = GetCursorInfo()
+        if infoType == "item" and MarketSync.Favorites then
+            MarketSync.Favorites.AddToList(currentListName, itemID or itemLink)
+            ClearCursor()
+            if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
+            return true
+        end
+        return false
+    end
 
     -- Quick Add Bar (EditBox + Drag & Drop Target)
     local addBox = CreateFrame("EditBox", nil, listsContainer, "InputBoxTemplate")
@@ -492,12 +509,10 @@ function MarketSync.CreateAHSidecar(parent)
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         end
     end)
-    addBox:SetScript("OnReceiveDrag", function(self)
-        local infoType, itemID, itemLink = GetCursorInfo()
-        if infoType == "item" and MarketSync.Favorites then
-            MarketSync.Favorites.AddToList(currentListName, itemID or itemLink)
-            ClearCursor()
-            if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
+    addBox:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
+    addBox:SetScript("OnMouseUp", function(self, button)
+        if HandleSidecarItemDrop() then
+            self:ClearFocus()
         end
     end)
 
@@ -513,15 +528,30 @@ function MarketSync.CreateAHSidecar(parent)
     })
     listInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
     listInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+    listInset:EnableMouse(true)
+    listInset:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
+    listInset:SetScript("OnMouseUp", function(self, button)
+        HandleSidecarItemDrop()
+    end)
 
     -- Scrollable List Items Table
     local listScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarListScroll", listInset, "UIPanelScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", 2, -3)
     listScroll:SetPoint("BOTTOMRIGHT", -22, 3)
+    listScroll:EnableMouse(true)
+    listScroll:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
+    listScroll:SetScript("OnMouseUp", function(self, button)
+        HandleSidecarItemDrop()
+    end)
 
     local listScrollContent = CreateFrame("Frame", nil, listScroll)
     listScrollContent:SetSize(280, 1)
     listScroll:SetScrollChild(listScrollContent)
+    listScrollContent:EnableMouse(true)
+    listScrollContent:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
+    listScrollContent:SetScript("OnMouseUp", function(self, button)
+        HandleSidecarItemDrop()
+    end)
 
     local listEmptyText = listInset:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     listEmptyText:SetPoint("CENTER", 0, 20)

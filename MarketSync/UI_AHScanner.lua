@@ -152,14 +152,46 @@ function MarketSync.CreateAHScannerPanel(parent)
     activeListLabel:SetJustifyH("LEFT")
     activeListLabel:SetText("List Items: |cFFFFD100Favorites|r")
 
+    -- State
+    local selectedListName = "Favorites"
+    local checkedLists = { ["Favorites"] = true }
+    local checklistRows = {}
+    local itemRows = {}
+
+    local RefreshListsView
+    local RefreshActiveItemsView
+
+    -- Unified Drag & Drop Handler for Shopping List Items
+    local function HandleScannerItemDrop()
+        local infoType, itemID, itemLink = GetCursorInfo()
+        if infoType == "item" and MarketSync.Favorites then
+            MarketSync.Favorites.AddToList(selectedListName, itemID or itemLink)
+            ClearCursor()
+            RefreshActiveItemsView()
+            RefreshListsView()
+            return true
+        end
+        return false
+    end
+
     -- Active List Items ScrollFrame
     local itemsScroll = CreateFrame("ScrollFrame", "MarketSyncScanItemsScroll", leftInset, "UIPanelScrollFrameTemplate")
     itemsScroll:SetPoint("TOPLEFT", activeListLabel, "BOTTOMLEFT", 0, -4)
     itemsScroll:SetPoint("BOTTOMRIGHT", -22, 34)
+    itemsScroll:EnableMouse(true)
+    itemsScroll:SetScript("OnReceiveDrag", HandleScannerItemDrop)
+    itemsScroll:SetScript("OnMouseUp", function(self, button)
+        HandleScannerItemDrop()
+    end)
 
     local itemsScrollContent = CreateFrame("Frame", nil, itemsScroll)
     itemsScrollContent:SetSize(232, 1)
     itemsScroll:SetScrollChild(itemsScrollContent)
+    itemsScrollContent:EnableMouse(true)
+    itemsScrollContent:SetScript("OnReceiveDrag", HandleScannerItemDrop)
+    itemsScrollContent:SetScript("OnMouseUp", function(self, button)
+        HandleScannerItemDrop()
+    end)
 
     local itemsEmptyText = itemsScroll:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     itemsEmptyText:SetPoint("CENTER", 0, 0)
@@ -181,15 +213,6 @@ function MarketSync.CreateAHScannerPanel(parent)
         if self:GetText() == "" then self:SetText("Drop item or enter ID...") end
     end)
 
-    -- State
-    local selectedListName = "Favorites"
-    local checkedLists = { ["Favorites"] = true }
-    local checklistRows = {}
-    local itemRows = {}
-
-    local RefreshListsView
-    local RefreshActiveItemsView
-
     addBox:SetScript("OnEnterPressed", function(self)
         local text = self:GetText()
         if text and text ~= "" and text ~= "Drop item or enter ID..." and MarketSync.Favorites then
@@ -201,13 +224,10 @@ function MarketSync.CreateAHScannerPanel(parent)
         end
     end)
 
-    addBox:SetScript("OnReceiveDrag", function(self)
-        local infoType, itemID, itemLink = GetCursorInfo()
-        if infoType == "item" and MarketSync.Favorites then
-            MarketSync.Favorites.AddToList(selectedListName, itemID or itemLink)
-            ClearCursor()
-            RefreshActiveItemsView()
-            RefreshListsView()
+    addBox:SetScript("OnReceiveDrag", HandleScannerItemDrop)
+    addBox:SetScript("OnMouseUp", function(self, button)
+        if HandleScannerItemDrop() then
+            self:ClearFocus()
         end
     end)
 
