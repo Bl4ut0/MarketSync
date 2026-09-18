@@ -253,26 +253,12 @@ local function SetControlVisible(control, visible)
 end
 
 local function CreateBox(parent, x, y, width, height)
+    if MarketSync and MarketSync.CreateModernInset then
+        return MarketSync.CreateModernInset(parent, x, y, width, height)
+    end
     local box = CreateFrame("Frame", nil, parent)
     box:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     box:SetSize(width, height)
-
-    local bg = box:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, 0.35)
-
-    local function BorderPoint(anchorPoint, relPoint, ox, oy, w, h)
-        local t = box:CreateTexture(nil, "BACKGROUND", nil, 2)
-        t:SetColorTexture(1, 0.84, 0, 0.25)
-        t:SetPoint(anchorPoint, box, relPoint, ox, oy)
-        t:SetSize(w, h)
-    end
-
-    BorderPoint("TOPLEFT", "TOPLEFT", 0, 0, width, 1)
-    BorderPoint("BOTTOMLEFT", "BOTTOMLEFT", 0, 0, width, 1)
-    BorderPoint("TOPLEFT", "TOPLEFT", 0, 0, 1, height)
-    BorderPoint("TOPRIGHT", "TOPRIGHT", 0, 0, 1, height)
-
     return box
 end
 
@@ -296,9 +282,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local leftTopBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, LEFT_TOP_H)
     local leftBottomBox = CreateBox(panel, LEFT_X, TOP_Y - LEFT_TOP_H - BOX_GAP, LEFT_W, LEFT_BOTTOM_H)
-    local rightBox = CreateFrame("Frame", nil, panel)
-    rightBox:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X - 2, -81)
-    rightBox:SetSize(ROW_WIDTH + 4, 324)
+    local rightBox = CreateBox(panel, RESULTS_X - 2, -75, ROW_WIDTH + 4, 335)
 
     local leftTopTitle = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     leftTopTitle:SetPoint("TOPLEFT", 8, -8)
@@ -341,8 +325,7 @@ function MarketSync.CreateProcessingPanel(parent)
         btn:SetPoint("TOPLEFT", 8, yOffset)
 
         local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-FilterBg")
-        bg:SetTexCoord(0, 0.53125, 0, 0.625)
+        bg:SetColorTexture(1, 1, 1, 0.02)
         bg:SetAllPoints()
 
         local hl = btn:CreateTexture(nil, "HIGHLIGHT")
@@ -692,24 +675,17 @@ function MarketSync.CreateProcessingPanel(parent)
         iconBorder:SetSize(60, 60)
         iconBorder:SetPoint("CENTER")
 
-        local nameLeft = row:CreateTexture(nil, "BACKGROUND")
-        nameLeft:SetTexture("Interface\\AuctionFrame\\UI-AuctionItemNameFrame")
-        nameLeft:SetSize(10, 32)
-        nameLeft:SetPoint("LEFT", 34, 2)
-        nameLeft:SetTexCoord(0, 0.078125, 0, 1.0)
+        -- Modern clean row background replacing legacy parchment slices
+        local rowBg = row:CreateTexture(nil, "BACKGROUND")
+        rowBg:SetPoint("TOPLEFT", 34, 0)
+        rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
+        rowBg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.035 or 0.015)
+        row.rowBg = rowBg
 
-        local nameRight = row:CreateTexture(nil, "BACKGROUND")
-        nameRight:SetTexture("Interface\\AuctionFrame\\UI-AuctionItemNameFrame")
-        nameRight:SetSize(10, 32)
-        nameRight:SetPoint("LEFT", 617, 2)
-        nameRight:SetTexCoord(0.75, 0.828125, 0, 1.0)
-
-        local nameMid = row:CreateTexture(nil, "BACKGROUND")
-        nameMid:SetTexture("Interface\\AuctionFrame\\UI-AuctionItemNameFrame")
-        nameMid:SetPoint("LEFT", nameLeft, "RIGHT")
-        nameMid:SetPoint("RIGHT", nameRight, "LEFT")
-        nameMid:SetHeight(32)
-        nameMid:SetTexCoord(0.078125, 0.75, 0, 1.0)
+        local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
+        rowHl:SetPoint("TOPLEFT", 34, 0)
+        rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
+        rowHl:SetColorTexture(1, 0.84, 0, 0.12)
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         row.nameText:SetPoint("TOPLEFT", 43, -3)

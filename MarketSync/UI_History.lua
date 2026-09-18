@@ -295,32 +295,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     panel.scanPage = 0
     panel.sourceTab = "personal"  -- which browse tab opened this
 
-    -- ================================================================
-    -- BACKGROUND TEXTURES (Bid-tab parchment, same as Settings)
-    -- ================================================================
-    local btl = panel:CreateTexture(nil, "BACKGROUND")
-    btl:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-TopLeft")
-    btl:SetSize(256, 256); btl:SetPoint("TOPLEFT")
 
-    local btm = panel:CreateTexture(nil, "BACKGROUND")
-    btm:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-Top")
-    btm:SetSize(320, 256); btm:SetPoint("TOPLEFT", 256, 0)
-
-    local btr = panel:CreateTexture(nil, "BACKGROUND")
-    btr:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-TopRight")
-    btr:SetSize(256, 256); btr:SetPoint("TOPLEFT", btm, "TOPRIGHT")
-
-    local bbl = panel:CreateTexture(nil, "BACKGROUND")
-    bbl:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-BotLeft")
-    bbl:SetSize(256, 256); bbl:SetPoint("TOPLEFT", 0, -256)
-
-    local bbm = panel:CreateTexture(nil, "BACKGROUND")
-    bbm:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-Bot")
-    bbm:SetSize(320, 256); bbm:SetPoint("TOPLEFT", 256, -256)
-
-    local bbr = panel:CreateTexture(nil, "BACKGROUND")
-    bbr:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-BotRight")
-    bbr:SetSize(256, 256); bbr:SetPoint("TOPLEFT", bbm, "TOPRIGHT")
 
     -- ================================================================
     -- HEADER ROW: Item info (buttons moved to bottom slots)

@@ -952,14 +952,20 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         panel:RunSearch()
     end)
 
-    -- --- CATEGORY SIDEBAR ---
-    local SIDEBAR_WIDTH = 155
-    local SIDEBAR_HEIGHT = 305
+    -- --- CATEGORY SIDEBAR & RESULTS INSETS ---
+    local SIDEBAR_WIDTH = 156
+    local SIDEBAR_HEIGHT = 335
+    local categoryInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 20, -75, SIDEBAR_WIDTH, SIDEBAR_HEIGHT)
+    panel.categoryInset = categoryInset
+
+    local tableInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 182, -75, 630, 335)
+    panel.tableInset = tableInset
+
     -- Creating raw ScrollFrame WITHOUT UIPanelScrollFrameTemplate removes all visual scrollbar elements completely
     local filterScroll = CreateFrame("ScrollFrame", nil, panel)
-    filterScroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 23, -105)
-    filterScroll:SetSize(SIDEBAR_WIDTH, SIDEBAR_HEIGHT)
-    local filterChild = CreateFrame("Frame"); filterChild:SetSize(SIDEBAR_WIDTH, 800); filterScroll:SetScrollChild(filterChild)
+    filterScroll:SetPoint("TOPLEFT", categoryInset or panel, "TOPLEFT", 3, -4)
+    filterScroll:SetSize(SIDEBAR_WIDTH - 6, SIDEBAR_HEIGHT - 8)
+    local filterChild = CreateFrame("Frame"); filterChild:SetSize(SIDEBAR_WIDTH - 6, 800); filterScroll:SetScrollChild(filterChild)
     filterScroll:EnableMouseWheel(true)
     filterScroll:SetScript("OnMouseWheel", function(self, delta)
         local step = FILTER_HEIGHT * 3
@@ -976,14 +982,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.activeSubCategory = nil
 
     local function MakeFilterButton(parentFrame, labelText, indent, yOff, btnWidth)
-        local w = btnWidth or SIDEBAR_WIDTH
+        local w = btnWidth or (SIDEBAR_WIDTH - 6)
         local btn = CreateFrame("Button", nil, parentFrame)
         btn:SetSize(w, FILTER_HEIGHT)
         btn:SetPoint("TOPLEFT", 0, -yOff)
 
         local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-FilterBg")
-        bg:SetTexCoord(0, 0.53125, 0, 0.625)
+        bg:SetColorTexture(1, 1, 1, 0.02)
         bg:SetAllPoints()
 
         local text = btn:CreateFontString(nil, "ARTWORK", indent > 0 and "GameFontHighlightSmallLeft" or "GameFontNormalSmallLeft")
@@ -1003,7 +1008,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         for _, b in ipairs(self.filterButtons) do b:Hide() end
         wipe(self.filterButtons)
 
-        local btnWidth = SIDEBAR_WIDTH
+        local btnWidth = SIDEBAR_WIDTH - 6
         local y = 0
         for _, cat in ipairs(CATEGORIES) do
             local btn = MakeFilterButton(self.filterChild, cat.name, 0, y, btnWidth)
@@ -1302,25 +1307,17 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         countText:SetJustifyH("RIGHT")
         row.countText = countText
 
-        -- Item Name Frame (9-slice background)
-        local nameLeft = row:CreateTexture(nil, "BACKGROUND")
-        nameLeft:SetTexture("Interface\\AuctionFrame\\UI-AuctionItemNameFrame")
-        nameLeft:SetSize(10, 32)
-        nameLeft:SetPoint("LEFT", 34, 2)
-        nameLeft:SetTexCoord(0, 0.078125, 0, 1.0)
+        -- Modern clean row background replacing legacy parchment slices
+        local rowBg = row:CreateTexture(nil, "BACKGROUND")
+        rowBg:SetPoint("TOPLEFT", 34, 0)
+        rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
+        rowBg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.035 or 0.015)
+        row.rowBg = rowBg
 
-        local nameRight = row:CreateTexture(nil, "BACKGROUND")
-        nameRight:SetTexture("Interface\\AuctionFrame\\UI-AuctionItemNameFrame")
-        nameRight:SetSize(10, 32)
-        nameRight:SetPoint("LEFT", 617, 2)
-        nameRight:SetTexCoord(0.75, 0.828125, 0, 1.0)
-
-        local nameMid = row:CreateTexture(nil, "BACKGROUND")
-        nameMid:SetTexture("Interface\\AuctionFrame\\UI-AuctionItemNameFrame")
-        nameMid:SetPoint("LEFT", nameLeft, "RIGHT")
-        nameMid:SetPoint("RIGHT", nameRight, "LEFT")
-        nameMid:SetHeight(32)
-        nameMid:SetTexCoord(0.078125, 0.75, 0, 1.0)
+        local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
+        rowHl:SetPoint("TOPLEFT", 34, 0)
+        rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
+        rowHl:SetColorTexture(1, 0.84, 0, 0.12)
 
         -- Name text
         local nameText = row:CreateFontString(nil, "BACKGROUND", "GameFontNormal")

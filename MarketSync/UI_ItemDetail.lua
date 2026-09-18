@@ -181,20 +181,6 @@ function MarketSync.CreateItemDetailPanel(parent)
     panel:SetAllPoints(parent)
     panel:Hide()
 
-    -- Background
-    for i = 1, 6 do
-        local tex = panel:CreateTexture(nil, "BACKGROUND")
-        local names = {"Bid-TopLeft", "Bid-Top", "Bid-TopRight", "Bid-BotLeft", "Bid-Bot", "Bid-BotRight"}
-        tex:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-" .. names[i])
-        if i <= 3 then
-            tex:SetSize(i == 2 and 320 or 256, 256)
-            tex:SetPoint("TOPLEFT", (i-1)*256 + (i>2 and 64 or 0), 0)
-        else
-            tex:SetSize((i-3) == 2 and 320 or 256, 256)
-            tex:SetPoint("TOPLEFT", (i-4)*256 + ((i-3)>2 and 64 or 0), -256)
-        end
-    end
-
     -- Header
     local icon = panel:CreateTexture(nil, "ARTWORK")
     icon:SetSize(48, 48); icon:SetPoint("TOPLEFT", 30, -25)
@@ -215,17 +201,21 @@ function MarketSync.CreateItemDetailPanel(parent)
 
     -- Info Boxes
     local function CreateBox(x, y, w, h, title)
-        local f = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-        f:SetSize(w, h); f:SetPoint("TOPLEFT", x, y)
-        f:SetBackdrop({
-            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 }
-        })
-        f:SetBackdropColor(0, 0, 0, 0.45)
+        local f = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, x, y, w, h)
+        if not f then
+            f = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+            f:SetSize(w, h); f:SetPoint("TOPLEFT", x, y)
+            f:SetBackdrop({
+                bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 }
+            })
+            f:SetBackdropColor(0, 0, 0, 0.45)
+        end
         local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         t:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 5, 2)
+        t:SetTextColor(1, 0.82, 0)
         t:SetText(title)
         return f
     end

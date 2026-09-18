@@ -107,26 +107,12 @@ local function FormatRelativeTime(epochTime, fallbackDays)
 end
 
 local function CreateBox(parent, x, y, width, height)
+    if MarketSync and MarketSync.CreateModernInset then
+        return MarketSync.CreateModernInset(parent, x, y, width, height)
+    end
     local box = CreateFrame("Frame", nil, parent)
     box:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     box:SetSize(width, height)
-
-    local bg = box:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.04, 0.04, 0.04, 0.55)
-
-    local function BorderLine(anchorPoint, relPoint, ox, oy, w, h)
-        local t = box:CreateTexture(nil, "BACKGROUND", nil, 2)
-        t:SetColorTexture(1, 0.84, 0, 0.28)
-        t:SetPoint(anchorPoint, box, relPoint, ox, oy)
-        t:SetSize(w, h)
-    end
-
-    BorderLine("TOPLEFT", "TOPLEFT", 0, 0, width, 1)
-    BorderLine("BOTTOMLEFT", "BOTTOMLEFT", 0, 0, width, 1)
-    BorderLine("TOPLEFT", "TOPLEFT", 0, 0, 1, height)
-    BorderLine("TOPRIGHT", "TOPRIGHT", 0, 0, 1, height)
-
     return box
 end
 

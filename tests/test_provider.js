@@ -1,7 +1,11 @@
 // Automated test suite for MarketSync Provider abstraction and Auctionator decoupling
 const fs = require('fs');
 const path = require('path');
-const deps = path.resolve(__dirname, '../../ItemRack-Forever/node_modules');
+const candidateDeps = [
+  path.resolve(__dirname, '../../ItemRack-Forever/node_modules'),
+  'C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/ItemRack-Forever/node_modules'
+];
+const deps = candidateDeps.find(p => fs.existsSync(p)) || candidateDeps[0];
 const luaparse = require(path.join(deps, 'luaparse'));
 const { lua, lauxlib, lualib, to_luastring } = require(path.join(deps, 'fengari'));
 

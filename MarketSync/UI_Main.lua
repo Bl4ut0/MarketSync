@@ -8,13 +8,47 @@ local ItemHistoryPanel, AnalyticsPanel, ItemDetailPanel
 local activeBrowseTab = 1
 
 -- ================================================================
+-- HELPER: CreateModernInset
+-- Blizzard Dragonflight / Classic Beta NineSlice marble panel
+-- ================================================================
+function MarketSync.CreateModernInset(parent, x, y, width, height)
+    local inset
+    local ok, res = pcall(CreateFrame, "Frame", nil, parent, "InsetFrameTemplate")
+    if ok and res then
+        inset = res
+    else
+        inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        inset:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = false, tileSize = 0, edgeSize = 12,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        inset:SetBackdropColor(0.06, 0.07, 0.09, 0.90)
+        inset:SetBackdropBorderColor(0.4, 0.35, 0.2, 0.8)
+    end
+    if x and y then
+        inset:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    end
+    if width and height then
+        inset:SetSize(width, height)
+    end
+    return inset
+end
+
+-- ================================================================
 -- MAIN FRAME CONSTRUCTION
 -- ================================================================
 local function CreateMainFrame()
     if MainFrame then return MainFrame end
 
-    -- --- MAIN WINDOW (832 x 447, same as AuctionFrame) ---
-    MainFrame = CreateFrame("Frame", "MarketSyncMainFrame", UIParent)
+    -- --- MAIN WINDOW (832 x 447, PortraitFrameTemplate) ---
+    local ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent, "PortraitFrameTemplate")
+    if ok and res then
+        MainFrame = res
+    else
+        MainFrame = CreateFrame("Frame", "MarketSyncMainFrame", UIParent)
+    end
     MainFrame:SetSize(832, 447)
     MainFrame:SetPoint("CENTER")
     MainFrame:SetMovable(true)
@@ -26,66 +60,30 @@ local function CreateMainFrame()
     MainFrame:SetToplevel(true)
     tinsert(UISpecialFrames, "MarketSyncMainFrame")
 
-    -- --- BACKGROUND TEXTURES (AH Style Parchment) ---
-    -- --- BACKGROUND TEXTURES (AH Style Parchment) ---
-    local tl = MainFrame:CreateTexture(nil, "ARTWORK")
-    tl:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-TopLeft")
-    tl:SetSize(256, 256)
-    tl:SetPoint("TOPLEFT")
-
-    local tm = MainFrame:CreateTexture(nil, "ARTWORK")
-    tm:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-Top")
-    tm:SetSize(320, 256)
-    tm:SetPoint("TOPLEFT", 256, 0)
-
-    local tr = MainFrame:CreateTexture(nil, "ARTWORK")
-    tr:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-TopRight")
-    tr:SetSize(256, 256)
-    tr:SetPoint("TOPLEFT", tm, "TOPRIGHT", 0, 0)
-
-    local bl = MainFrame:CreateTexture(nil, "ARTWORK")
-    bl:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-BotLeft")
-    bl:SetSize(256, 191)
-    bl:SetPoint("TOPLEFT", 0, -256)
-    bl:SetTexCoord(0, 1, 0, 191/256)
-
-    local bm = MainFrame:CreateTexture(nil, "OVERLAY")
-    bm:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-Bot")
-    bm:SetSize(320, 191)
-    bm:SetPoint("TOPLEFT", 256, -256)
-    bm:SetTexCoord(0, 1, 0, 191/256)
-
-    local br = MainFrame:CreateTexture(nil, "ARTWORK")
-    br:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-BotRight")
-    br:SetSize(256, 191)
-    br:SetPoint("TOPLEFT", bm, "TOPRIGHT", 0, 0)
-    br:SetTexCoord(0, 1, 0, 191/256)
-
-    -- Cover up the money input slots on the right with more clean gold bar texture
-    local brCover = MainFrame:CreateTexture(nil, "OVERLAY")
-    brCover:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-Bot")
-    brCover:SetSize(260, 191)
-    brCover:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -5, -256)
-    brCover:SetTexCoord(0, 0.75, 0, 191/256)
-
     -- --- PORTRAIT ---
-    -- --- PORTRAIT (2D Character Face) ---
-    local portrait = MainFrame:CreateTexture(nil, "BACKGROUND")
-    portrait:SetSize(60, 60)
-    portrait:SetPoint("TOPLEFT", 6, -6)
-    
-    local function UpdatePortrait()
-        SetPortraitTexture(portrait, "player")
+    local portrait = MainFrame.GetPortrait and MainFrame:GetPortrait()
+        or (MainFrame.PortraitContainer and MainFrame.PortraitContainer.portrait)
+        or _G["MarketSyncMainFramePortrait"]
+    if not portrait then
+        portrait = MainFrame:CreateTexture(nil, "BACKGROUND")
+        portrait:SetSize(60, 60)
+        portrait:SetPoint("TOPLEFT", 6, -6)
+        local mask = MainFrame:CreateMaskTexture()
+        mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mask:SetSize(58, 58)
+        mask:SetPoint("TOPLEFT", 8, -7)
+        portrait:AddMaskTexture(mask)
     end
-    
-    -- Mask to circle
-    local mask = MainFrame:CreateMaskTexture()
-    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    mask:SetSize(58, 58)
-    mask:SetPoint("TOPLEFT", 8, -7)
-    portrait:AddMaskTexture(mask)
+    MainFrame.portrait = portrait
 
-    -- Event handling to update portrait if player appearance changes (e.g. barbshop, gear)
+    local function UpdatePortrait()
+        if MainFrame.SetPortraitToUnit then
+            MainFrame:SetPortraitToUnit("player")
+        elseif portrait then
+            SetPortraitTexture(portrait, "player")
+        end
+    end
+
     local portraitFrame = CreateFrame("Frame", nil, MainFrame)
     portraitFrame:RegisterEvent("UNIT_PORTRAIT_UPDATE")
     portraitFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -96,24 +94,33 @@ local function CreateMainFrame()
             UpdatePortrait()
         end
     end)
-    MainFrame:SetScript("OnShow", function() UpdatePortrait() end)
-    
+    MainFrame:HookScript("OnShow", function() UpdatePortrait() end)
     UpdatePortrait()
 
-
     -- --- CLOSE BUTTON ---
-    local closeBtn = CreateFrame("Button", nil, MainFrame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", 3, -8)
+    local closeBtn = MainFrame.CloseButton or _G["MarketSyncMainFrameCloseButton"]
+    if not closeBtn then
+        closeBtn = CreateFrame("Button", nil, MainFrame, "UIPanelCloseButton")
+        closeBtn:SetPoint("TOPRIGHT", -4, -4)
+    end
+    MainFrame.CloseBtn = closeBtn
 
     -- --- TITLE ---
-    local titleText = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    titleText:SetPoint("TOP", 0, -18)
-    titleText:SetTextColor(1, 0.82, 0) -- Restore exact WoW standard yellow title
+    local titleText = MainFrame.GetTitleText and MainFrame:GetTitleText()
+        or (MainFrame.TitleContainer and MainFrame.TitleContainer.TitleText)
+        or _G["MarketSyncMainFrameTitleText"]
+    if not titleText then
+        titleText = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        titleText:SetPoint("TOP", 0, -18)
+    end
+    titleText:SetTextColor(1, 0.82, 0)
     titleText:SetText(MarketSync.ADDON_NAME or "MarketSync")
+    MainFrame.titleText = titleText
+
     -- Low RAM Mode: 5-minute idle GC
     local lowRamIdleTicker = nil
 
-    MainFrame:SetScript("OnHide", function()
+    MainFrame:HookScript("OnHide", function()
         if MarketSyncDB and MarketSyncDB.LowRamMode then
             if not lowRamIdleTicker then
                 lowRamIdleTicker = C_Timer.NewTicker(300, function()
@@ -127,17 +134,16 @@ local function CreateMainFrame()
             end
         end
     end)
-    MainFrame:SetScript("OnShow", function()
+    MainFrame:HookScript("OnShow", function()
         if lowRamIdleTicker then
             lowRamIdleTicker:Cancel()
             lowRamIdleTicker = nil
         end
     end)
-    MainFrame.titleText = titleText
-    
+
     local titleHitBox = CreateFrame("Button", nil, MainFrame)
-    titleHitBox:SetPoint("CENTER", titleText, "CENTER")
-    titleHitBox:SetHeight(20)
+    titleHitBox:SetPoint("CENTER", MainFrame.TitleContainer or titleText, "CENTER")
+    titleHitBox:SetHeight(22)
     titleHitBox:SetWidth(300) -- Will be updated dynamically
     titleHitBox:SetScript("OnEnter", function(self)
         if self.tooltipText then
@@ -151,10 +157,10 @@ local function CreateMainFrame()
         GameTooltip:Hide()
     end)
     MainFrame.titleHitBox = titleHitBox
-    
+
     -- --- SYNC MONITOR ---
     local syncMonitor = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    syncMonitor:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -35, -20)
+    syncMonitor:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -36, -26)
     syncMonitor:SetJustifyH("RIGHT")
     syncMonitor:SetText("|cff888888Network: Idle|r")
     MainFrame.syncMonitor = syncMonitor
@@ -320,11 +326,11 @@ local function CreateMainFrame()
             tab:Hide()
         else
             if not lastVisibleTab then
-                -- First visible tab anchors to the frame
-                tab:SetPoint("TOPLEFT", MainFrame, "BOTTOMLEFT", 60, 12)
+                -- First visible tab anchors to the frame bottom (matching native Auction House)
+                tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 20, -30)
             else
                 -- Subsequent visible tabs anchor to the previous visible tab
-                tab:SetPoint("TOPLEFT", lastVisibleTab, "TOPRIGHT", -8, 0)
+                tab:SetPoint("LEFT", lastVisibleTab, "RIGHT", -15, 0)
             end
             lastVisibleTab = tab
         end
@@ -355,9 +361,9 @@ local function CreateMainFrame()
             else
                 tab:Show()
                 if not lastVisible then
-                    tab:SetPoint("TOPLEFT", MainFrame, "BOTTOMLEFT", 60, 12)
+                    tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 20, -30)
                 else
-                    tab:SetPoint("TOPLEFT", lastVisible, "TOPRIGHT", -8, 0)
+                    tab:SetPoint("LEFT", lastVisible, "RIGHT", -15, 0)
                 end
                 lastVisible = tab
             end
@@ -450,45 +456,9 @@ local function CreateMainFrame()
     SettingsContent:Hide()
     table.insert(contentFrames, SettingsContent)
 
-    local settingsTabTitle = SettingsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    settingsTabTitle:SetPoint("TOP", 0, -18)
-    settingsTabTitle:SetTextColor(1, 0.82, 0)
-    settingsTabTitle:SetText(string.format("%s (v%s) - Settings", MarketSync.ADDON_NAME or "MarketSync", MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0"))
-
-    -- Settings background (Bid tab parchment)
-    local stl = SettingsContent:CreateTexture(nil, "BACKGROUND")
-    stl:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-TopLeft")
-    stl:SetSize(256, 256); stl:SetPoint("TOPLEFT")
-    local stm = SettingsContent:CreateTexture(nil, "BACKGROUND")
-    stm:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-Top")
-    stm:SetSize(320, 256); stm:SetPoint("TOPLEFT", 256, 0)
-    local str = SettingsContent:CreateTexture(nil, "BACKGROUND")
-    str:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-TopRight")
-    str:SetSize(256, 256); str:SetPoint("TOPLEFT", stm, "TOPRIGHT")
-    local sbl = SettingsContent:CreateTexture(nil, "BACKGROUND")
-    sbl:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-BotLeft")
-    sbl:SetSize(256, 256); sbl:SetPoint("TOPLEFT", 0, -256)
-    local sbm = SettingsContent:CreateTexture(nil, "BACKGROUND")
-    sbm:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-Bot")
-    sbm:SetSize(320, 256); sbm:SetPoint("TOPLEFT", 256, -256)
-    local sbr = SettingsContent:CreateTexture(nil, "BACKGROUND")
-    sbr:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Bid-BotRight")
-    sbr:SetSize(256, 256); sbr:SetPoint("TOPLEFT", sbm, "TOPRIGHT")
-
     -- --- SETTINGS UI FRAMES ---
     local function CreateBox(parent, w, h, x, y)
-        local box = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-        box:SetSize(w, h)
-        box:SetPoint("TOPLEFT", x, y)
-        box:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 }
-        })
-        box:SetBackdropColor(0, 0, 0, 0.4)
-        box:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-        return box
+        return MarketSync.CreateModernInset(parent, x, y, w, h)
     end
 
     -- Column layout: four columns
@@ -557,6 +527,7 @@ local function CreateMainFrame()
     -- ================================================================
     local header1 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     header1:SetPoint("TOP", leftGlobalBox, "TOP", 0, 16) -- Perfectly centered above the box
+    header1:SetTextColor(1, 0.82, 0)
     header1:SetText("Global Settings")
 
     local chkLock = CreateCheckbox(leftGlobalBox, leftGlobalBox, "TOPLEFT",
@@ -643,6 +614,7 @@ local function CreateMainFrame()
     -- ================================================================
     local header2 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     header2:SetPoint("TOP", leftFeaturesBox, "TOP", 0, 16) -- Perfectly centered above the box
+    header2:SetTextColor(1, 0.82, 0)
     header2:SetText("Toggle Features")
 
     local chkGuild = CreateCheckbox(leftFeaturesBox, leftFeaturesBox, "TOPLEFT",
@@ -800,6 +772,7 @@ local function CreateMainFrame()
     -- ================================================================
     local header3 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     header3:SetPoint("TOP", middleMemoryBox, "TOP", 0, 16) -- Perfectly centered above the box
+    header3:SetTextColor(1, 0.82, 0)
     header3:SetText("Memory Saver")
 
     local chkLowRam = CreateCheckbox(middleMemoryBox, middleMemoryBox, "TOPLEFT",

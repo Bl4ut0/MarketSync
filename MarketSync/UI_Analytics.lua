@@ -197,19 +197,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     panel:Hide()
 
     -- Background textures
-    local textures = {
-        {"Bid-TopLeft", 256, 256, "TOPLEFT", 0, 0},
-        {"Bid-Top", 320, 256, "TOPLEFT", 256, 0},
-        {"Bid-TopRight", 256, 256, "TOPLEFT", 576, 0},
-        {"Bid-BotLeft", 256, 256, "TOPLEFT", 0, -256},
-        {"Bid-Bot", 320, 256, "TOPLEFT", 256, -256},
-        {"Bid-BotRight", 256, 256, "TOPLEFT", 576, -256},
-    }
-    for _, t in ipairs(textures) do
-        local tex = panel:CreateTexture(nil, "BACKGROUND")
-        tex:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-" .. t[1])
-        tex:SetSize(t[2], t[3]); tex:SetPoint(t[4], t[5], t[6])
-    end
+
 
     -- Header info
     local icon = panel:CreateTexture(nil, "ARTWORK")
