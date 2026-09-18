@@ -24,6 +24,30 @@ local MODE_OPTIONS = {
     { key = "craft", label = "Craft Profit" },
 }
 
+local function SafeGetItemInfo(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemInfo then
+        return MarketSync.GetItemInfo(item)
+    elseif C_Item and C_Item.GetItemInfo then
+        return C_Item.GetItemInfo(item)
+    elseif GetItemInfo then
+        return GetItemInfo(item)
+    end
+    return nil
+end
+
+local function SafeGetItemIcon(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemIcon then
+        return MarketSync.GetItemIcon(item)
+    elseif C_Item and C_Item.GetItemIconByID then
+        return C_Item.GetItemIconByID(item)
+    elseif GetItemIcon then
+        return GetItemIcon(item)
+    end
+    return nil
+end
+
 local function GetProcessOptions()
     if MarketSync.GetSupportedProcessingTypes then
         local supported = MarketSync.GetSupportedProcessingTypes(true)
@@ -96,7 +120,7 @@ local function ResolveItemIDFromQuery(query)
         return math.floor(numericID)
     end
 
-    local _, linkByName = GetItemInfo(raw)
+    local _, linkByName = SafeGetItemInfo(raw)
     if linkByName then
         local idFromLink = linkByName:match("item:(%d+)")
         if idFromLink then
@@ -204,9 +228,9 @@ local function ResolveItemVisual(itemID, fallbackName)
     local id = tonumber(itemID)
     local name, link, _, _, _, _, _, _, _, icon
     if id then
-        name, link, _, _, _, _, _, _, _, icon = GetItemInfo(id)
-        if not icon and GetItemIcon then
-            icon = GetItemIcon(id)
+        name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
+        if not icon then
+            icon = SafeGetItemIcon(id)
         end
     end
     name = name or fallbackName or ("Item " .. tostring(id or "?"))
@@ -1001,7 +1025,7 @@ function MarketSync.CreateProcessingPanel(parent)
             end
         end
 
-        local name = GetItemInfo(id)
+        local name = SafeGetItemInfo(id)
         return name or ("Item " .. tostring(id))
     end
 

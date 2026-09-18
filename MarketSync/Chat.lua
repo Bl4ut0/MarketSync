@@ -1899,10 +1899,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
                     -- Add Disenchanting Breakdown
                     if MarketSync.EstimateDisenchantEV then
-                        local _, _, quality, _, _, _, _, _, _, _, _, classID = GetItemInfo(link)
+                        local getItemInfo = MarketSync.GetItemInfo or (C_Item and C_Item.GetItemInfo) or GetItemInfo
+                        local getDetailedIlvl = MarketSync.GetDetailedItemLevelInfo or (C_Item and C_Item.GetDetailedItemLevelInfo) or GetDetailedItemLevelInfo
+                        local quality, classID
+                        if getItemInfo then
+                            local _
+                            _, _, quality, _, _, _, _, _, _, _, _, classID = getItemInfo(link)
+                        end
                         local ilvl = 0
-                        if GetDetailedItemLevelInfo then ilvl = GetDetailedItemLevelInfo(link) end
-                        if not ilvl or ilvl == 0 then ilvl = select(4, GetItemInfo(link)) or 0 end
+                        if getDetailedIlvl then ilvl = getDetailedIlvl(link) end
+                        if (not ilvl or ilvl == 0) and getItemInfo then ilvl = select(4, getItemInfo(link)) or 0 end
 
                         if quality and quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl > 0 then
                             local isWeapon = (classID == 2)

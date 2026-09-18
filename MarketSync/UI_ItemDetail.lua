@@ -32,6 +32,30 @@ local function FormatMoneyPlain(copper)
     return c .. "c"
 end
 
+local function SafeGetItemInfo(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemInfo then
+        return MarketSync.GetItemInfo(item)
+    elseif C_Item and C_Item.GetItemInfo then
+        return C_Item.GetItemInfo(item)
+    elseif GetItemInfo then
+        return GetItemInfo(item)
+    end
+    return nil
+end
+
+local function SafeGetItemIcon(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemIcon then
+        return MarketSync.GetItemIcon(item)
+    elseif C_Item and C_Item.GetItemIconByID then
+        return C_Item.GetItemIconByID(item)
+    elseif GetItemIcon then
+        return GetItemIcon(item)
+    end
+    return nil
+end
+
 local function ScanDayToDate(scanDay)
     if not Auctionator or not Auctionator.Constants or not Auctionator.Constants.SCAN_DAY_0 then
         return "Day " .. scanDay
@@ -328,7 +352,14 @@ function MarketSync.CreateItemDetailPanel(parent)
 
     function panel:RefreshItem(itemID, requestID)
         self.currentItemItemID = itemID
-        local name, link, _, _, _, _, _, _, _, icon = GetItemInfo(itemID)
+        local name, link, icon
+        if itemID then
+            local _
+            name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
+            if not icon then
+                icon = SafeGetItemIcon(itemID)
+            end
+        end
         self.currentItemName = name or "Loading..."
         self.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
         self.name:SetText(link or name or "Loading...")

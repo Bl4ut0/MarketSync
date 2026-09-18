@@ -23,6 +23,30 @@ local SCOPE_OPTIONS = {
     { value = "neutral", label = "Neutral AH" },
 }
 
+local function SafeGetItemInfo(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemInfo then
+        return MarketSync.GetItemInfo(item)
+    elseif C_Item and C_Item.GetItemInfo then
+        return C_Item.GetItemInfo(item)
+    elseif GetItemInfo then
+        return GetItemInfo(item)
+    end
+    return nil
+end
+
+local function SafeGetItemIcon(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemIcon then
+        return MarketSync.GetItemIcon(item)
+    elseif C_Item and C_Item.GetItemIconByID then
+        return C_Item.GetItemIconByID(item)
+    elseif GetItemIcon then
+        return GetItemIcon(item)
+    end
+    return nil
+end
+
 local function TrimText(text)
     local raw = tostring(text or "")
     if strtrim then return strtrim(raw) end
@@ -144,7 +168,7 @@ local function ResolveManualRequest(rawValue)
     if linkedID then
         local id = tonumber(linkedID)
         if id and id > 0 then
-            local itemName = GetItemInfo(id)
+            local itemName = SafeGetItemInfo(id)
             return {
                 matchType = "itemID",
                 matchValue = id,
@@ -161,7 +185,7 @@ local function ResolveManualRequest(rawValue)
     local asID = tonumber(raw)
     if asID and asID > 0 then
         local id = math.floor(asID)
-        local itemName = GetItemInfo(id)
+        local itemName = SafeGetItemInfo(id)
         return {
             matchType = "itemID",
             matchValue = id,
@@ -192,15 +216,15 @@ local function ResolveRequestVisual(req)
 
     local name, link, _, _, _, _, _, _, _, icon
     if itemID then
-        name, link, _, _, _, _, _, _, _, icon = GetItemInfo(itemID)
+        name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
     elseif displayName ~= "" then
         -- Fallback attempt for display names that aren't already converted to itemIDs
         local displayID = MarketSync.ResolveItemID(displayName)
         if displayID then
             itemID = displayID
-            name, link, _, _, _, _, _, _, _, icon = GetItemInfo(itemID)
+            name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
         else
-            name, link, _, _, _, _, _, _, _, icon = GetItemInfo(displayName)
+            name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(displayName)
             if link then
                 itemID = tonumber(link:match("item:(%d+)"))
             end
@@ -212,8 +236,8 @@ local function ResolveRequestVisual(req)
         link = "|Hitem:" .. tostring(itemID) .. "|h[" .. tostring(name) .. "]|h"
     end
     
-    if not icon and itemID and GetItemIcon then
-        icon = GetItemIcon(itemID)
+    if not icon and itemID then
+        icon = SafeGetItemIcon(itemID)
     end
     
     icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"

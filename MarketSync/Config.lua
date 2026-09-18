@@ -24,6 +24,47 @@ function MarketSync.GetAddOnMetadata(addon, field)
     return nil
 end
 
+-- Cross-version item information helpers (Modern C_Item vs Legacy global)
+function MarketSync.GetItemInfo(item)
+    if not item then return nil end
+    if C_Item and C_Item.GetItemInfo then
+        return C_Item.GetItemInfo(item)
+    elseif GetItemInfo then
+        return GetItemInfo(item)
+    end
+    return nil
+end
+
+function MarketSync.GetItemInfoInstant(item)
+    if not item then return nil end
+    if C_Item and C_Item.GetItemInfoInstant then
+        return C_Item.GetItemInfoInstant(item)
+    elseif GetItemInfoInstant then
+        return GetItemInfoInstant(item)
+    end
+    return nil
+end
+
+function MarketSync.GetDetailedItemLevelInfo(item)
+    if not item then return 0 end
+    if C_Item and C_Item.GetDetailedItemLevelInfo then
+        return C_Item.GetDetailedItemLevelInfo(item)
+    elseif GetDetailedItemLevelInfo then
+        return GetDetailedItemLevelInfo(item)
+    end
+    return 0
+end
+
+function MarketSync.GetItemIcon(item)
+    if not item then return nil end
+    if C_Item and C_Item.GetItemIconByID then
+        return C_Item.GetItemIconByID(item)
+    elseif GetItemIcon then
+        return GetItemIcon(item)
+    end
+    return nil
+end
+
 -- ================================================================
 -- BASE-36 ENCODING / DECODING
 -- Compresses numeric payloads by ~30% (e.g. "50000" -> "11cg")
@@ -661,7 +702,7 @@ function MarketSync.ResolveItemID(query)
     end
 
     -- 2. Try Exact Name Match (Case-Insensitive) via GetItemInfo
-    local _, linkByName = GetItemInfo(raw)
+    local _, linkByName = MarketSync.GetItemInfo(raw)
     if linkByName then
         local idFromLink = linkByName:match("item:(%d+)")
         if idFromLink then

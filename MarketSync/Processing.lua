@@ -15,6 +15,30 @@ local PROCESS_MIN_EXPANSION = {
 }
 local PROCESS_TYPE_ORDER = { "PROSPECT", "MILL", "DISENCHANT" }
 
+local function SafeGetItemInfo(item)
+    if not item then return nil end
+    if MarketSync and MarketSync.GetItemInfo then
+        return MarketSync.GetItemInfo(item)
+    elseif C_Item and C_Item.GetItemInfo then
+        return C_Item.GetItemInfo(item)
+    elseif GetItemInfo then
+        return GetItemInfo(item)
+    end
+    return nil
+end
+
+local function SafeGetDetailedItemLevelInfo(item)
+    if not item then return 0 end
+    if MarketSync and MarketSync.GetDetailedItemLevelInfo then
+        return MarketSync.GetDetailedItemLevelInfo(item)
+    elseif C_Item and C_Item.GetDetailedItemLevelInfo then
+        return C_Item.GetDetailedItemLevelInfo(item)
+    elseif GetDetailedItemLevelInfo then
+        return GetDetailedItemLevelInfo(item)
+    end
+    return 0
+end
+
 local function NetMainAuctionValue(grossValue)
     return math.max(0, tonumber(grossValue) or 0) * MAIN_AH_NET_MULTIPLIER
 end
@@ -799,7 +823,7 @@ local function GetItemName(itemID)
     if not itemID then return nil end
     local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID]
     if cached and cached.n then return cached.n end
-    local name = C_Item and C_Item.GetItemInfo and C_Item.GetItemInfo(itemID)
+    local name = SafeGetItemInfo(itemID)
     if name and MarketSyncDB and MarketSyncDB.ItemInfoCache then
         MarketSyncDB.ItemInfoCache[itemID] = MarketSyncDB.ItemInfoCache[itemID] or {}
         MarketSyncDB.ItemInfoCache[itemID].n = name
@@ -1570,14 +1594,28 @@ end
 -- ================================================================
 -- TOOLTIP HOOKS (Disenchanting, Milling, Prospecting)
 -- ================================================================
-local function OnTooltipSetItem(tooltip)
+local function OnTooltipSetItem(tooltip, data)
     if not MarketSyncDB or not MarketSyncDB.EnableTooltipProb then return end
+    if not tooltip then return end
 
-    local name, link = tooltip:GetItem()
-    if not link then return end
+    local name, link
+    if tooltip.GetItem then
+        name, link = tooltip:GetItem()
+    end
     
-    local itemID = MarketSync.ParseItemIDFromDBKey(link)
+    local itemID = nil
+    if link then
+        itemID = MarketSync.ParseItemIDFromDBKey(link)
+    end
+    if not itemID and data and data.id then
+        itemID = data.id
+    end
     if not itemID then return end
+
+    if not link and itemID then
+        local _, resolvedLink = SafeGetItemInfo(itemID)
+        link = resolvedLink or ("item:" .. itemID)
+    end
 
     -- 1. Check ProcessingData (Milling/Prospecting)
     if MarketSync.ProcessingData and MarketSync.ProcessingData[itemID] then
@@ -1621,10 +1659,12 @@ local function OnTooltipSetItem(tooltip)
     end
 
     -- Helper to check if another addon already printed breakdown info
-    local function HasExternalBreakdown(tooltip, keyword)
-        for i = 1, tooltip:NumLines() do
-            local line = _G[tooltip:GetName() .. "TextLeft" .. i]
-            if line and line:GetText() and line:GetText():find(keyword) then
+    local function HasExternalBreakdown(tooltipObj, keyword)
+        local tName = tooltipObj and tooltipObj.GetName and tooltipObj:GetName()
+        if not tName or not tooltipObj.NumLines then return false end
+        for i = 1, tooltipObj:NumLines() do
+            local line = _G[tName .. "TextLeft" .. i]
+            if line and line.GetText and line:GetText() and line:GetText():find(keyword) then
                 return true
             end
         end
@@ -1633,13 +1673,24 @@ local function OnTooltipSetItem(tooltip)
 
     -- 2. Check Disenchanting
     if MarketSync.EstimateDisenchantEV then
-        local _, _, quality, _, _, _, _, _, _, _, _, classID = GetItemInfo(link)
-        local ilvl = 0
-        if GetDetailedItemLevelInfo then
-            ilvl = GetDetailedItemLevelInfo(link)
+        local quality, classID
+        if link then
+            _, _, quality, _, _, _, _, _, _, _, _, classID = SafeGetItemInfo(link)
+        elseif itemID then
+            _, _, quality, _, _, _, _, _, _, _, _, classID = SafeGetItemInfo(itemID)
         end
-        if not ilvl or ilvl == 0 then
-            ilvl = select(4, GetItemInfo(link)) or 0
+
+        local ilvl = 0
+        if link then
+            ilvl = SafeGetDetailedItemLevelInfo(link)
+        elseif itemID then
+            ilvl = SafeGetDetailedItemLevelInfo(itemID)
+        end
+        if (not ilvl or ilvl == 0) and link then
+            ilvl = select(4, SafeGetItemInfo(link)) or 0
+        end
+        if (not ilvl or ilvl == 0) and itemID then
+            ilvl = select(4, SafeGetItemInfo(itemID)) or 0
         end
 
         if quality and quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl > 0 then
