@@ -362,6 +362,10 @@ local function IsFreshLocalObservation(entry, now)
 end
 
 local function GetExactMainTrackedPrice(dbKey)
+    if MarketSync.Provider and MarketSync.Provider.GetPrice then
+        local p = MarketSync.Provider.GetPrice(dbKey)
+        if p and p > 0 then return p end
+    end
     local db = Auctionator and Auctionator.Database and Auctionator.Database.db
     if not db or dbKey == nil then return nil end
 
@@ -379,6 +383,10 @@ local function GetMainTrackedPrice(realmDB, req, itemID, now, requireFresh)
     end
     if req.matchType == "dbKey" and NormalizeVariantMode(req.variantMode) == "exact_key" then
         return GetExactMainTrackedPrice(dbKey)
+    end
+    if MarketSync.Provider and MarketSync.Provider.GetPrice then
+        local p = MarketSync.Provider.GetPrice(itemID)
+        if p and p > 0 then return p end
     end
     if not itemID or not Auctionator or not Auctionator.API or not Auctionator.API.v1 then return nil end
     local ok, price = pcall(Auctionator.API.v1.GetAuctionPriceByItemID, ADDON_CALLER_ID, itemID)
@@ -461,6 +469,9 @@ end)
 MarketSync.NotificationTicker = notificationTicker
 
 function MarketSync.GetAuctionatorShoppingListNames()
+    if MarketSync.Provider and not MarketSync.Provider.CanExportShoppingList() then
+        return {}
+    end
     if not Auctionator or not Auctionator.Shopping or not Auctionator.Shopping.ListManager then
         return {}
     end

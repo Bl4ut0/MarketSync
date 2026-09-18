@@ -242,8 +242,11 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         source = (nmeta and nmeta.source) or "Neutral"
         exactTime = (nmeta and nmeta.time) or (MarketSyncDB and MarketSync.GetRealmDB().NeutralScanTime)
     else
-        -- Active Auctionator database (Live)
-        age = Auctionator and Auctionator.Database and Auctionator.Database.GetPriceAge and Auctionator.Database:GetPriceAge(dbKey) or nil
+        -- Active live database (Provider or Auctionator)
+        age = MarketSync.GetAuctionAge and MarketSync.GetAuctionAge(dbKey)
+        if age == nil and Auctionator and Auctionator.Database and Auctionator.Database.GetPriceAge then
+            age = Auctionator.Database:GetPriceAge(dbKey)
+        end
         
         -- Determine source by checking per-day metadata first
         if meta and meta.days and meta.days[dayStr] then
@@ -363,7 +366,9 @@ local function BuildSearchIndex(callback)
     NeutralResolved = 0
 
     local co = coroutine.create(function()
-        if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then
+        local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+            or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+        if not liveStore and not (MarketSyncDB and MarketSync.GetRealmDB().PersonalData) then
             PersonalIndexReady = true; GuildIndexReady = true; NeutralIndexReady = true
             PersonalIndexBuilding = false
             return
@@ -421,10 +426,11 @@ local function BuildSearchIndex(callback)
             if MarketSync.LogCacheEvent then
                 MarketSync.LogCacheEvent("|cff88aaff[Guild]|r On-Demand enabled. Skipping Guild index build.")
             end
-        else
-            for dbKey, data in pairs(Auctionator.Database.db) do
-                if type(data) == "table" and data.m and data.m > 0 then
-                    local itemID = ParseItemID(dbKey)
+        elseif liveStore then
+            for dbKey, data in pairs(liveStore) do
+                local price = (type(data) == "table" and data.m) or (data and data.latest and data.latest.minUnitPrice)
+                if price and price > 0 then
+                    local itemID = ParseItemID(dbKey) or (data.key and data.key.itemID)
                     if itemID then
                         GuildTotal = GuildTotal + 1
                         local entry = BuildIndexEntry(dbKey, itemID, data, "guild")
@@ -538,7 +544,8 @@ local function BuildSearchIndex(callback)
         local neutralRemove = {}
         local pStore = MarketSyncDB and MarketSync.GetRealmDB().PersonalData
         local nStore = MarketSyncDB and MarketSync.GetRealmDB().NeutralData
-        local gStore = Auctionator and Auctionator.Database and Auctionator.Database.db
+        local gStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+            or (Auctionator and Auctionator.Database and Auctionator.Database.db)
 
         -- Resolve Personal pending
         for dbKey, itemID in pairs(PersonalPending) do
@@ -706,9 +713,11 @@ end
 -- Called by sync module for each item received during sync
 function MarketSync.AddToGuildIncoming(dbKey)
     if not GuildIndexReady then return end  -- Index hasn't been built yet
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return end
+    local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+        or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+    if not liveStore then return end
 
-    local data = Auctionator.Database.db[dbKey]
+    local data = liveStore[dbKey]
     if not data then return end
 
     local itemID = ParseItemID(dbKey)

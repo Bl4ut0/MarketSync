@@ -54,7 +54,10 @@ end
 -- Maps the current UNIX time into a 30-minute tracking bucket
 -- ================================================================
 function MarketSync.GetCurrentBucket()
-    -- 1800 seconds = 30 minutes. 48 buckets total per 24 hours aligned to Auctionator epoch.
+    -- Delegate to active provider (e.g. Unix 30-min bucket on Forever, Auctionator epoch on legacy)
+    if MarketSync.Provider and MarketSync.Provider.GetCurrentBucket then
+        return MarketSync.Provider.GetCurrentBucket()
+    end
     local dayZero = Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 or 1600000000
     return math.floor((time() - dayZero) / 1800)
 end
@@ -570,23 +573,35 @@ function MarketSync.ParseItemIDFromDBKey(dbKey)
 end
 
 -- ================================================================
--- AUCTIONATOR HELPERS
+-- PRICE AND AGE HELPERS (ROUTED THROUGH PROVIDER)
 -- ================================================================
 function MarketSync.GetAuctionPrice(itemLink)
-    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then return nil end
-    return Auctionator.API.v1.GetAuctionPriceByItemLink(ADDON_NAME, itemLink)
+    if MarketSync.Provider and MarketSync.Provider.GetPrice then
+        local price = MarketSync.Provider.GetPrice(itemLink)
+        if price ~= nil then return price end
+    end
+    if Auctionator and Auctionator.API and Auctionator.API.v1 then
+        return Auctionator.API.v1.GetAuctionPriceByItemLink(ADDON_NAME, itemLink)
+    end
+    return nil
 end
 
 function MarketSync.GetAuctionAge(itemLink)
-    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then return nil end
-    return Auctionator.API.v1.GetAuctionAgeByItemLink(ADDON_NAME, itemLink)
+    if MarketSync.Provider and MarketSync.Provider.GetPriceAge then
+        local age = MarketSync.Provider.GetPriceAge(itemLink)
+        if age ~= nil then return age end
+    end
+    if Auctionator and Auctionator.API and Auctionator.API.v1 then
+        return Auctionator.API.v1.GetAuctionAgeByItemLink(ADDON_NAME, itemLink)
+    end
+    return nil
 end
 
 function MarketSync.GetCurrentScanDay()
     if Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 then
         return math.floor((time() - Auctionator.Constants.SCAN_DAY_0) / 86400)
     end
-    return 0
+    return math.floor(time() / 86400)
 end
 
 -- ================================================================

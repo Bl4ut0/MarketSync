@@ -604,7 +604,9 @@ local function BuildApplyTransaction(session, operations)
             end
         end
     else
-        if not Auctionator or not Auctionator.Database or type(Auctionator.Database.db) ~= "table" then
+        local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+            or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+        if not liveStore and MarketSync.Provider and MarketSync.Provider.GetActiveName() == "auctionator" then
             return nil, "Auctionator database unavailable during apply"
         end
         local personalData = workingRealmTable("PersonalData")
@@ -613,7 +615,7 @@ local function BuildApplyTransaction(session, operations)
         for _, operation in ipairs(operations) do
             if not touched[operation.key] then
                 touched[operation.key] = true
-                journalEntry(Auctionator.Database.db, operation.key)
+                if liveStore then journalEntry(liveStore, operation.key) end
                 journalEntry(personalData, operation.key)
                 journalEntry(itemMetadata, operation.key)
             end

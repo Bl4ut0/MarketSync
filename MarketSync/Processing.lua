@@ -808,7 +808,12 @@ local function GetItemName(itemID)
 end
 
 local function GetPriceByItemID(itemID)
-    if not itemID or not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
+    if not itemID then return nil end
+    if MarketSync.GetAuctionPrice then
+        local p = MarketSync.GetAuctionPrice(itemID)
+        if p and p > 0 then return p end
+    end
+    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
         return nil
     end
     local ok, price = pcall(Auctionator.API.v1.GetAuctionPriceByItemID, CALLER_ID, itemID)
@@ -819,7 +824,12 @@ local function GetPriceByItemID(itemID)
 end
 
 local function GetAgeByItemID(itemID)
-    if not itemID or not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
+    if not itemID then return nil end
+    if MarketSync.GetAuctionAge then
+        local a = MarketSync.GetAuctionAge(itemID)
+        if a and a >= 0 then return a end
+    end
+    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
         return nil
     end
 

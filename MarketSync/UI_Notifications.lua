@@ -229,7 +229,8 @@ local function ResolveRequestDBKey(req, itemID)
 end
 
 local function GetAuctionatorDataByKey(dbKey)
-    local db = Auctionator and Auctionator.Database and Auctionator.Database.db
+    local db = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+        or (Auctionator and Auctionator.Database and Auctionator.Database.db)
     if not db or dbKey == nil then return nil end
     local data = db[dbKey] or db[tostring(dbKey)]
     if not data then

@@ -206,16 +206,24 @@ local function RegisterAuctionatorHooks()
     auctionatorHooksInstalled = true
 end
 
-local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 == "Auctionator" then
-            RegisterAuctionatorHooks()
+            if not MarketSync.Provider or MarketSync.Provider.GetActiveName() == "auctionator" then
+                RegisterAuctionatorHooks()
+            end
         elseif arg1 == ADDON_NAME or arg1 == "AuctionatorAnnouncer" then
             MarketSync.InitializeDB()
             CreateMinimapButton()
-            RegisterAuctionatorHooks()
+            if MarketSync.Provider and MarketSync.Provider.Initialize then
+                MarketSync.Provider.Initialize()
+            end
+            if not MarketSync.Provider or MarketSync.Provider.GetActiveName() == "auctionator" then
+                RegisterAuctionatorHooks()
+            end
 
         -- FIRST LAUNCH PROTECTION: If the user doesn't have an offline personal snapshot pool yet,
         -- forcibly snapshot whatever exists in their Live Auctionator DB into the mirror pool right now.
@@ -356,18 +364,22 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
         MarketSync._lastCanSync = MarketSync.CanSync and MarketSync.CanSync() or true
 
-    elseif event == "AUCTION_HOUSE_SHOW" then
+    elseif event == "AUCTION_HOUSE_SHOW"
+        or (event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and (arg1 == 21 or (Enum and Enum.PlayerInteractionType and arg1 == Enum.PlayerInteractionType.Auctioneer))) then
         MarketSync.IsAuctionHouseOpen = true
         MarketSync.IsNeutralAHOpen = false
 
-        -- Snapshot the current Auctionator DB size and "today" count so we can detect a real scan on close
+        -- Snapshot current live store size and "today" count so we can detect a real scan on close
         MarketSync._ahOpenItemCount = 0
         MarketSync._ahOpenTodayCount = 0
-        if Auctionator and Auctionator.Database and Auctionator.Database.db then
+        local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+            or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+        if liveStore then
             local today = MarketSync.GetCurrentScanDay()
-            for _, data in pairs(Auctionator.Database.db) do
+            for _, data in pairs(liveStore) do
                 MarketSync._ahOpenItemCount = MarketSync._ahOpenItemCount + 1
-                if type(data) == "table" and data.h and data.h[tostring(today)] then
+                if (type(data) == "table" and data.h and data.h[tostring(today)])
+                    or (data and data.latest and data.latest.seenAt and (time() - data.latest.seenAt) < 86400) then
                     MarketSync._ahOpenTodayCount = MarketSync._ahOpenTodayCount + 1
                 end
             end
@@ -382,14 +394,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end
 
-    elseif event == "AUCTION_HOUSE_CLOSED" then
+    elseif event == "AUCTION_HOUSE_CLOSED"
+        or (event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and (arg1 == 21 or (Enum and Enum.PlayerInteractionType and arg1 == Enum.PlayerInteractionType.Auctioneer))) then
         -- Guard: Only run the snapshot pipeline if we actually tracked the AH opening.
-        -- Some WoW edge cases (NPC interactions, addon taint, etc.) can fire
-        -- AUCTION_HOUSE_CLOSED without a preceding AUCTION_HOUSE_SHOW. Running the
-        -- pipeline on a spurious close would set a false PersonalScanTime and trigger
-        -- phantom ADV broadcasts to the guild.
         if not MarketSync.IsAuctionHouseOpen then
-            MarketSync.Debug("AUCTION_HOUSE_CLOSED fired but AH was never opened â€” ignoring (spurious event)")
+            MarketSync.Debug("AUCTION_HOUSE_CLOSED fired but AH was never opened — ignoring (spurious event)")
             return
         end
         MarketSync.IsAuctionHouseOpen = false
@@ -422,17 +431,21 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 local postToday = 0
                 local today = MarketSync.GetCurrentScanDay()
 
-                if Auctionator and Auctionator.Database and Auctionator.Database.db then
-                    for _, data in pairs(Auctionator.Database.db) do 
+                local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+                    or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+                if liveStore then
+                    for _, data in pairs(liveStore) do 
                         postCount = postCount + 1 
-                        if type(data) == "table" and data.h and data.h[tostring(today)] then
+                        if (type(data) == "table" and data.h and data.h[tostring(today)])
+                            or (data and data.latest and data.latest.seenAt and (time() - data.latest.seenAt) < 86400) then
                             postToday = postToday + 1
                         end
                     end
                 end
                 
-                -- Detect a real scan if Auctionator scanned, items grew, or price changes were recorded
-                local scanCompleted = MarketSync._ahFullScanCompleted
+                -- Detect a real scan if Auctionator/Scanner scanned, items grew, or price changes were recorded
+                local scannerScanned = MarketSyncForeverScanner and MarketSyncForeverScanner.Store and MarketSyncForeverScanner.Store.completedWatchScans and MarketSyncForeverScanner.Store.completedWatchScans > 0
+                local scanCompleted = MarketSync._ahFullScanCompleted or scannerScanned
                 local scanActivity = MarketSync._ahScanActivity and MarketSync._ahScanActivity > 0
                 local countGrew = (postCount > preCount) or (postToday > preToday)
                 local changesRecorded = (changedCount and changedCount > 0)

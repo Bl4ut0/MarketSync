@@ -4,10 +4,17 @@
 ## Author: Gemini
 ## Version: 0.8.0-rc2
 ## SavedVariables: MarketSyncDB
-## Dependencies: Auctionator
+## OptionalDeps: Auctionator, MarketSyncForeverScanner
+## AllowLoadGameType: camelot
+## X-Forever-Target: 1.60.1 (69893)
 
 # Libs
 Libs\Libs.xml
+
+# Provider abstraction
+Provider.lua
+Providers\AuctionatorProvider.lua
+Providers\ForeverProvider.lua
 
 # Config: shared globals, DB init, helpers
 Config.lua

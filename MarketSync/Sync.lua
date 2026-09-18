@@ -874,7 +874,9 @@ function MarketSync.EnsureVerifiedSnapshotSchema()
 end
 
 function MarketSync.SnapshotPersonalScan(options)
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then return 0, 0 end
+    local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+        or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+    if not liveStore then return 0, 0 end
     if not MarketSync.GetRealmDB().PersonalData then MarketSync.GetRealmDB().PersonalData = {} end
 
     -- Optional notification integration. Generic Auctionator DB updates are
@@ -888,7 +890,7 @@ function MarketSync.SnapshotPersonalScan(options)
         or (type(options) == "table" and options.onPriceChanged)
     local exactKeys = type(options) == "table" and options.exactKeys == true
         and type(options.keys) == "table"
-    local source = exactKeys and options.keys or Auctionator.Database.db
+    local source = exactKeys and options.keys or liveStore
     
     local today = MarketSync.GetCurrentScanDay()
     local todayStr = tostring(today)
@@ -905,14 +907,15 @@ function MarketSync.SnapshotPersonalScan(options)
     local changedCount = 0
     
     for dbKey, sourceValue in pairs(source) do
-        local data = exactKeys and Auctionator.Database.db[dbKey] or sourceValue
+        local data = exactKeys and liveStore[dbKey] or sourceValue
         if type(data) == "table" then
             local hasValidID = false
             if type(dbKey) == "number" or type(dbKey) == "string" then
                 hasValidID = true
             end
             
-            if hasValidID and data.m and data.m > 0 then
+            local priceVal = tonumber(data.m) or (data.latest and data.latest.complete and tonumber(data.latest.minUnitPrice)) or 0
+            if hasValidID and priceVal > 0 then
                 local lastSeenDay = 0
                 if data.h then
                     for dayStr in pairs(data.h) do
@@ -925,12 +928,12 @@ function MarketSync.SnapshotPersonalScan(options)
                 local entry = pData[dbKey]
                 if not entry.h then entry.h = {} end
                 local previousObservedPrice = tonumber(entry.m) or 0
-                local observedPrice = tonumber(data.m) or 0
+                local observedPrice = priceVal
                 local observedPriceChanged = previousObservedPrice ~= observedPrice
 
                 entry.m = observedPrice
-                entry.d = lastSeenDay
-                if exactKeys then entry.observedAt = time() end
+                entry.d = lastSeenDay > 0 and lastSeenDay or today
+                if exactKeys or data.latest then entry.observedAt = (data.latest and data.latest.seenAt) or time() end
                 
                 -- Only write Timeseries buckets for data seen today
                 if lastSeenDay == today then
