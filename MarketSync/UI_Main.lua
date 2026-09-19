@@ -9,7 +9,7 @@ local activeBrowseTab = 1
 
 -- ================================================================
 -- HELPER: CreateModernInset
--- Matches Blizzard Auction House sleek dark slate inset panels
+-- Matches Blizzard Auction House sleek dark bronze/stone inset panels
 -- ================================================================
 function MarketSync.CreateModernInset(parent, x, y, width, height)
     local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -19,15 +19,15 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
         tile = false, tileSize = 0, edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    inset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
-    inset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+    inset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
+    inset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
 
-    -- Subtle top inner highlight line matching Blizzard AH insets
+    -- Subtle top inner highlight line matching Blizzard AH insets (warm bronze/gold sheen)
     local topHighlight = inset:CreateTexture(nil, "BORDER")
     topHighlight:SetHeight(1)
     topHighlight:SetPoint("TOPLEFT", 1, -1)
     topHighlight:SetPoint("TOPRIGHT", -1, -1)
-    topHighlight:SetColorTexture(0.35, 0.38, 0.45, 0.35)
+    topHighlight:SetColorTexture(0.50, 0.42, 0.25, 0.25)
     inset.topHighlight = topHighlight
 
     if x and y then
@@ -41,7 +41,7 @@ end
 
 -- ================================================================
 -- HELPER: CreateAHColumnHeader
--- Matches Blizzard Auction House column headers (clean dark slate + sort arrow)
+-- Matches Blizzard Auction House column headers (clean dark bronze/stone + sort arrow)
 -- ================================================================
 function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     local hdr = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -54,15 +54,15 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
         edgeSize = 1,
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
-    hdr:SetBackdropColor(0.09, 0.11, 0.14, 0.95)
-    hdr:SetBackdropBorderColor(0.18, 0.20, 0.24, 0.70)
+    hdr:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+    hdr:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
 
     -- Vertical separator on right side
     local sep = hdr:CreateTexture(nil, "OVERLAY")
     sep:SetWidth(1)
     sep:SetPoint("TOPRIGHT", 0, -2)
     sep:SetPoint("BOTTOMRIGHT", 0, 2)
-    sep:SetColorTexture(0.25, 0.28, 0.34, 0.60)
+    sep:SetColorTexture(0.35, 0.30, 0.20, 0.60)
     hdr.sep = sep
 
     local label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -79,10 +79,10 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     hdr.arrow = arrow
 
     hdr:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.16, 0.20, 0.26, 0.95)
+        self:SetBackdropColor(0.24, 0.20, 0.12, 0.95)
     end)
     hdr:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.09, 0.11, 0.14, 0.95)
+        self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
     end)
 
     return hdr
@@ -1175,7 +1175,7 @@ local function CreateMainFrame()
 
                 local hl = row:CreateTexture(nil, "HIGHLIGHT")
                 hl:SetAllPoints()
-                hl:SetColorTexture(0.18, 0.22, 0.30, 0.40)
+                hl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
                 row.hl = hl
 
                 row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -1200,9 +1200,9 @@ local function CreateMainFrame()
             end
 
             if count % 2 == 1 then
-                row.bg:SetColorTexture(0.07, 0.09, 0.12, 0.65)
+                row.bg:SetColorTexture(0.10, 0.095, 0.09, 0.70)
             else
-                row.bg:SetColorTexture(0.04, 0.05, 0.07, 0.65)
+                row.bg:SetColorTexture(0.06, 0.055, 0.05, 0.70)
             end
 
             local isBlocked = MarketSyncDB.BlockedUsers and MarketSyncDB.BlockedUsers[user]

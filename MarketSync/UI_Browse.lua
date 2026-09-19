@@ -20,62 +20,77 @@ local function FormatMoney(copper)
     return str
 end
 
--- ---- WoW Classic Item Categories ----
+-- ---- WoW Item Categories (matches native Auction House client) ----
 local CATEGORIES = {
     { name = "Weapons", classID = 2, subs = {
-        {name="One-Handed Axes",  subID=0}, {name="Two-Handed Axes",  subID=1},
-        {name="Bows",             subID=2}, {name="Guns",             subID=3},
-        {name="One-Handed Maces", subID=4}, {name="Two-Handed Maces", subID=5},
-        {name="Polearms",         subID=6}, {name="One-Handed Swords",subID=7},
-        {name="Two-Handed Swords",subID=8}, {name="Staves",           subID=10},
-        {name="Fist Weapons",     subID=13},{name="Miscellaneous",    subID=14},
-        {name="Daggers",          subID=15},{name="Thrown",            subID=16},
-        {name="Crossbows",        subID=18},{name="Wands",            subID=19},
+        { name = "One-Handed",    subIDs = { 0, 4, 7, 13, 15 } },
+        { name = "Two-Handed",    subIDs = { 1, 5, 6, 8, 10 } },
+        { name = "Ranged",        subIDs = { 2, 3, 16, 18, 19 } },
+        { name = "Miscellaneous", subIDs = { 14, 20 } },
     }},
     { name = "Armor", classID = 4, subs = {
-        {name="Miscellaneous",subID=0}, {name="Cloth",   subID=1},
-        {name="Leather",      subID=2}, {name="Mail",    subID=3},
-        {name="Plate",        subID=4}, {name="Shields", subID=6},
-        {name="Librams",      subID=7}, {name="Idols",   subID=8},
-        {name="Totems",       subID=9},
+        { name = "Plate",         subIDs = { 4 } },
+        { name = "Mail",          subIDs = { 3 } },
+        { name = "Leather",       subIDs = { 2 } },
+        { name = "Cloth",         subIDs = { 1 } },
+        { name = "Relic",         subIDs = { 7, 8, 9, 10, 11 } },
+        { name = "Miscellaneous", subIDs = { 0, 6 } },
     }},
-    { name = "Container", classID = 1, subs = {
-        {name="Bag",      subID=0}, {name="Soul Bag",        subID=1},
-        {name="Herb Bag", subID=2}, {name="Enchanting Bag",  subID=3},
-        {name="Engineering Bag",subID=4}, {name="Gem Bag",   subID=5},
-        {name="Mining Bag",subID=6},
+    { name = "Containers", classID = 1, subs = {
+        { name = "Regular Bags",  subIDs = { 0 } },
+        { name = "Ammo",          subIDs = { 10 }, extraClassID = 11 },
+        { name = "Trade Bags",    subIDs = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } },
     }},
-    { name = "Consumable", classID = 0, subs = {
-        {name="Consumable",subID=0}, {name="Potion",subID=1}, {name="Elixir",subID=2},
-        {name="Flask",subID=3}, {name="Scroll",subID=4}, {name="Food & Drink",subID=5},
-        {name="Item Enhancement",subID=6}, {name="Bandage",subID=7},
+    { name = "Consumables", classID = 0, subs = {
+        { name = "Potion",           subIDs = { 1 } },
+        { name = "Elixir",           subIDs = { 2 } },
+        { name = "Flask",            subIDs = { 3 } },
+        { name = "Scroll",           subIDs = { 4 } },
+        { name = "Food & Drink",     subIDs = { 5 } },
+        { name = "Item Enhancement", subIDs = { 6 } },
+        { name = "Bandage",          subIDs = { 7 } },
+        { name = "Other",            subIDs = { 0 } },
     }},
     { name = "Trade Goods", classID = 7, subs = {
-        {name="Trade Goods",subID=0}, {name="Parts",subID=1}, {name="Explosives",subID=2},
-        {name="Devices",subID=3}, {name="Jewelcrafting",subID=4}, {name="Cloth",subID=5},
-        {name="Leather",subID=6}, {name="Metal & Stone",subID=7}, {name="Meat",subID=8},
-        {name="Herb",subID=9}, {name="Elemental",subID=10}, {name="Other",subID=11},
-        {name="Enchanting",subID=12},
+        { name = "Parts",         subIDs = { 1 } },
+        { name = "Explosives",    subIDs = { 2 } },
+        { name = "Devices",       subIDs = { 3 } },
+        { name = "Jewelcrafting", subIDs = { 4 } },
+        { name = "Cloth",         subIDs = { 5 } },
+        { name = "Leather",       subIDs = { 6 } },
+        { name = "Metal & Stone", subIDs = { 7 } },
+        { name = "Meat",          subIDs = { 8 } },
+        { name = "Herb",          subIDs = { 9 } },
+        { name = "Elemental",     subIDs = { 10 } },
+        { name = "Enchanting",    subIDs = { 12 } },
+        { name = "Other",         subIDs = { 0, 11 } },
     }},
-    { name = "Projectile", classID = 6, subs = {
-        {name="Arrow",subID=2}, {name="Bullet",subID=3},
+    { name = "Ammo", classID = 6, subs = {
+        { name = "Arrow",  subIDs = { 2 } },
+        { name = "Bullet", subIDs = { 3 } },
     }},
-    { name = "Quiver", classID = 11, subs = {
-        {name="Quiver",subID=2}, {name="Ammo Pouch",subID=3},
+    { name = "Recipes", classID = 9, subs = {
+        { name = "Book",                 subIDs = { 0 } },
+        { name = "Leatherworking",       subIDs = { 1 } },
+        { name = "Tailoring",           subIDs = { 2 } },
+        { name = "Engineering",          subIDs = { 3 } },
+        { name = "Blacksmithing",        subIDs = { 4 } },
+        { name = "Cooking",              subIDs = { 5 } },
+        { name = "Alchemy",              subIDs = { 6 } },
+        { name = "First Aid (Health)",   subIDs = { 7 } },
+        { name = "Enchanting",           subIDs = { 8 } },
+        { name = "Fishing",              subIDs = { 9 } },
+        { name = "Jewelcrafting",        subIDs = { 10 } },
     }},
-    { name = "Recipe", classID = 9, subs = {
-        {name="Book",subID=0}, {name="Leatherworking",subID=1}, {name="Tailoring",subID=2},
-        {name="Engineering",subID=3}, {name="Blacksmithing",subID=4}, {name="Cooking",subID=5},
-        {name="Alchemy",subID=6}, {name="First Aid (Health)",subID=7}, {name="Enchanting",subID=8},
-        {name="Fishing",subID=9}, {name="Jewelcrafting",subID=10},
-    }},
-    { name = "Gems", classID = 3, subs = {
-        {name="Red",subID=0}, {name="Blue",subID=1}, {name="Yellow",subID=2},
-        {name="Purple",subID=3}, {name="Green",subID=4}, {name="Orange",subID=5},
-        {name="Meta",subID=6}, {name="Simple",subID=7}, {name="Prismatic",subID=8},
-    }},
-    { name = "Miscellaneous", classID = 15 },
     { name = "Quest Items",   classID = 12 },
+    { name = "Miscellaneous", classID = 15, subs = {
+        { name = "Junk",           subIDs = { 0 } },
+        { name = "Reagent",        subIDs = { 1 } },
+        { name = "Companion Pets", subIDs = { 2 } },
+        { name = "Holiday",        subIDs = { 3 } },
+        { name = "Mount",          subIDs = { 5 } },
+        { name = "Other",          subIDs = { 4 } },
+    }},
 }
 
 -- ---- Rarity Colors ----
@@ -957,6 +972,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         searchBox:SetText("")
         panel.activeCategory = nil
         panel.activeSubCategory = nil
+        panel.activeSubIDs = nil
         panel.expandedCategory = nil
         panel:RebuildFilters()
         panel:RunSearch()
@@ -992,54 +1008,52 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.activeSubCategory = nil
 
     local function MakeFilterButton(parentFrame, labelText, indent, yOff, btnWidth)
-        local w = btnWidth or (SIDEBAR_WIDTH - 6)
+        local w = (btnWidth or (SIDEBAR_WIDTH - 6)) - 4
         local btn = CreateFrame("Button", nil, parentFrame, "BackdropTemplate")
         btn:SetSize(w, FILTER_HEIGHT)
-        btn:SetPoint("TOPLEFT", 0, -yOff)
-
-        -- Normal background
-        local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetColorTexture(0.08, 0.09, 0.12, 0.35)
-        bg:SetAllPoints()
-
-        -- Selected highlight (dark gold background + gold border)
-        local selBg = btn:CreateTexture(nil, "BORDER")
-        selBg:SetPoint("TOPLEFT", 1, -1)
-        selBg:SetPoint("BOTTOMRIGHT", -1, 1)
-        selBg:SetColorTexture(0.24, 0.18, 0.05, 0.75)
-        selBg:Hide()
-        btn.selBg = selBg
+        btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
 
         btn:SetBackdrop({
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = 1,
-            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
         })
-        btn:SetBackdropBorderColor(0, 0, 0, 0)
+
+        if indent > 0 then
+            btn:SetBackdropColor(0.09, 0.08, 0.07, 0.85)
+            btn:SetBackdropBorderColor(0.24, 0.20, 0.15, 0.60)
+        else
+            btn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+            btn:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+        end
 
         local text = btn:CreateFontString(nil, "ARTWORK", indent > 0 and "GameFontHighlightSmallLeft" or "GameFontNormalSmallLeft")
-        text:SetSize(w - 10 - indent, 12)
-        text:SetPoint("LEFT", 6 + indent, 0)
+        text:SetPoint("LEFT", 6, 0)
+        text:SetPoint("RIGHT", -6, 0)
         text:SetText(labelText)
         btn.text = text
 
         -- Hover highlight: subtle warm amber glow
         local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetColorTexture(1, 0.82, 0, 0.12)
-        hl:SetAllPoints()
+        hl:SetColorTexture(1, 0.82, 0, 0.15)
+        hl:SetPoint("TOPLEFT", 2, -2)
+        hl:SetPoint("BOTTOMRIGHT", -2, 2)
 
         btn.SetSelected = function(self, isSelected)
             if isSelected then
-                self.selBg:Show()
-                self:SetBackdropBorderColor(1, 0.82, 0, 0.75)
-                self.text:SetTextColor(1, 0.82, 0)
+                self:SetBackdropColor(0.32, 0.25, 0.08, 0.90)
+                self:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
+                self.text:SetTextColor(1.0, 0.82, 0.0)
             else
-                self.selBg:Hide()
-                self:SetBackdropBorderColor(0, 0, 0, 0)
                 if indent > 0 then
-                    self.text:SetTextColor(0.85, 0.85, 0.85)
+                    self:SetBackdropColor(0.09, 0.08, 0.07, 0.85)
+                    self:SetBackdropBorderColor(0.24, 0.20, 0.15, 0.60)
+                    self.text:SetTextColor(0.90, 0.90, 0.90)
                 else
-                    self.text:SetTextColor(1, 1, 1)
+                    self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+                    self:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+                    self.text:SetTextColor(1.0, 0.82, 0.0)
                 end
             end
         end
@@ -1052,7 +1066,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         wipe(self.filterButtons)
 
         local btnWidth = SIDEBAR_WIDTH - 6
-        local y = 0
+        local y = 2
         for _, cat in ipairs(CATEGORIES) do
             local btn = MakeFilterButton(self.filterChild, cat.name, 0, y, btnWidth)
             btn.classID = cat.classID
@@ -1065,42 +1079,47 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     -- Toggle OFF: Clear filter and collapse
                     self.activeCategory = nil
                     self.expandedCategory = nil
+                    self.activeSubCategory = nil
+                    self.activeSubIDs = nil
                 else
                     -- Toggle ON: Select and Expand
                     self.activeCategory = cat.classID
                     self.activeSubCategory = nil
+                    self.activeSubIDs = nil
                     self.expandedCategory = cat.classID
                 end
                 self:RebuildFilters()
                 self:RunSearch()
             end)
             table.insert(self.filterButtons, btn)
-            y = y + FILTER_HEIGHT
+            y = y + FILTER_HEIGHT + 2
 
             if self.expandedCategory == cat.classID and cat.subs then
                 for _, sub in ipairs(cat.subs) do
                     local sbtn = MakeFilterButton(self.filterChild, sub.name, 12, y, btnWidth)
                     sbtn.classID = cat.classID
-                    sbtn.subID = sub.subID
-                    local isSubSelected = (self.activeSubCategory == sub.subID and self.activeCategory == cat.classID)
+                    sbtn.subIDs = sub.subIDs
+                    local isSubSelected = (self.activeSubCategory == sub.name and self.activeCategory == cat.classID)
                     sbtn:SetSelected(isSubSelected)
 
                     sbtn:SetScript("OnClick", function()
-                        if self.activeCategory == cat.classID and self.activeSubCategory == sub.subID then
+                        if self.activeCategory == cat.classID and self.activeSubCategory == sub.name then
                             self.activeSubCategory = nil -- Toggle OFF (Revert to Parent)
+                            self.activeSubIDs = nil
                         else
                             self.activeCategory = cat.classID
-                            self.activeSubCategory = sub.subID
+                            self.activeSubCategory = sub.name
+                            self.activeSubIDs = sub.subIDs
                         end
                         self:RebuildFilters()
                         self:RunSearch()
                     end)
                     table.insert(self.filterButtons, sbtn)
-                    y = y + FILTER_HEIGHT
+                    y = y + FILTER_HEIGHT + 2
                 end
             end
         end
-        self.filterChild:SetHeight(math.max(y, SIDEBAR_HEIGHT))
+        self.filterChild:SetHeight(math.max(y + 8, SIDEBAR_HEIGHT))
     end
     panel:RebuildFilters()
 
@@ -1330,16 +1349,16 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
         if i % 2 == 0 then
-            rowBg:SetColorTexture(0.08, 0.09, 0.12, 0.50)
+            rowBg:SetColorTexture(0.10, 0.095, 0.09, 0.50)
         else
-            rowBg:SetColorTexture(0.04, 0.05, 0.07, 0.50)
+            rowBg:SetColorTexture(0.06, 0.055, 0.05, 0.50)
         end
         row.rowBg = rowBg
 
         local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
         rowHl:SetPoint("TOPLEFT", 34, 0)
         rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(0.18, 0.22, 0.30, 0.60)
+        rowHl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
 
         -- Name text
         local nameText = row:CreateFontString(nil, "BACKGROUND", "GameFontNormal")
@@ -1537,8 +1556,22 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
             if matchesQuery then
                 local matchesCat = (not activeCat) or (item.classID == activeCat)
+                if not matchesCat and activeCat == 1 and item.classID == 11 then
+                    matchesCat = true
+                end
                 if matchesCat then
-                    local matchesSub = (not activeSub) or (item.subClassID == activeSub)
+                    local matchesSub = true
+                    if self.activeSubIDs then
+                        matchesSub = false
+                        for _, sid in ipairs(self.activeSubIDs) do
+                            if item.subClassID == sid then
+                                matchesSub = true
+                                break
+                            end
+                        end
+                    elseif activeSub then
+                        matchesSub = (item.subClassID == activeSub)
+                    end
                     if matchesSub then
                         local existing = uniqueResults[item.dbKey]
                         if not existing or item.price < existing.price then

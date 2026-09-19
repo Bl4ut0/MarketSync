@@ -208,8 +208,8 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    toggleBtn:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
-    toggleBtn:SetBackdropBorderColor(0.5, 0.42, 0.25, 0.9)
+    toggleBtn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+    toggleBtn:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.90)
     toggleBtn:EnableMouse(true)
     toggleBtn:RegisterForClicks("LeftButtonUp")
 
@@ -218,14 +218,14 @@ function MarketSync.CreateAHSidecar(parent)
     toggleArrow:SetText("|cFFFFD100>|r")
 
     toggleBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.2, 0.22, 0.28, 0.95)
+        self:SetBackdropColor(0.24, 0.20, 0.12, 0.95)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("MarketSync Sidecar", 1, 0.82, 0)
         GameTooltip:AddLine("Click to open Shopping Lists & Bag Selling", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     toggleBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
+        self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
         GameTooltip:Hide()
     end)
     if MarketSync.SetAccessibility then
@@ -251,7 +251,7 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(0.06, 0.07, 0.09, 0.98)
+    frame:SetBackdropColor(0.075, 0.070, 0.065, 0.98)
     frame:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.95)
     Sidecar.Frame = frame
 
@@ -284,7 +284,7 @@ function MarketSync.CreateAHSidecar(parent)
     headerSep:SetHeight(1)
     headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -2)
     headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -4, -2)
-    headerSep:SetColorTexture(0.4, 0.35, 0.2, 0.5)
+    headerSep:SetColorTexture(0.40, 0.35, 0.20, 0.50)
 
     -- Mode Switcher Tabs: [ Shopping Lists ]  [ Bag Selling ]
     local tabLists = CreateFrame("Button", nil, frame, "BackdropTemplate")
@@ -344,21 +344,21 @@ function MarketSync.CreateAHSidecar(parent)
         if mode == "lists" then
             listsContainer:Show()
             sellContainer:Hide()
-            tabLists:SetBackdropColor(0.20, 0.24, 0.32, 0.95)
-            tabLists:SetBackdropBorderColor(0.6, 0.5, 0.25, 0.9)
+            tabLists:SetBackdropColor(0.26, 0.20, 0.10, 0.95)
+            tabLists:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
             tabLists.label:SetText("|cFFFFD100Shopping Lists|r")
-            tabBags:SetBackdropColor(0.08, 0.09, 0.12, 0.6)
-            tabBags:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+            tabBags:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
+            tabBags:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
             tabBags.label:SetText("|cFF888888Bag Selling|r")
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         else
             listsContainer:Hide()
             sellContainer:Show()
-            tabBags:SetBackdropColor(0.20, 0.24, 0.32, 0.95)
-            tabBags:SetBackdropBorderColor(0.6, 0.5, 0.25, 0.9)
+            tabBags:SetBackdropColor(0.26, 0.20, 0.10, 0.95)
+            tabBags:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
             tabBags.label:SetText("|cFFFFD100Bag Selling|r")
-            tabLists:SetBackdropColor(0.08, 0.09, 0.12, 0.6)
-            tabLists:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+            tabLists:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
+            tabLists:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
             tabLists.label:SetText("|cFF888888Shopping Lists|r")
             if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
         end
@@ -592,8 +592,8 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    listInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
-    listInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+    listInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
+    listInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
     listInset:EnableMouse(true)
     listInset:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
     listInset:SetScript("OnMouseUp", function(self, button)
@@ -672,9 +672,9 @@ function MarketSync.CreateAHSidecar(parent)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
                 if i % 2 == 0 then
-                    row:SetBackdropColor(0.09, 0.11, 0.14, 0.7)
+                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                 else
-                    row:SetBackdropColor(0.05, 0.06, 0.08, 0.7)
+                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                 end
 
                 row.icon:SetTexture(item.icon)
@@ -693,7 +693,7 @@ function MarketSync.CreateAHSidecar(parent)
                 end)
 
                 row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.18, 0.22, 0.30, 0.9)
+                    self:SetBackdropColor(0.30, 0.25, 0.12, 0.80)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     if item.link and GameTooltip.SetHyperlink then
                         pcall(GameTooltip.SetHyperlink, GameTooltip, item.link)
@@ -707,9 +707,9 @@ function MarketSync.CreateAHSidecar(parent)
                 end)
                 row:SetScript("OnLeave", function(self)
                     if i % 2 == 0 then
-                        self:SetBackdropColor(0.09, 0.11, 0.14, 0.7)
+                        self:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                     else
-                        self:SetBackdropColor(0.05, 0.06, 0.08, 0.7)
+                        self:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                     end
                     GameTooltip:Hide()
                 end)
@@ -799,8 +799,8 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    sellInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
-    sellInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+    sellInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
+    sellInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
 
     local sellScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarSellScroll", sellInset, "UIPanelScrollFrameTemplate")
     sellScroll:SetPoint("TOPLEFT", 2, -3)
@@ -853,8 +853,8 @@ function MarketSync.CreateAHSidecar(parent)
                         edgeSize = 1,
                         insets = { left = 1, right = 1, top = 1, bottom = 1 },
                     })
-                    header:SetBackdropColor(0.10, 0.12, 0.16, 0.95)
-                    header:SetBackdropBorderColor(0.22, 0.25, 0.30, 0.85)
+                    header:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+                    header:SetBackdropBorderColor(0.30, 0.26, 0.20, 0.85)
 
                     header.icon = header:CreateTexture(nil, "ARTWORK")
                     header.icon:SetSize(16, 16)
@@ -919,7 +919,7 @@ function MarketSync.CreateAHSidecar(parent)
                     btn.item = item
 
                     local qColor = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] or { r = 0.4, g = 0.4, b = 0.4 }
-                    btn:SetBackdropColor(0.06, 0.08, 0.10, 0.95)
+                    btn:SetBackdropColor(0.08, 0.075, 0.07, 0.95)
                     btn:SetBackdropBorderColor(qColor.r or 0.4, qColor.g or 0.4, qColor.b or 0.4, 0.85)
 
                     btn:SetScript("OnEnter", function(self)

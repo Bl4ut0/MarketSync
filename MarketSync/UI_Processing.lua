@@ -89,8 +89,8 @@ local function BuildDropdown(frameName, parent, width, initFunc)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    dd:SetBackdropColor(0.08, 0.10, 0.13, 0.95)
-    dd:SetBackdropBorderColor(0.25, 0.28, 0.35, 0.8)
+    dd:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+    dd:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
 
     local txt = _G[frameName.."Text"]
     if txt then
@@ -361,35 +361,36 @@ function MarketSync.CreateProcessingPanel(parent)
             local btn = modeButtons[def.key]
             if btn then
                 if def.key == panel.activeMode then
-                    btn.selected:Show()
-                    btn.text:SetTextColor(1.0, 0.87, 0.1)
+                    btn:SetBackdropColor(0.32, 0.25, 0.08, 0.90)
+                    btn:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
+                    btn.text:SetTextColor(1.0, 0.82, 0.0)
                 else
-                    btn.selected:Hide()
-                    btn.text:SetTextColor(1, 1, 1)
+                    btn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+                    btn:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+                    btn.text:SetTextColor(0.90, 0.90, 0.90)
                 end
             end
         end
     end
 
     local function CreateModeButton(def, yOffset)
-        local btn = CreateFrame("Button", nil, leftTopBox)
-        btn:SetSize(LEFT_W - 16, 18)
+        local btn = CreateFrame("Button", nil, leftTopBox, "BackdropTemplate")
+        btn:SetSize(LEFT_W - 16, 22)
         btn:SetPoint("TOPLEFT", 8, yOffset)
 
-        local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetColorTexture(1, 1, 1, 0.02)
-        bg:SetAllPoints()
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        btn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+        btn:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
 
         local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
-        hl:SetBlendMode("ADD")
-        hl:SetAllPoints()
-
-        local selected = btn:CreateTexture(nil, "ARTWORK")
-        selected:SetColorTexture(1, 0.84, 0, 0.16)
-        selected:SetAllPoints()
-        selected:Hide()
-        btn.selected = selected
+        hl:SetColorTexture(1, 0.82, 0, 0.15)
+        hl:SetPoint("TOPLEFT", 2, -2)
+        hl:SetPoint("BOTTOMRIGHT", -2, 2)
 
         local txt = btn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         txt:SetPoint("CENTER")
@@ -414,9 +415,9 @@ function MarketSync.CreateProcessingPanel(parent)
         return btn
     end
 
-    modeButtons.target = CreateModeButton(MODE_OPTIONS[1], -26)
+    modeButtons.target = CreateModeButton(MODE_OPTIONS[1], -24)
     modeButtons.process = CreateModeButton(MODE_OPTIONS[2], -48)
-    modeButtons.craft = CreateModeButton(MODE_OPTIONS[3], -70)
+    modeButtons.craft = CreateModeButton(MODE_OPTIONS[3], -72)
 
     local targetLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     targetLabel:SetPoint("TOPLEFT", 8, -94)
@@ -775,16 +776,16 @@ function MarketSync.CreateProcessingPanel(parent)
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
         if i % 2 == 0 then
-            rowBg:SetColorTexture(0.08, 0.09, 0.12, 0.50)
+            rowBg:SetColorTexture(0.10, 0.095, 0.09, 0.50)
         else
-            rowBg:SetColorTexture(0.04, 0.05, 0.07, 0.50)
+            rowBg:SetColorTexture(0.06, 0.055, 0.05, 0.50)
         end
         row.rowBg = rowBg
 
         local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
         rowHl:SetPoint("TOPLEFT", 34, 0)
         rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(0.18, 0.22, 0.30, 0.60)
+        rowHl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         row.nameText:SetPoint("TOPLEFT", 43, -3)

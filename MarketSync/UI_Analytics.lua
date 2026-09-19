@@ -306,8 +306,8 @@ end
 function MarketSync.CreateAnalyticsPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local LEFT_X = isEmbedded and 6 or 20
-    local TOP_Y = isEmbedded and -6 or -75
-    local BOTTOM_Y = isEmbedded and 6 or 37
+    local TOP_Y = isEmbedded and -6 or -68
+    local BOTTOM_Y = isEmbedded and 6 or 35
     local RIGHT_X = isEmbedded and -6 or -20
     local LEFT_W = 240
     local GRAPH_H = isEmbedded and 230 or 155
@@ -340,30 +340,35 @@ function MarketSync.CreateAnalyticsPanel(parent)
     -- ================================================================
     -- LEFT INSET: ITEM SELECTION & QUICK SEARCH
     -- ================================================================
-    local leftHeader = CreateFrame("Frame", nil, leftInset)
-    leftHeader:SetPoint("TOPLEFT", 6, -6)
-    leftHeader:SetPoint("TOPRIGHT", -6, -6)
-    leftHeader:SetHeight(26)
+    -- Mode Switcher: [ Recent Scans ] [ Favorites ] across top of left inset
+    local recentBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
+    recentBtn:SetSize(110, 22)
+    recentBtn:SetPoint("TOPLEFT", leftInset, "TOPLEFT", 8, -8)
+    recentBtn:SetText("Recent Scans")
+    recentBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("|cFFFFD100Scanned Items|r")
+        GameTooltip:AddLine("View recent auction house scan results.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    recentBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local listTitle = leftHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    listTitle:SetPoint("LEFT", 4, 0)
-    listTitle:SetText("|cFFFFD100Scanned Items|r")
-
-    -- Mode Switcher: [ Recent ] [ Favorites ]
-    local recentBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
-    recentBtn:SetSize(62, 20)
-    recentBtn:SetPoint("RIGHT", -66, 0)
-    recentBtn:SetText("Recent")
-
-    local favBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
-    favBtn:SetSize(64, 20)
-    favBtn:SetPoint("RIGHT", 0, 0)
+    local favBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
+    favBtn:SetSize(110, 22)
+    favBtn:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -8, -8)
     favBtn:SetText("Favorites")
+    favBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("|cFFFFD100Favorite Items|r")
+        GameTooltip:AddLine("View your saved favorite items.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    favBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Quick Search & Drop EditBox
     local searchBox = CreateFrame("EditBox", nil, leftInset, "InputBoxTemplate")
-    searchBox:SetPoint("TOPLEFT", leftHeader, "BOTTOMLEFT", 4, -6)
-    searchBox:SetPoint("TOPRIGHT", leftHeader, "BOTTOMRIGHT", -4, -6)
+    searchBox:SetPoint("TOPLEFT", leftInset, "TOPLEFT", 12, -36)
+    searchBox:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -8, -36)
     searchBox:SetHeight(20)
     searchBox:SetAutoFocus(false)
     searchBox:SetFontObject("GameFontHighlightSmall")
@@ -476,7 +481,6 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local function RefreshItemsList()
         itemsList = {}
         if currentMode == "recent" then
-            listTitle:SetText("|cFFFFD100Scanned Items|r")
             emptyListText:SetText("No scanned items recorded.\nRun an AH scan or drop an item above.")
             recentBtn:Disable()
             favBtn:Enable()
@@ -523,8 +527,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 end
             end
         else
-            listTitle:SetText("|cFFFFD100Favorite Items|r")
-            emptyListText:SetText("No favorite items saved.\nAdd items to your Favorites list.")
+            emptyListText:SetText("No favorite items saved.\nClick + Favorite on any item to save it.")
             recentBtn:Enable()
             favBtn:Disable()
             if MarketSync.Favorites and MarketSync.Favorites.GetList then
@@ -596,13 +599,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
                 local isSelected = (selectedDBKey and selectedDBKey == tostring(item.itemID))
                 if isSelected then
-                    row:SetBackdropColor(0.18, 0.28, 0.42, 0.85)
-                    row:SetBackdropBorderColor(0.35, 0.60, 0.90, 0.80)
+                    row:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
+                    row:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
                 elseif i % 2 == 0 then
-                    row:SetBackdropColor(0.08, 0.09, 0.12, 0.50)
+                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                     row:SetBackdropBorderColor(0, 0, 0, 0)
                 else
-                    row:SetBackdropColor(0.04, 0.05, 0.07, 0.50)
+                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                     row:SetBackdropBorderColor(0, 0, 0, 0)
                 end
 
@@ -618,7 +621,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
                 row:SetScript("OnEnter", function(self)
                     if not isSelected then
-                        self:SetBackdropColor(0.15, 0.18, 0.24, 0.80)
+                        self:SetBackdropColor(0.30, 0.25, 0.12, 0.80)
                     end
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     local link = select(2, SafeGetItemInfo(item.itemID))
@@ -637,11 +640,11 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
                 row:SetScript("OnLeave", function(self)
                     if isSelected then
-                        self:SetBackdropColor(0.18, 0.28, 0.42, 0.85)
+                        self:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
                     elseif i % 2 == 0 then
-                        self:SetBackdropColor(0.08, 0.09, 0.12, 0.50)
+                        self:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                     else
-                        self:SetBackdropColor(0.04, 0.05, 0.07, 0.50)
+                        self:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                     end
                     GameTooltip:Hide()
                 end)
@@ -792,22 +795,27 @@ function MarketSync.CreateAnalyticsPanel(parent)
         })
     end
 
-    -- 2. Historical Trend Card
-    local graphCard = MarketSync.CreateModernInset and MarketSync.CreateModernInset(rightInset)
-    if not graphCard then
-        graphCard = CreateFrame("Frame", nil, rightInset, "BackdropTemplate")
-    end
-    graphCard:SetPoint("TOPLEFT", banner, "BOTTOMLEFT", 0, -6)
-    graphCard:SetPoint("TOPRIGHT", banner, "BOTTOMRIGHT", 0, -6)
+    -- Horizontal separator line between banner and graph
+    local sep1 = rightInset:CreateTexture(nil, "ARTWORK")
+    sep1:SetHeight(1)
+    sep1:SetPoint("TOPLEFT", rightInset, "TOPLEFT", 10, isEmbedded and -56 or -52)
+    sep1:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", -10, isEmbedded and -56 or -52)
+    sep1:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    panel.sep1 = sep1
+
+    -- 2. Historical Trend Section (Unified inside rightInset, no double-borders)
+    local graphCard = CreateFrame("Frame", nil, rightInset)
+    graphCard:SetPoint("TOPLEFT", rightInset, "TOPLEFT", 0, isEmbedded and -58 or -54)
+    graphCard:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", 0, isEmbedded and -58 or -54)
     graphCard:SetHeight(GRAPH_H)
     panel.graphCard = graphCard
 
     local graphHeader = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    graphHeader:SetPoint("TOPLEFT", 10, -8)
+    graphHeader:SetPoint("TOPLEFT", 14, -8)
     graphHeader:SetText("|cFFFFD100Historical Price Trend|r")
 
     local graphLegend = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
-    graphLegend:SetPoint("TOPRIGHT", -10, -8)
+    graphLegend:SetPoint("TOPRIGHT", -14, -8)
     graphLegend:SetText("|cFF33FF33— Daily Price|r    |cFF33B2FF● Granular 30-Min Snapshot|r")
 
     local graph = CreateGraph(graphCard)
@@ -815,13 +823,18 @@ function MarketSync.CreateAnalyticsPanel(parent)
     graph:SetPoint("BOTTOMRIGHT", -10, 8)
     panel.graph = graph
 
-    -- 3. Metrics & Insights Card
-    local metricsCard = MarketSync.CreateModernInset and MarketSync.CreateModernInset(rightInset)
-    if not metricsCard then
-        metricsCard = CreateFrame("Frame", nil, rightInset, "BackdropTemplate")
-    end
-    metricsCard:SetPoint("TOPLEFT", graphCard, "BOTTOMLEFT", 0, -6)
-    metricsCard:SetPoint("BOTTOMRIGHT", rightInset, "BOTTOMRIGHT", -10, isEmbedded and 10 or 8)
+    -- Horizontal separator line between graph and metrics
+    local sep2 = rightInset:CreateTexture(nil, "ARTWORK")
+    sep2:SetHeight(1)
+    sep2:SetPoint("TOPLEFT", graphCard, "BOTTOMLEFT", 10, 0)
+    sep2:SetPoint("TOPRIGHT", graphCard, "BOTTOMRIGHT", -10, 0)
+    sep2:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    panel.sep2 = sep2
+
+    -- 3. Metrics & Insights Section (Unified inside rightInset, no double-borders)
+    local metricsCard = CreateFrame("Frame", nil, rightInset)
+    metricsCard:SetPoint("TOPLEFT", sep2, "BOTTOMLEFT", 0, -2)
+    metricsCard:SetPoint("BOTTOMRIGHT", rightInset, "BOTTOMRIGHT", 0, 0)
     panel.metricsCard = metricsCard
 
     -- Left Column: Market Value & Freshness
@@ -860,13 +873,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local vDivider = metricsCard:CreateTexture(nil, "BORDER")
     vDivider:SetWidth(1)
     vDivider:SetPoint("TOP", metricsCard, "TOP", 0, -8)
-    vDivider:SetPoint("BOTTOM", metricsCard, "BOTTOM", 0, 8)
-    vDivider:SetColorTexture(0.20, 0.22, 0.26, 0.70)
+    vDivider:SetPoint("BOTTOM", metricsCard, "BOTTOM", 0, isEmbedded and 10 or 8)
+    vDivider:SetColorTexture(0.35, 0.30, 0.20, 0.60)
 
     -- Right Column: Intraday Analytics (30-Minute Buckets)
     local rightMetricsTitle = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     rightMetricsTitle:SetPoint("TOPLEFT", metricsCard, "TOP", 15, -8)
-    rightMetricsTitle:SetText("|cFF4499FFIntraday Analytics (30-min Buckets)|r")
+    rightMetricsTitle:SetText("|cFFFFD100Intraday Analytics (30-min Buckets)|r")
 
     local function CreateRightMetricRow(parent, anchor, yOff, label)
         local row = CreateFrame("Frame", nil, parent)
@@ -900,26 +913,61 @@ function MarketSync.CreateAnalyticsPanel(parent)
     emptyState:EnableMouse(true)
     emptyState:SetScript("OnReceiveDrag", HandleItemDrop)
     emptyState:SetScript("OnMouseUp", function() HandleItemDrop() end)
+    panel.emptyState = emptyState
+
+    local emptyIcon = emptyState:CreateTexture(nil, "ARTWORK")
+    emptyIcon:SetSize(44, 44)
+    emptyIcon:SetPoint("CENTER", emptyState, "CENTER", 0, 68)
+    emptyIcon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+    emptyIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local emptyIconBorder = emptyState:CreateTexture(nil, "OVERLAY")
+    emptyIconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+    emptyIconBorder:SetSize(72, 72)
+    emptyIconBorder:SetPoint("CENTER", emptyIcon, "CENTER", 0, 0)
 
     local emptyTitle = emptyState:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    emptyTitle:SetPoint("CENTER", 0, 40)
+    emptyTitle:SetPoint("TOP", emptyIcon, "BOTTOM", 0, -14)
     emptyTitle:SetText("|cFFFFD100Price Analytics & Historiography|r")
 
     local emptyMsg = emptyState:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    emptyMsg:SetPoint("TOP", emptyTitle, "BOTTOM", 0, -12)
+    emptyMsg:SetPoint("TOP", emptyTitle, "BOTTOM", 0, -6)
     emptyMsg:SetText("No Item Selected")
 
     local emptyDesc = emptyState:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    emptyDesc:SetPoint("TOP", emptyMsg, "BOTTOM", 0, -8)
-    emptyDesc:SetWidth(440)
+    emptyDesc:SetPoint("TOP", emptyMsg, "BOTTOM", 0, -12)
+    emptyDesc:SetWidth(460)
     emptyDesc:SetJustifyH("CENTER")
-    emptyDesc:SetText("|cFF888888Drop an item from your bags, enter a name or ID on the left,\nor pick an item from Recent Scans to view historical price charts and intraday purchasing patterns.|r")
+    emptyDesc:SetText("|cFF888888Select an item from the list on the left, or drop an item from your bags here\nto inspect historical price trendlines, data confidence, and intraday purchase timing.|r")
+
+    local function ShowEmptyState()
+        emptyState:Show()
+        banner:Hide()
+        sep1:Hide()
+        graphCard:Hide()
+        sep2:Hide()
+        metricsCard:Hide()
+    end
+    panel.ShowEmptyState = ShowEmptyState
+
+    local function HideEmptyState()
+        emptyState:Hide()
+        banner:Show()
+        sep1:Show()
+        graphCard:Show()
+        sep2:Show()
+        metricsCard:Show()
+    end
+    panel.HideEmptyState = HideEmptyState
 
     -- ================================================================
     -- SHOW ITEM DATA METHOD
     -- ================================================================
     function panel:ShowItem(dbKey, itemLink, itemName, iconTex, price)
-        if not dbKey and not itemLink and not itemName then return end
+        if not dbKey and not itemLink and not itemName then
+            ShowEmptyState()
+            return
+        end
 
         local itemInfo = ResolveItem(dbKey or itemLink or itemName)
         local key = (itemInfo and itemInfo.dbKey) or (dbKey and tostring(dbKey)) or "0"
@@ -940,7 +988,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
             link = resolvedLink,
         }
 
-        emptyState:Hide()
+        HideEmptyState()
         if self.UpdateFavBannerBtn then self:UpdateFavBannerBtn() end
         self.icon:SetTexture(iconPath)
         self.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(nameStr, qual) or nameStr)
@@ -1083,7 +1131,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
             local first = itemsList[1]
             panel:ShowItem(tostring(first.itemID), nil, first.name, first.icon, first.price)
         else
-            emptyState:Show()
+            ShowEmptyState()
         end
     end
 

@@ -696,13 +696,13 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Horizontal separator bar above headers
     local headerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
-    headerSep:SetColorTexture(1, 0.84, 0, 0.2)
+    headerSep:SetColorTexture(0.35, 0.30, 0.20, 0.60)
     headerSep:SetPoint("TOPLEFT", 0, -30)
     headerSep:SetSize(ROW_WIDTH, 1)
 
     -- Header background strip
     local headerStrip = rightBox:CreateTexture(nil, "BACKGROUND", nil, 1)
-    headerStrip:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+    headerStrip:SetColorTexture(0.12, 0.11, 0.10, 0.95)
     headerStrip:SetPoint("TOPLEFT", 0, -31)
     headerStrip:SetSize(ROW_WIDTH, 18)
 
@@ -791,12 +791,12 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         local bg = row:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.035 or 0.015)
+        bg:SetColorTexture(i % 2 == 0 and 0.10 or 0.06, i % 2 == 0 and 0.095 or 0.055, i % 2 == 0 and 0.09 or 0.05, 0.70)
         row.bg = bg
 
         local hl = row:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
-        hl:SetColorTexture(1, 0.84, 0, 0.12)
+        hl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
 
         local accent = row:CreateTexture(nil, "OVERLAY")
         accent:SetSize(3, ROW_HEIGHT)
@@ -924,7 +924,7 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Footer inside rightBox
     local footerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
-    footerSep:SetColorTexture(1, 0.84, 0, 0.2)
+    footerSep:SetColorTexture(0.35, 0.30, 0.20, 0.60)
     footerSep:SetPoint("BOTTOMLEFT", 0, 30)
     footerSep:SetSize(ROW_WIDTH, 1)
 

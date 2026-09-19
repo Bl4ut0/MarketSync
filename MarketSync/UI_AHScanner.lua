@@ -26,8 +26,8 @@ local function CreateCustomCheckBox(parent, onClick)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    cb:SetBackdropColor(0.08, 0.10, 0.13, 0.95)
-    cb:SetBackdropBorderColor(0.35, 0.38, 0.45, 0.8)
+    cb:SetBackdropColor(0.10, 0.09, 0.08, 0.95)
+    cb:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
 
     cb.checkTex = cb:CreateTexture(nil, "OVERLAY")
     cb.checkTex:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
@@ -62,31 +62,37 @@ function MarketSync.CreateAHScannerPanel(parent)
     panel:SetAllPoints(parent)
 
     -- Left Pane: Scan Lists Management (260px wide)
-    local leftInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
+    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, 260, nil)
+    if not leftInset then
+        leftInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+        leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
+        leftInset:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        leftInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
+        leftInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    end
     leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
     leftInset:SetWidth(260)
-    leftInset:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    leftInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
-    leftInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
 
     -- Right Pane: Scan Operations & Results Feed
-    local rightInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    local rightInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel)
+    if not rightInset then
+        rightInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+        rightInset:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        rightInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
+        rightInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    end
     rightInset:SetPoint("TOPLEFT", leftInset, "TOPRIGHT", 6, 0)
     rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
-    rightInset:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    rightInset:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
-    rightInset:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
 
     -- ================================================================
     -- LEFT PANE: MULTI-LIST CHECKLIST & SELECTION
@@ -137,7 +143,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     divider:SetPoint("TOPLEFT", toggleSelectBtn, "BOTTOMLEFT", -2, -8)
     divider:SetPoint("RIGHT", -4, 0)
     divider:SetHeight(1)
-    divider:SetColorTexture(0.20, 0.22, 0.26, 0.90)
+    divider:SetColorTexture(0.35, 0.30, 0.20, 0.60)
 
     -- Active List Header
     local activeListLabel = leftInset:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -321,13 +327,13 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row.count:SetText(string.format("|cff888888(%d)|r", count))
 
                 if listName == selectedListName then
-                    row:SetBackdropColor(0.20, 0.16, 0.05, 0.85)
+                    row:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
                     row.name:SetTextColor(1, 0.82, 0)
                 elseif i % 2 == 0 then
-                    row:SetBackdropColor(0.08, 0.10, 0.13, 0.5)
+                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                     row.name:SetTextColor(0.85, 0.85, 0.85)
                 else
-                    row:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
+                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                     row.name:SetTextColor(0.85, 0.85, 0.85)
                 end
 
@@ -615,8 +621,8 @@ function MarketSync.CreateAHScannerPanel(parent)
         edgeFile = "Interface\\Buttons\\WHITE8X8",
         edgeSize = 1,
     })
-    progressBar:SetBackdropColor(0.08, 0.10, 0.13, 0.95)
-    progressBar:SetBackdropBorderColor(0.20, 0.22, 0.26, 0.90)
+    progressBar:SetBackdropColor(0.10, 0.09, 0.08, 0.95)
+    progressBar:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
     progressBar:SetMinMaxValues(0, 1)
     progressBar:SetValue(0)
 
@@ -711,9 +717,9 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
                 if i % 2 == 0 then
-                    row:SetBackdropColor(0.08, 0.09, 0.12, 0.50)
+                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                 else
-                    row:SetBackdropColor(0.04, 0.05, 0.07, 0.50)
+                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                 end
 
                 row.icon:SetTexture(data.icon)
@@ -723,7 +729,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row.time:SetText(date("%H:%M:%S", data.time))
 
                 row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.18, 0.22, 0.30, 0.60)
+                    self:SetBackdropColor(0.30, 0.25, 0.12, 0.40)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     if data.itemKey and data.itemKey.itemID then
                         local link = select(2, SafeGetItemInfo(data.itemKey.itemID))
@@ -743,9 +749,9 @@ function MarketSync.CreateAHScannerPanel(parent)
 
                 row:SetScript("OnLeave", function(self)
                     if i % 2 == 0 then
-                        self:SetBackdropColor(0.08, 0.09, 0.12, 0.50)
+                        self:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
                     else
-                        self:SetBackdropColor(0.04, 0.05, 0.07, 0.50)
+                        self:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                     end
                     GameTooltip:Hide()
                 end)

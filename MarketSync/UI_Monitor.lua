@@ -381,8 +381,8 @@ local function CreateRateMonitorFrame()
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 }
     })
-    barTrack:SetBackdropColor(0.02, 0.03, 0.04, 1.0)
-    barTrack:SetBackdropBorderColor(0.22, 0.24, 0.28, 0.9)
+    barTrack:SetBackdropColor(0.10, 0.09, 0.08, 0.95)
+    barTrack:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
 
     local rateBar = CreateFrame("StatusBar", nil, barTrack)
     rateBar:SetPoint("TOPLEFT", 1, -1)
@@ -427,9 +427,9 @@ local function CreateRateMonitorFrame()
         local rowBg = row:CreateTexture(nil, "BACKGROUND")
         rowBg:SetAllPoints()
         if i % 2 == 1 then
-            rowBg:SetColorTexture(0.07, 0.09, 0.12, 0.65)
+            rowBg:SetColorTexture(0.10, 0.095, 0.09, 0.70)
         else
-            rowBg:SetColorTexture(0.04, 0.05, 0.07, 0.65)
+            rowBg:SetColorTexture(0.06, 0.055, 0.05, 0.70)
         end
         row.bg = rowBg
 
