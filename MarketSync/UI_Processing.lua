@@ -320,9 +320,21 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.page = 0
     panel.customPage = 0
 
-    local leftTopBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, LEFT_TOP_H)
-    local leftBottomBox = CreateBox(panel, LEFT_X, TOP_Y - LEFT_TOP_H - BOX_GAP, LEFT_W, LEFT_BOTTOM_H)
-    local rightBox = CreateBox(panel, RESULTS_X - 2, -75, ROW_WIDTH + 4, 335)
+    local leftTopBox, leftBottomBox, rightBox
+    if isEmbedded then
+        leftTopBox = CreateBox(panel, LEFT_X, -8, LEFT_W, 215)
+        leftBottomBox = CreateBox(panel, LEFT_X, -231, LEFT_W, nil)
+        leftBottomBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
+        rightBox = CreateBox(panel, RESULTS_X - 6, -30, ROW_WIDTH + 10, nil)
+        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
+    else
+        leftTopBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, LEFT_TOP_H)
+        leftBottomBox = CreateBox(panel, LEFT_X, TOP_Y - LEFT_TOP_H - BOX_GAP, LEFT_W, LEFT_BOTTOM_H)
+        rightBox = CreateBox(panel, RESULTS_X - 2, -75, ROW_WIDTH + 4, 335)
+    end
+    panel.leftTopBox = leftTopBox
+    panel.leftBottomBox = leftBottomBox
+    panel.rightBox = rightBox
 
     local leftTopTitle = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     leftTopTitle:SetPoint("TOPLEFT", 8, -8)
@@ -569,18 +581,38 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnRun:SetSize(100, 22)
-    btnRun:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -238, -44)
-
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnExport:SetSize(100, 22)
-    btnExport:SetPoint("LEFT", btnRun, "RIGHT", 6, 0)
-    btnExport:SetText("Export")
-
     local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnTrack:SetSize(100, 22)
-    btnTrack:SetPoint("LEFT", btnExport, "RIGHT", 6, 0)
+    local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+
+    if isEmbedded then
+        btnRun:SetSize(84, 20)
+        btnExport:SetSize(68, 20)
+        btnTrack:SetSize(64, 20)
+
+        btnTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -7)
+        btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
+        btnRun:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
+
+        statusSummary:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, -9)
+        statusSummary:SetWidth(280)
+        statusSummary:SetJustifyH("LEFT")
+    else
+        btnRun:SetSize(100, 22)
+        btnExport:SetSize(100, 22)
+        btnTrack:SetSize(100, 22)
+
+        btnRun:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -238, -44)
+        btnExport:SetPoint("LEFT", btnRun, "RIGHT", 6, 0)
+        btnTrack:SetPoint("LEFT", btnExport, "RIGHT", 6, 0)
+
+        statusSummary:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -66)
+        statusSummary:SetWidth(320)
+        statusSummary:SetJustifyH("RIGHT")
+    end
+    btnExport:SetText("Export")
     btnTrack:SetText("Track")
+    statusSummary:SetText("|cff888888Ready|r")
 
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(btnRun, {
@@ -609,12 +641,6 @@ function MarketSync.CreateProcessingPanel(parent)
             description = "Minimum gold profit required for craft",
         })
     end
-
-    local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    statusSummary:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -66)
-    statusSummary:SetWidth(320)
-    statusSummary:SetJustifyH("RIGHT")
-    statusSummary:SetText("|cff888888Ready|r")
 
     panel.sortField = "valueSort"
     panel.sortAscending = false
@@ -655,6 +681,11 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end
 
+    local numResultsPerPage = isEmbedded and 11 or 8
+    local rowHeight = isEmbedded and 36 or 37
+    local hdrY = isEmbedded and -32 or -77
+    local rowStartY = isEmbedded and -54 or -103
+
     local colX = RESULTS_X - 2
     for i, col in ipairs(colDefs) do
         local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(panel, col.width, 20, col.name, col.sortKey)
@@ -665,7 +696,7 @@ function MarketSync.CreateProcessingPanel(parent)
             hdr.label:SetPoint("LEFT", 6, 0)
             hdr.label:SetText(col.name)
         end
-        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", colX, -77)
+        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", colX, hdrY)
         hdr.sortKey = col.sortKey
 
         if col.sortKey then
@@ -722,10 +753,10 @@ function MarketSync.CreateProcessingPanel(parent)
     RefreshHeaderArrows()
 
     panel.resultRows = {}
-    for i = 1, RESULTS_PER_PAGE do
+    for i = 1, numResultsPerPage do
         local row = CreateFrame("Button", nil, panel)
-        row:SetSize(ROW_WIDTH, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, -103 - ((i - 1) * ROW_HEIGHT))
+        row:SetSize(ROW_WIDTH, rowHeight)
+        row:SetPoint("TOPLEFT", panel, "TOPLEFT", RESULTS_X, rowStartY - ((i - 1) * rowHeight))
 
         local iconButton = CreateFrame("Button", nil, row)
         iconButton:SetSize(32, 32)
@@ -1179,12 +1210,12 @@ function MarketSync.CreateProcessingPanel(parent)
     local function UpdateResultRows()
         local rows = panel.displayRows or {}
         local total = #rows
-        local totalPages = math.max(1, math.ceil(total / RESULTS_PER_PAGE))
+        local totalPages = math.max(1, math.ceil(total / numResultsPerPage))
         if panel.page < 0 then panel.page = 0 end
         if panel.page > (totalPages - 1) then panel.page = totalPages - 1 end
 
-        local firstIndex = (panel.page * RESULTS_PER_PAGE) + 1
-        for i = 1, RESULTS_PER_PAGE do
+        local firstIndex = (panel.page * numResultsPerPage) + 1
+        for i = 1, numResultsPerPage do
             local row = panel.resultRows[i]
             local data = rows[firstIndex + i - 1]
             if row and data then

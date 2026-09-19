@@ -780,7 +780,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
         metricsCard = CreateFrame("Frame", nil, rightInset, "BackdropTemplate")
     end
     metricsCard:SetPoint("TOPLEFT", graphCard, "BOTTOMLEFT", 0, -6)
-    metricsCard:SetPoint("BOTTOMRIGHT", -10, 10)
+    metricsCard:SetPoint("BOTTOMRIGHT", rightInset, "BOTTOMRIGHT", -10, 10)
 
     -- Left Column: Market Value & Freshness
     local leftMetricsTitle = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")

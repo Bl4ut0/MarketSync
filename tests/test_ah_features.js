@@ -1560,24 +1560,28 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     -- Standalone MainFrame processing panel
     local procMain = MarketSync.CreateProcessingPanel(MarketSync.MainFrame)
     assert(procMain.resultRows[1].width == 632, "MainFrame processing row width should be 632, got: " .. tostring(procMain.resultRows[1].width))
+    assert(#procMain.resultRows == 8, "MainFrame processing rows should be 8, got: " .. tostring(#procMain.resultRows))
 
     -- Embedded AH processing panel
     local ahProcContainer = CreateFrame("Frame", "AHProcContainer")
     ahProcContainer:SetSize(756, 447)
     local procAH = MarketSync.CreateProcessingPanel(ahProcContainer)
     assert(procAH.resultRows[1].width == 576, "Embedded AH processing row width should be 576, got: " .. tostring(procAH.resultRows[1].width))
+    assert(#procAH.resultRows == 11, "Embedded AH processing rows should be 11, got: " .. tostring(#procAH.resultRows))
     -- Total row right offset: RESULTS_X (162) + ROW_WIDTH (576) = 738px <= 756px
     assert(162 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
 
     -- Standalone MainFrame alerts panel
     local alertsMain = MarketSync.CreateNotificationsPanel(MarketSync.MainFrame)
     assert(alertsMain.rows[1].width == 576, "MainFrame alerts row width should be 576, got: " .. tostring(alertsMain.rows[1].width))
+    assert(#alertsMain.rows == 9, "MainFrame alerts rows should be 9, got: " .. tostring(#alertsMain.rows))
 
     -- Embedded AH alerts panel
     local ahAlertsContainer = CreateFrame("Frame", "AHAlertsContainer")
     ahAlertsContainer:SetSize(756, 447)
     local alertsAH = MarketSync.CreateNotificationsPanel(ahAlertsContainer)
     assert(alertsAH.rows[1].width == 542, "Embedded AH alerts row width should be 542, got: " .. tostring(alertsAH.rows[1].width))
+    assert(#alertsAH.rows == 12, "Embedded AH alerts rows should be 12, got: " .. tostring(#alertsAH.rows))
     -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
     assert(198 + alertsAH.rows[1].width <= 756, "Alerts table must fit inside AH width <= 756px")
   `;

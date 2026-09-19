@@ -144,6 +144,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     local LEFT_W = isEmbedded and 180 or 196
     local RESULTS_X = isEmbedded and 198 or 224
     local ROW_WIDTH = isEmbedded and 550 or 584
+    local numRowsPerPage = isEmbedded and 12 or 9
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
@@ -175,7 +176,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local btnTabWatchlist = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnTabWatchlist:SetSize(130, 22)
-    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 12 or 76, -34)
+    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 8 or 76, isEmbedded and -8 or -34)
     btnTabWatchlist:SetText("Tracked Watchlist")
 
     local btnTabHistory = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -185,7 +186,7 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     local btnTestSound = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnTestSound:SetSize(76, 20)
-    btnTestSound:SetPoint("TOPRIGHT", panel, "TOPRIGHT", isEmbedded and -12 or -26, -34)
+    btnTestSound:SetPoint("TOPRIGHT", panel, "TOPRIGHT", isEmbedded and -8 or -26, isEmbedded and -8 or -34)
     btnTestSound:SetText("Test Sound")
     btnTestSound:SetScript("OnClick", function()
         local soundID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
@@ -268,7 +269,12 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     -- LEFT COLUMN: ALERT EDITOR (BOX 1 - Height 216)
     -- =========================================================
-    local editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 216)
+    local editorBox
+    if isEmbedded then
+        editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 216)
+    else
+        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 216)
+    end
 
     local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     editorTitle:SetPoint("TOPLEFT", 10, -7)
@@ -536,7 +542,13 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2 - Height 114)
     -- =========================================================
-    local importBox = CreateBox(panel, LEFT_X, TOP_Y - 224, LEFT_W, 114)
+    local importBox
+    if isEmbedded then
+        importBox = CreateBox(panel, LEFT_X, -256, LEFT_W, nil)
+        importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
+    else
+        importBox = CreateBox(panel, LEFT_X, TOP_Y - 224, LEFT_W, 114)
+    end
 
     local importTitle = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     importTitle:SetPoint("TOPLEFT", 10, -7)
@@ -589,7 +601,13 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     -- RIGHT COLUMN: ENCLOSING RESULTS BOX (Height 338)
     -- =========================================================
-    local rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H)
+    local rightBox
+    if isEmbedded then
+        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, nil)
+        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
+    else
+        rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H)
+    end
 
     -- Top Toolbar inside rightBox
     local searchBox = CreateFrame("EditBox", nil, rightBox, "InputBoxTemplate")
@@ -766,7 +784,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     emptyLabel:SetPoint("CENTER", rightBox, "CENTER", 0, 10)
     emptyLabel:SetText("")
 
-    for i = 1, ROWS_PER_PAGE do
+    for i = 1, numRowsPerPage do
         local row = CreateFrame("Button", nil, rightBox)
         row:SetSize(ROW_WIDTH - 8, ROW_HEIGHT)
         row:SetPoint("TOPLEFT", rightBox, "TOPLEFT", 4, -51 - ((i - 1) * 28))
@@ -1205,7 +1223,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         end)
 
         local total = #allReqs
-        local maxPage = math.max(0, math.ceil(total / ROWS_PER_PAGE) - 1)
+        local maxPage = math.max(0, math.ceil(total / numRowsPerPage) - 1)
         if panel.watchlistPage > maxPage then panel.watchlistPage = maxPage end
         if panel.watchlistPage < 0 then panel.watchlistPage = 0 end
 
@@ -1213,8 +1231,8 @@ function MarketSync.CreateNotificationsPanel(parent)
         btnNext:SetEnabled(panel.watchlistPage < maxPage)
         pageText:SetText(string.format("%d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
 
-        local startIndex = (panel.watchlistPage * ROWS_PER_PAGE) + 1
-        local endIndex = math.min(total, startIndex + ROWS_PER_PAGE - 1)
+        local startIndex = (panel.watchlistPage * numRowsPerPage) + 1
+        local endIndex = math.min(total, startIndex + numRowsPerPage - 1)
 
         if total == 0 then
             countText:SetText("No tracked items")
@@ -1225,7 +1243,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             emptyLabel:Hide()
         end
 
-        for i = 1, ROWS_PER_PAGE do
+        for i = 1, numRowsPerPage do
             local row = rows[i]
             local reqIndex = startIndex + i - 1
             local req = allReqs[reqIndex]
@@ -1346,7 +1364,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         local history = realmDB and realmDB.NotificationLog or {}
 
         local total = #history
-        local maxPage = math.max(0, math.ceil(total / ROWS_PER_PAGE) - 1)
+        local maxPage = math.max(0, math.ceil(total / numRowsPerPage) - 1)
         if panel.historyPage > maxPage then panel.historyPage = maxPage end
         if panel.historyPage < 0 then panel.historyPage = 0 end
 
@@ -1354,8 +1372,8 @@ function MarketSync.CreateNotificationsPanel(parent)
         btnNext:SetEnabled(panel.historyPage < maxPage)
         pageText:SetText(string.format("%d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
 
-        local startIndex = (panel.historyPage * ROWS_PER_PAGE) + 1
-        local endIndex = math.min(total, startIndex + ROWS_PER_PAGE - 1)
+        local startIndex = (panel.historyPage * numRowsPerPage) + 1
+        local endIndex = math.min(total, startIndex + numRowsPerPage - 1)
 
         if total == 0 then
             countText:SetText("No alerts recorded")
@@ -1366,7 +1384,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             emptyLabel:Hide()
         end
 
-        for i = 1, ROWS_PER_PAGE do
+        for i = 1, numRowsPerPage do
             local row = rows[i]
             local hIndex = startIndex + i - 1
             local entry = history[hIndex]
