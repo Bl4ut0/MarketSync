@@ -304,18 +304,29 @@ end
 -- ANALYTICS PANEL CONSTRUCTOR
 -- ================================================================
 function MarketSync.CreateAnalyticsPanel(parent)
+    local isEmbedded = (parent ~= MarketSync.MainFrame)
+    local LEFT_X = isEmbedded and 6 or 20
+    local TOP_Y = isEmbedded and -6 or -75
+    local BOTTOM_Y = isEmbedded and 6 or 37
+    local RIGHT_X = isEmbedded and -6 or -20
+    local LEFT_W = 240
+    local GRAPH_H = isEmbedded and 230 or 155
+    local BANNER_H = isEmbedded and 46 or 44
+
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
+    panel.isEmbedded = isEmbedded
 
     -- Left Inset: Search, Item Drop & List of Recent/Tracked Items (240px)
-    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, 240, nil)
+    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, LEFT_X, TOP_Y, LEFT_W, nil)
     if not leftInset then
         leftInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-        leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
-        leftInset:SetWidth(240)
+        leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_X, TOP_Y)
+        leftInset:SetWidth(LEFT_W)
     end
-    leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
-    leftInset:SetWidth(240)
+    leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, BOTTOM_Y)
+    leftInset:SetWidth(LEFT_W)
+    panel.leftInset = leftInset
 
     -- Right Inset: Detail Banner, Historical Graph & Intraday Metrics
     local rightInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel)
@@ -323,7 +334,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
         rightInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     end
     rightInset:SetPoint("TOPLEFT", leftInset, "TOPRIGHT", 6, 0)
-    rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
+    rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", RIGHT_X, BOTTOM_Y)
+    panel.rightInset = rightInset
 
     -- ================================================================
     -- LEFT INSET: ITEM SELECTION & QUICK SEARCH
@@ -418,8 +430,32 @@ function MarketSync.CreateAnalyticsPanel(parent)
         end
     end)
 
+    if MarketSync.RegisterLinkAwareEditBox then
+        MarketSync.RegisterLinkAwareEditBox(searchBox, {
+            onInsertLink = function(box, text)
+                local id = text and text:match("item:(%d+)")
+                if id then
+                    panel:ShowItem(tonumber(id))
+                    box:SetText("")
+                    box:ClearFocus()
+                    return true
+                end
+                local itemName = text and text:match("%[(.-)%]")
+                if itemName and itemName ~= "" then
+                    panel:SelectByNameOrQuery(itemName)
+                    box:SetText("")
+                    box:ClearFocus()
+                    return true
+                end
+                return false
+            end
+        })
+    end
+
     -- Item List ScrollFrame
-    local itemsScroll = CreateFrame("ScrollFrame", "MarketSyncAnalyticsItemsScroll", leftInset, "UIPanelScrollFrameTemplate")
+    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
+    local scrollName = parentPrefix .. "AnalyticsItemsScroll"
+    local itemsScroll = CreateFrame("ScrollFrame", scrollName, leftInset, "UIPanelScrollFrameTemplate")
     itemsScroll:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -2, -6)
     itemsScroll:SetPoint("BOTTOMRIGHT", -22, 6)
     itemsScroll:EnableMouse(true)
@@ -527,8 +563,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
                     row = CreateFrame("Button", nil, itemsContent, "BackdropTemplate")
                     row:SetHeight(rowH)
                     row:SetBackdrop({
-                        bgFile = "Interface\Buttons\WHITE8X8",
-                        edgeFile = "Interface\Buttons\WHITE8X8",
+                        bgFile = "Interface\\Buttons\\WHITE8X8",
+                        edgeFile = "Interface\\Buttons\\WHITE8X8",
                         edgeSize = 1,
                         insets = { left = 0, right = 0, top = 0, bottom = 0 }
                     })
@@ -645,19 +681,20 @@ function MarketSync.CreateAnalyticsPanel(parent)
     -- ================================================================
     -- 1. Top Detail Banner (Icon, Name, Subtitle, Search in AH button)
     local banner = CreateFrame("Frame", nil, rightInset)
-    banner:SetPoint("TOPLEFT", 10, -8)
-    banner:SetPoint("TOPRIGHT", -10, -8)
-    banner:SetHeight(46)
+    banner:SetPoint("TOPLEFT", 10, isEmbedded and -8 or -6)
+    banner:SetPoint("TOPRIGHT", -10, isEmbedded and -8 or -6)
+    banner:SetHeight(BANNER_H)
+    panel.banner = banner
 
     local icon = banner:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(40, 40)
+    icon:SetSize(isEmbedded and 40 or 36, isEmbedded and 40 or 36)
     icon:SetPoint("LEFT", 2, 0)
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     panel.icon = icon
 
     local iconBorder = banner:CreateTexture(nil, "OVERLAY")
     iconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-    iconBorder:SetSize(68, 68)
+    iconBorder:SetSize(isEmbedded and 68 or 62, isEmbedded and 68 or 62)
     iconBorder:SetPoint("CENTER", icon, "CENTER", 0, 0)
 
     local itemName = banner:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -679,7 +716,10 @@ function MarketSync.CreateAnalyticsPanel(parent)
     searchAHBtn:SetText("Search in AH")
     searchAHBtn:SetScript("OnClick", function()
         if panel.currentItem and MarketSync.SearchInAuctionHouse then
-            MarketSync.SearchInAuctionHouse(panel.currentItem.itemID or panel.currentItem.name)
+            local success = MarketSync.SearchInAuctionHouse(panel.currentItem.itemID or panel.currentItem.name)
+            if not success and not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then
+                print("|cFFFFD100[MarketSync]|r Please visit an Auctioneer to search in the Auction House.")
+            end
         end
     end)
     searchAHBtn:SetScript("OnEnter", function(self)
@@ -759,7 +799,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
     end
     graphCard:SetPoint("TOPLEFT", banner, "BOTTOMLEFT", 0, -6)
     graphCard:SetPoint("TOPRIGHT", banner, "BOTTOMRIGHT", 0, -6)
-    graphCard:SetHeight(230)
+    graphCard:SetHeight(GRAPH_H)
+    panel.graphCard = graphCard
 
     local graphHeader = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     graphHeader:SetPoint("TOPLEFT", 10, -8)
@@ -780,18 +821,20 @@ function MarketSync.CreateAnalyticsPanel(parent)
         metricsCard = CreateFrame("Frame", nil, rightInset, "BackdropTemplate")
     end
     metricsCard:SetPoint("TOPLEFT", graphCard, "BOTTOMLEFT", 0, -6)
-    metricsCard:SetPoint("BOTTOMRIGHT", rightInset, "BOTTOMRIGHT", -10, 10)
+    metricsCard:SetPoint("BOTTOMRIGHT", rightInset, "BOTTOMRIGHT", -10, isEmbedded and 10 or 8)
+    panel.metricsCard = metricsCard
 
     -- Left Column: Market Value & Freshness
     local leftMetricsTitle = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     leftMetricsTitle:SetPoint("TOPLEFT", 14, -8)
     leftMetricsTitle:SetText("|cFFFFD100Market Value & Freshness|r")
 
+    local metricRowH = isEmbedded and 18 or 16
     local function CreateMetricRow(parent, anchor, yOff, label)
         local row = CreateFrame("Frame", nil, parent)
         row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff)
         row:SetPoint("RIGHT", parent, "CENTER", -15, 0)
-        row:SetHeight(18)
+        row:SetHeight(metricRowH)
 
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("LEFT", 0, 0)
@@ -803,10 +846,15 @@ function MarketSync.CreateAnalyticsPanel(parent)
         return val
     end
 
-    panel.mPrice = CreateMetricRow(metricsCard, leftMetricsTitle, -6, "Current Market Value")
-    panel.mStatus = CreateMetricRow(metricsCard, leftMetricsTitle, -26, "Data Health / Confidence")
-    panel.mAge = CreateMetricRow(metricsCard, leftMetricsTitle, -46, "Data Age (Last Scanned)")
-    panel.mSource = CreateMetricRow(metricsCard, leftMetricsTitle, -66, "Source Distribution")
+    local rowOff1 = -4
+    local rowOff2 = isEmbedded and -24 or -22
+    local rowOff3 = isEmbedded and -44 or -40
+    local rowOff4 = isEmbedded and -64 or -58
+
+    panel.mPrice = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff1, "Current Market Value")
+    panel.mStatus = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff2, "Data Health / Confidence")
+    panel.mAge = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff3, "Data Age (Last Scanned)")
+    panel.mSource = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff4, "Source Distribution")
 
     -- Subtle vertical divider in metrics card
     local vDivider = metricsCard:CreateTexture(nil, "BORDER")
@@ -824,7 +872,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
         local row = CreateFrame("Frame", nil, parent)
         row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff)
         row:SetPoint("RIGHT", parent, "RIGHT", -14, 0)
-        row:SetHeight(18)
+        row:SetHeight(metricRowH)
 
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("LEFT", 0, 0)
@@ -836,12 +884,12 @@ function MarketSync.CreateAnalyticsPanel(parent)
         return val
     end
 
-    panel.mBestTime = CreateRightMetricRow(metricsCard, rightMetricsTitle, -6, "Best Time to Buy")
-    panel.mVolatility = CreateRightMetricRow(metricsCard, rightMetricsTitle, -26, "Intraday Price Volatility")
-    panel.mDataPoints = CreateRightMetricRow(metricsCard, rightMetricsTitle, -46, "Granular Snapshots")
+    panel.mBestTime = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff1, "Best Time to Buy")
+    panel.mVolatility = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff2, "Intraday Price Volatility")
+    panel.mDataPoints = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff3, "Granular Snapshots")
 
     local debugNote = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
-    debugNote:SetPoint("BOTTOMLEFT", metricsCard, "BOTTOM", 15, 8)
+    debugNote:SetPoint("BOTTOMLEFT", metricsCard, "BOTTOM", 15, isEmbedded and 8 or 6)
     debugNote:SetPoint("RIGHT", -14, 0)
     debugNote:SetJustifyH("LEFT")
     debugNote:SetText("|cFF888888Intraday analytics compute cyclical price dips based on 30-minute scan snapshots across sessions.|r")

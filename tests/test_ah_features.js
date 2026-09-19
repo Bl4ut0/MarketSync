@@ -1505,6 +1505,8 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
         SetAllPoints = function(self) end,
         SetSize = function(self, w, h) self.width = w self.height = h end,
+        SetWidth = function(self, w) self.width = w end,
+        SetHeight = function(self, h) self.height = h end,
         SetBackdrop = function() end,
         SetBackdropColor = function() end,
         SetBackdropBorderColor = function() end,
@@ -1512,6 +1514,8 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         GetHeight = function(self) return self.height or 0 end,
         SetAutoFocus = function() end,
         SetNumeric = function() end,
+        SetFontObject = function() end,
+        SetScrollChild = function() end,
         SetScript = function(self, name, fn) self.scripts[name] = fn end,
         SetText = function(self, t) self.text = t end,
         GetText = function(self) return self.text or "" end,
@@ -1531,9 +1535,11 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         Enable = function() end,
         Disable = function() end,
         SetEnabled = function(self, en) if en then self:Enable() else self:Disable() end end,
-        CreateTexture = function() return { SetColorTexture = function() end, SetTexture = function() end, SetSize = function() end, SetPoint = function() end, SetAllPoints = function() end, SetBlendMode = function() end, SetVertexColor = function() end, SetTexCoord = function() end, Show = function() end, Hide = function() end } end,
+        CreateTexture = function() return { SetColorTexture = function() end, SetTexture = function() end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetPoint = function() end, SetAllPoints = function() end, SetBlendMode = function() end, SetVertexColor = function() end, SetTexCoord = function() end, Show = function() end, Hide = function() end } end,
+        CreateLine = function() return { SetThickness = function() end, SetColorTexture = function() end, SetStartPoint = function() end, SetEndPoint = function() end, Show = function() end, Hide = function() end } end,
         CreateFontString = function() return { SetPoint = function() end, ClearAllPoints = function() end, SetText = function() end, GetText = function() return "" end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetJustifyH = function() end, SetTextColor = function() end, SetFontObject = function() end, Show = function() end, Hide = function() end } end,
         EnableMouseWheel = function() end,
+        EnableMouse = function() end,
       }
       if frameType == "CheckButton" or (template and type(template) == "string" and template:find("CheckButton")) then
         f.text = f:CreateFontString()
@@ -1554,6 +1560,11 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   const notifLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Notifications.lua'), 'utf8');
   if (lauxlib.luaL_dostring(L, to_luastring(notifLua)) !== 0) {
     throw new Error('Failed to load UI_Notifications.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const analyticsLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Analytics.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(analyticsLua)) !== 0) {
+    throw new Error('Failed to load UI_Analytics.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
 
   const check = `
@@ -1584,6 +1595,20 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(#alertsAH.rows == 12, "Embedded AH alerts rows should be 12, got: " .. tostring(#alertsAH.rows))
     -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
     assert(198 + alertsAH.rows[1].width <= 756, "Alerts table must fit inside AH width <= 756px")
+
+    -- Standalone MainFrame analytics panel
+    local analyticsMain = MarketSync.CreateAnalyticsPanel(MarketSync.MainFrame)
+    assert(analyticsMain.isEmbedded == false, "MainFrame analytics isEmbedded should be false")
+    assert(analyticsMain.graphCard.height == 155, "MainFrame analytics graph height should be 155, got: " .. tostring(analyticsMain.graphCard.height))
+    assert(analyticsMain.banner.height == 44, "MainFrame analytics banner height should be 44, got: " .. tostring(analyticsMain.banner.height))
+
+    -- Embedded AH analytics panel
+    local ahAnalyticsContainer = CreateFrame("Frame", "AHAnalyticsContainer")
+    ahAnalyticsContainer:SetSize(756, 447)
+    local analyticsAH = MarketSync.CreateAnalyticsPanel(ahAnalyticsContainer)
+    assert(analyticsAH.isEmbedded == true, "AH analytics isEmbedded should be true")
+    assert(analyticsAH.graphCard.height == 230, "AH analytics graph height should be 230, got: " .. tostring(analyticsAH.graphCard.height))
+    assert(analyticsAH.banner.height == 46, "AH analytics banner height should be 46, got: " .. tostring(analyticsAH.banner.height))
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Responsive layout check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
