@@ -1349,57 +1349,262 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
     if not scrollFrame then return end
     local name = scrollFrame:GetName()
     local scrollBar = (name and _G[name .. "ScrollBar"]) or scrollFrame.ScrollBar
+    if not scrollBar then
+        for _, child in ipairs({ scrollFrame:GetChildren() }) do
+            if child and child.IsObjectType and child:IsObjectType("Slider") then
+                scrollBar = child
+                break
+            end
+        end
+    end
     if not scrollBar then return end
 
-    local barWidth = customWidth or 6
+    local barWidth = customWidth or 8
     local xOff = offsetX or 0
+    local sbName = scrollBar:GetName()
 
-    -- Hide ancient Classic up/down buttons
-    local upBtn = (name and _G[name .. "ScrollBarScrollUpButton"]) or scrollBar.ScrollUpButton or scrollBar.Back
-    local downBtn = (name and _G[name .. "ScrollBarScrollDownButton"]) or scrollBar.ScrollDownButton or scrollBar.Forward
-    if upBtn then
-        upBtn:Hide()
-        upBtn:SetAlpha(0)
-        upBtn:SetSize(0.1, 0.1)
-        upBtn:EnableMouse(false)
-    end
-    if downBtn then
-        downBtn:Hide()
-        downBtn:SetAlpha(0)
-        downBtn:SetSize(0.1, 0.1)
-        downBtn:EnableMouse(false)
+    -- Identify up/down buttons
+    local upBtn = (sbName and _G[sbName .. "ScrollUpButton"]) or (name and _G[name .. "ScrollBarScrollUpButton"]) or scrollBar.ScrollUpButton or scrollBar.Back
+    local downBtn = (sbName and _G[sbName .. "ScrollDownButton"]) or (name and _G[name .. "ScrollBarScrollDownButton"]) or scrollBar.ScrollDownButton or scrollBar.Forward
+    if not upBtn or not downBtn then
+        for _, child in ipairs({ scrollBar:GetChildren() }) do
+            if child and child.IsObjectType and child:IsObjectType("Button") then
+                if not upBtn then upBtn = child
+                elseif not downBtn then downBtn = child end
+            end
+        end
     end
 
-    -- Re-anchor scrollBar to span from top to bottom seamlessly
+    -- Re-anchor scrollBar to span seamlessly
     scrollBar:ClearAllPoints()
-    scrollBar:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", xOff + barWidth + 2, -2)
-    scrollBar:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", xOff + barWidth + 2, 2)
+    scrollBar:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", xOff + barWidth + 2, -14)
+    scrollBar:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", xOff + barWidth + 2, 14)
     scrollBar:SetWidth(barWidth)
 
-    -- Style track background: subtle dark stone gutter
+    -- Style track background: subtle dark stone recessed groove
     if not scrollBar.modernTrack then
         local track = scrollBar:CreateTexture(nil, "BACKGROUND")
         track:SetAllPoints()
-        track:SetColorTexture(0.04, 0.04, 0.04, 0.45)
+        track:SetColorTexture(0.04, 0.04, 0.04, 0.55)
         scrollBar.modernTrack = track
     end
 
     -- Style thumb: modern sleek rounded pill
-    local thumb = (name and _G[name .. "ScrollBarThumbTexture"]) or scrollBar.ThumbTexture or (scrollBar.GetThumbTexture and scrollBar:GetThumbTexture())
+    local thumb = (sbName and _G[sbName .. "ThumbTexture"]) or (scrollBar.GetThumbTexture and scrollBar:GetThumbTexture()) or scrollBar.ThumbTexture
     if thumb then
         thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
         thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) -- Warm bronze/stone
         thumb:SetSize(barWidth, 32)
     end
 
+    -- Modern Chevron Up Button
+    if upBtn then
+        upBtn:ClearAllPoints()
+        upBtn:SetPoint("BOTTOM", scrollBar, "TOP", 0, 1)
+        upBtn:SetSize(barWidth + 4, 12)
+        if upBtn.SetNormalTexture then
+            upBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Up-Up")
+            upBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Up-Down")
+            upBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Up-Disabled")
+            local nt = upBtn:GetNormalTexture()
+            if nt and nt.SetVertexColor then nt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+        end
+    end
+
+    -- Modern Chevron Down Button
+    if downBtn then
+        downBtn:ClearAllPoints()
+        downBtn:SetPoint("TOP", scrollBar, "BOTTOM", 0, -1)
+        downBtn:SetSize(barWidth + 4, 12)
+        if downBtn.SetNormalTexture then
+            downBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Down-Up")
+            downBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Down-Down")
+            downBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Down-Disabled")
+            local nt = downBtn:GetNormalTexture()
+            if nt and nt.SetVertexColor then nt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+        end
+    end
+
     -- Hover effect on thumb
     if scrollBar.HookScript then
         scrollBar:HookScript("OnEnter", function()
-            if thumb then thumb:SetColorTexture(0.48, 0.38, 0.18, 0.95) end
+            if thumb and thumb.SetColorTexture then thumb:SetColorTexture(0.48, 0.38, 0.18, 0.95) end
         end)
         scrollBar:HookScript("OnLeave", function()
-            if thumb then thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) end
+            if thumb and thumb.SetColorTexture then thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) end
+        end)
+    end
+
+    -- Hook UIPanelScrollBar_Update to preserve modern styling on range updates
+    if not scrollBar._modernHooked and type(hooksecurefunc) == "function" and _G["UIPanelScrollBar_Update"] then
+        scrollBar._modernHooked = true
+        hooksecurefunc("UIPanelScrollBar_Update", function(sb)
+            if sb == scrollBar then
+                if thumb and thumb.SetColorTexture then
+                    thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
+                    thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85)
+                    local curH = thumb:GetHeight() or 32
+                    thumb:SetSize(barWidth, math.max(20, curH))
+                end
+                if upBtn and upBtn.GetNormalTexture and upBtn:GetNormalTexture() and upBtn:GetNormalTexture().SetVertexColor then
+                    upBtn:GetNormalTexture():SetVertexColor(0.70, 0.65, 0.55, 0.90)
+                end
+                if downBtn and downBtn.GetNormalTexture and downBtn:GetNormalTexture() and downBtn:GetNormalTexture().SetVertexColor then
+                    downBtn:GetNormalTexture():SetVertexColor(0.70, 0.65, 0.55, 0.90)
+                end
+            end
         end)
     end
 end
+
+-- ================================================================
+-- UI HELPER: CreateModernTableScrollBar
+-- Creates a modern vertical scrollbar for paginated table insets
+-- (e.g., Browse, Processing, Alerts) matching native WoW AH tables.
+-- ================================================================
+function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged, customWidth, topOffset, bottomOffset)
+    if not parent or not insetFrame then return end
+
+    local barWidth = customWidth or 8
+    local topOff = topOffset or -30
+    local botOff = bottomOffset or 28
+
+    local slider = CreateFrame("Slider", nil, insetFrame)
+    slider:SetPoint("TOPRIGHT", insetFrame, "TOPRIGHT", -4, topOff - 14)
+    slider:SetPoint("BOTTOMRIGHT", insetFrame, "BOTTOMRIGHT", -4, botOff + 14)
+    slider:SetWidth(barWidth)
+    slider:SetOrientation("VERTICAL")
+    slider:SetMinMaxValues(0, 1)
+    slider:SetValue(0)
+    slider:SetValueStep(1)
+    slider:EnableMouse(true)
+    slider:EnableMouseWheel(true)
+
+    -- Track gutter
+    local track = slider:CreateTexture(nil, "BACKGROUND")
+    track:SetAllPoints()
+    track:SetColorTexture(0.04, 0.04, 0.04, 0.55)
+    slider.track = track
+
+    -- Thumb pill
+    local thumb = slider:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
+    thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85)
+    thumb:SetSize(barWidth, 32)
+    slider:SetThumbTexture(thumb)
+    slider.thumb = thumb
+
+    -- Hover effect
+    slider:SetScript("OnEnter", function()
+        thumb:SetColorTexture(0.48, 0.38, 0.18, 0.95)
+    end)
+    slider:SetScript("OnLeave", function()
+        thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85)
+    end)
+
+    -- Up Chevron Button
+    local upBtn = CreateFrame("Button", nil, insetFrame)
+    upBtn:SetSize(barWidth + 4, 12)
+    upBtn:SetPoint("BOTTOM", slider, "TOP", 0, 1)
+    if upBtn.SetNormalTexture then
+        upBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Up-Up")
+        upBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Up-Down")
+        upBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Up-Disabled")
+        local upTex = upBtn:GetNormalTexture()
+        if upTex and upTex.SetVertexColor then upTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    end
+
+    -- Down Chevron Button
+    local downBtn = CreateFrame("Button", nil, insetFrame)
+    downBtn:SetSize(barWidth + 4, 12)
+    downBtn:SetPoint("TOP", slider, "BOTTOM", 0, -1)
+    if downBtn.SetNormalTexture then
+        downBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Down-Up")
+        downBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Down-Down")
+        downBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Down-Disabled")
+        local downTex = downBtn:GetNormalTexture()
+        if downTex and downTex.SetVertexColor then downTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    end
+
+    slider.upBtn = upBtn
+    slider.downBtn = downBtn
+
+    local isUpdating = false
+    slider:SetScript("OnValueChanged", function(self, value)
+        if isUpdating then return end
+        local rounded = math.floor(value + 0.5)
+        if onPageChanged then
+            onPageChanged(rounded)
+        end
+    end)
+
+    upBtn:SetScript("OnClick", function()
+        local cur = slider:GetValue()
+        local minVal, _ = slider:GetMinMaxValues()
+        if cur > minVal then
+            slider:SetValue(math.max(minVal, cur - 1))
+        end
+    end)
+
+    downBtn:SetScript("OnClick", function()
+        local cur = slider:GetValue()
+        local _, maxVal = slider:GetMinMaxValues()
+        if cur < maxVal then
+            slider:SetValue(math.min(maxVal, cur + 1))
+        end
+    end)
+
+    local function HandleWheel(delta)
+        local cur = slider:GetValue()
+        local minVal, maxVal = slider:GetMinMaxValues()
+        if minVal >= maxVal then return end
+        if delta > 0 then
+            slider:SetValue(math.max(minVal, cur - 1))
+        else
+            slider:SetValue(math.min(maxVal, cur + 1))
+        end
+    end
+
+    slider:SetScript("OnMouseWheel", function(self, delta)
+        HandleWheel(delta)
+    end)
+
+    function slider:AttachMouseWheel(targetFrame)
+        if not targetFrame then return end
+        targetFrame:EnableMouseWheel(true)
+        if targetFrame.HookScript then
+            targetFrame:HookScript("OnMouseWheel", function(self, delta)
+                HandleWheel(delta)
+            end)
+        else
+            targetFrame:SetScript("OnMouseWheel", function(self, delta)
+                HandleWheel(delta)
+            end)
+        end
+    end
+
+    function slider:Update(currentPage, maxPage)
+        isUpdating = true
+        maxPage = math.max(0, maxPage or 0)
+        currentPage = math.max(0, math.min(currentPage or 0, maxPage))
+        slider:SetMinMaxValues(0, maxPage)
+        slider:SetValue(currentPage)
+
+        if maxPage > 0 then
+            slider:Show()
+            upBtn:Show()
+            downBtn:Show()
+            if currentPage <= 0 then upBtn:Disable() else upBtn:Enable() end
+            if currentPage >= maxPage then downBtn:Disable() else downBtn:Enable() end
+        else
+            slider:Hide()
+            upBtn:Hide()
+            downBtn:Hide()
+        end
+        isUpdating = false
+    end
+
+    return slider
+end
+
 

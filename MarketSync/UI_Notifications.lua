@@ -622,6 +622,22 @@ function MarketSync.CreateNotificationsPanel(parent)
         rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H)
     end
 
+    local tableScrollBar
+    if MarketSync.CreateModernTableScrollBar and rightBox then
+        tableScrollBar = MarketSync.CreateModernTableScrollBar(panel, rightBox, function(newPage)
+            if panel.currentView == "watchlist" then
+                panel.watchlistPage = newPage
+                if RefreshWatchlistTable then RefreshWatchlistTable() end
+            else
+                panel.historyPage = newPage
+                if RefreshHistoryTable then RefreshHistoryTable() end
+            end
+        end, 8, -28, 28)
+        panel.tableScrollBar = tableScrollBar
+        tableScrollBar:AttachMouseWheel(rightBox)
+        tableScrollBar:AttachMouseWheel(panel)
+    end
+
     -- Top Toolbar inside rightBox
     local searchBox = CreateFrame("EditBox", nil, rightBox, "InputBoxTemplate")
     searchBox:SetSize(180, 18)
@@ -931,6 +947,11 @@ function MarketSync.CreateNotificationsPanel(parent)
                 threshBox:SetText(FormatGoldInput(row.historyEntry.threshold))
             end
         end)
+
+        if tableScrollBar then
+            tableScrollBar:AttachMouseWheel(row)
+            tableScrollBar:AttachMouseWheel(iconBtn)
+        end
 
         rows[i] = row
     end
@@ -1243,6 +1264,9 @@ function MarketSync.CreateNotificationsPanel(parent)
         btnPrev:SetEnabled(panel.watchlistPage > 0)
         btnNext:SetEnabled(panel.watchlistPage < maxPage)
         pageText:SetText(string.format("%d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
+        if tableScrollBar then
+            tableScrollBar:Update(panel.watchlistPage, maxPage)
+        end
 
         local startIndex = (panel.watchlistPage * numRowsPerPage) + 1
         local endIndex = math.min(total, startIndex + numRowsPerPage - 1)
@@ -1384,6 +1408,9 @@ function MarketSync.CreateNotificationsPanel(parent)
         btnPrev:SetEnabled(panel.historyPage > 0)
         btnNext:SetEnabled(panel.historyPage < maxPage)
         pageText:SetText(string.format("%d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
+        if tableScrollBar then
+            tableScrollBar:Update(panel.historyPage, maxPage)
+        end
 
         local startIndex = (panel.historyPage * numRowsPerPage) + 1
         local endIndex = math.min(total, startIndex + numRowsPerPage - 1)

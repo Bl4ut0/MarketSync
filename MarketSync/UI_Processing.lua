@@ -346,6 +346,20 @@ function MarketSync.CreateProcessingPanel(parent)
     local btnRun
     local ApplyDisplaySort
     local RunActiveMode
+    local UpdateResultRows
+
+    local tableScrollBar
+    if MarketSync.CreateModernTableScrollBar and rightBox then
+        tableScrollBar = MarketSync.CreateModernTableScrollBar(panel, rightBox, function(newPage)
+            panel.page = newPage
+            if UpdateResultRows then
+                UpdateResultRows()
+            end
+        end, 8, isEmbedded and -24 or -28, 28)
+        panel.tableScrollBar = tableScrollBar
+        tableScrollBar:AttachMouseWheel(rightBox)
+        tableScrollBar:AttachMouseWheel(panel)
+    end
 
     local function UpdateRunButtonText()
         if not btnRun then return end
@@ -1013,6 +1027,10 @@ function MarketSync.CreateProcessingPanel(parent)
         end)
 
         row:Hide()
+        if tableScrollBar then
+            tableScrollBar:AttachMouseWheel(row)
+            tableScrollBar:AttachMouseWheel(iconButton)
+        end
         panel.resultRows[i] = row
     end
 
@@ -1313,6 +1331,10 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.noResultsText:Hide()
         else
             panel.noResultsText:Show()
+        end
+
+        if tableScrollBar then
+            tableScrollBar:Update(panel.page, totalPages - 1)
         end
     end
 

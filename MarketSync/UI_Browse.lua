@@ -987,8 +987,20 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     local tableInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 182, -75, 630, 335)
     panel.tableInset = tableInset
 
+    -- Modern vertical scrollbar for results table matching native AH
+    local tableScrollBar
+    if MarketSync.CreateModernTableScrollBar and tableInset then
+        tableScrollBar = MarketSync.CreateModernTableScrollBar(panel, tableInset, function(newPage)
+            panel.page = newPage
+            panel:UpdateResults()
+        end, 8, -24, 10)
+        panel.tableScrollBar = tableScrollBar
+        tableScrollBar:AttachMouseWheel(tableInset)
+    end
+
     -- Modern slim scrollbar matching native Auction House client
-    local filterScroll = CreateFrame("ScrollFrame", "MarketSyncBrowseFilterScroll", panel, "UIPanelScrollFrameTemplate")
+    local scrollName = "MarketSyncBrowse" .. tostring(dataSourceName or "Scan") .. "FilterScroll"
+    local filterScroll = CreateFrame("ScrollFrame", scrollName, panel, "UIPanelScrollFrameTemplate")
     filterScroll:SetPoint("TOPLEFT", categoryInset or panel, "TOPLEFT", 3, -4)
     filterScroll:SetSize(SIDEBAR_WIDTH - 12, SIDEBAR_HEIGHT - 8)
     local filterChild = CreateFrame("Frame")
@@ -1494,6 +1506,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         end)
 
         row:Hide()
+        if tableScrollBar then
+            tableScrollBar:AttachMouseWheel(row)
+        end
         panel.resultRows[i] = row
     end
 
@@ -1679,6 +1694,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         self.pageText:SetText(statusStr)
         self.prevBtn:SetEnabled(self.page > 0)
         self.nextBtn:SetEnabled(self.page < maxPage)
+        if self.tableScrollBar then
+            self.tableScrollBar:Update(self.page, maxPage)
+        end
     end
 
     function panel:ApplySort()
