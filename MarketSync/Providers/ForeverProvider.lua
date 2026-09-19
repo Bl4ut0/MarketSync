@@ -155,6 +155,11 @@ function ForeverProvider.GetPriceAge(keyOrLink)
     return nil
 end
 
+function ForeverProvider.GetPriceTime(keyOrLink)
+    local snapshot = ForeverProvider.GetSnapshot(keyOrLink)
+    return snapshot and snapshot.seenAt or nil
+end
+
 function ForeverProvider.GetCurrentBucket()
     -- Native Unix 30-minute tracking buckets
     return math.floor(time() / 1800)

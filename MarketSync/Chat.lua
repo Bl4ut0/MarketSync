@@ -1402,7 +1402,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local price = MarketSync.GetAuctionPrice(link)
             local age = MarketSync.GetAuctionAge(link)
             if price and age then
-                local scanDay = MarketSync.GetCurrentScanDay() - age
+                local scanDay = MarketSync.GetCurrentScanDay() - math.floor(age)
                 MarketSync.SendSyncResponse(link, price, scanDay, 0, "GUILD")
             end
 
@@ -1865,7 +1865,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
                         meta = MarketSync.GetRealmDB().ItemMetadata[tostring(itemID)] or MarketSync.GetRealmDB().ItemMetadata["g:"..itemID] or MarketSync.GetRealmDB().ItemMetadata["p:"..itemID]
                     end
 
-                    if age == 0 then
+                    local isToday = (age == 0) or (type(age) == "number" and (age < 1 or math.floor(age) == 0))
+                    if isToday then
                         local metaTime = meta and tonumber(meta.lastTime or meta.time) or 0
                         local metaSource = meta and (meta.lastSource or meta.source)
                         
@@ -1890,15 +1891,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
                         end
                     elseif age then
                         -- For older scans, trace the exact source for that specific historical day
+                        local wholeDays = math.max(1, math.floor(age))
                         if meta and meta.days then
                             local currentDay = MarketSync.GetCurrentScanDay()
-                            local scanDay = currentDay - age
+                            local scanDay = currentDay - wholeDays
                             local dayData = meta.days[tostring(scanDay)]
                             if dayData and dayData.source and dayData.source ~= "Personal" then
                                 source = dayData.source
                             end
                         end
-                        ageStr = age .. "d ago (" .. source .. ")"
+                        ageStr = wholeDays .. "d ago (" .. source .. ")"
                     else
                         ageStr = "Unknown"
                     end

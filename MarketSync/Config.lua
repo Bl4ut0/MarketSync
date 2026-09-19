@@ -734,6 +734,14 @@ function MarketSync.GetAuctionAge(itemLink)
     return nil
 end
 
+function MarketSync.GetAuctionTime(itemLink)
+    if MarketSync.Provider and MarketSync.Provider.GetPriceTime then
+        local t = MarketSync.Provider.GetPriceTime(itemLink)
+        if t ~= nil then return t end
+    end
+    return nil
+end
+
 MarketSync.SCAN_DAY_0 = 1577836800 -- Jan 1, 2020 UTC
 
 function MarketSync.GetCurrentScanDay()
@@ -906,19 +914,87 @@ function MarketSync.FormatRelativeTime(epochTime, fallbackDays)
         if diff < 60 then
             return "Just now"
         elseif diff < 3600 then
-            return string.format("%dm ago", math.floor(diff / 60))
+            return string.format("%dm ago", math.max(1, math.floor(diff / 60)))
         elseif diff < 86400 then
             return string.format("%dh ago", math.floor(diff / 3600))
         else
             return string.format("%dd ago", math.floor(diff / 86400))
         end
     end
-    if fallbackDays ~= nil then
-        if fallbackDays == 0 then return "Today" end
-        if fallbackDays == 1 then return "Yesterday" end
-        return string.format("%dd ago", fallbackDays)
+    if fallbackDays ~= nil and type(fallbackDays) == "number" then
+        if fallbackDays < 1 and fallbackDays > 0 then
+            local diff = math.floor(fallbackDays * 86400)
+            if diff < 60 then return "Just now" end
+            if diff < 3600 then return string.format("%dm ago", math.max(1, math.floor(diff / 60))) end
+            return string.format("%dh ago", math.floor(diff / 3600))
+        end
+        local wholeDays = math.max(0, math.floor(fallbackDays))
+        if wholeDays == 0 then return "Today" end
+        if wholeDays == 1 then return "Yesterday" end
+        return string.format("%dd ago", wholeDays)
     end
     return "Unknown"
+end
+
+function MarketSync.FormatAuctionAge(ageDays, exactTime, isDetailed)
+    local diff = nil
+    if exactTime and tonumber(exactTime) and tonumber(exactTime) > 0 then
+        diff = math.max(0, time() - tonumber(exactTime))
+    elseif ageDays and type(ageDays) == "number" then
+        if ageDays < 1 and ageDays > 0 then
+            diff = math.max(0, math.floor(ageDays * 86400))
+        elseif ageDays >= 1 then
+            diff = math.floor(ageDays * 86400)
+        elseif ageDays == 0 then
+            diff = 0
+        end
+    end
+
+    if diff == nil then
+        if ageDays ~= nil and type(ageDays) == "number" then
+            local wholeDays = math.max(0, math.floor(ageDays))
+            if wholeDays == 0 then return "Today" end
+            if wholeDays == 1 then return isDetailed and "1 day ago" or "1d ago" end
+            return isDetailed and string.format("%d days ago", wholeDays) or string.format("%dd ago", wholeDays)
+        end
+        return "Unknown"
+    end
+
+    if isDetailed then
+        if diff < 60 then
+            return "Just now"
+        elseif diff < 3600 then
+            local mins = math.max(1, math.floor(diff / 60))
+            return string.format("%d min%s ago", mins, mins == 1 and "" or "s")
+        elseif diff < 86400 then
+            local hours = math.floor(diff / 3600)
+            local remMins = math.floor((diff % 3600) / 60)
+            if remMins > 0 then
+                return string.format("%d hr%s %d min%s ago", hours, hours == 1 and "" or "s", remMins, remMins == 1 and "" or "s")
+            else
+                return string.format("%d hr%s ago", hours, hours == 1 and "" or "s")
+            end
+        else
+            local days = math.floor(diff / 86400)
+            if days <= 1 then
+                return "1 day ago"
+            else
+                return string.format("%d days ago", days)
+            end
+        end
+    else
+        -- Compact format (for table columns and narrow views)
+        if diff < 60 then
+            return "Just now"
+        elseif diff < 3600 then
+            return string.format("%dm ago", math.max(1, math.floor(diff / 60)))
+        elseif diff < 86400 then
+            return string.format("%dh ago", math.floor(diff / 3600))
+        else
+            local days = math.floor(diff / 86400)
+            return string.format("%dd ago", math.max(1, days))
+        end
+    end
 end
 
 function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
@@ -965,6 +1041,12 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
             local provAge = MarketSync.Provider.GetPriceAge and MarketSync.Provider.GetPriceAge(lookupKey)
             if provAge ~= nil then
                 ageDays = math.max(0, math.floor(provAge))
+            end
+            if not scanTime and MarketSync.Provider.GetSnapshot then
+                local snap = MarketSync.Provider.GetSnapshot(lookupKey)
+                if snap and snap.seenAt then
+                    scanTime = snap.seenAt
+                end
             end
             source = "Guild Sync"
         end

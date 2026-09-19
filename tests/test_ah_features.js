@@ -1009,6 +1009,88 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
   }
 });
 
+test('Auction age formatting masks float days into human-readable duration without decimals', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    time = function() return 1773780000 end
+    hooksecurefunc = function() end
+    CreateFrame = function()
+      local f = {
+        SetScript = function() end,
+        SetBackdrop = function() end,
+        SetSize = function() end,
+        SetPoint = function() end,
+        SetText = function() end,
+        Show = function() end,
+        Hide = function() end,
+        CreateFontString = function() return { SetPoint = function() end, SetText = function() end } end,
+        RegisterEvent = function() end,
+      }
+      return f
+    end
+    C_Timer = { After = function() end }
+    GetGameTime = function() return 12, 0 end
+    date = function(fmt, t) return "Sep 18" end
+    GetNormalizedRealmName = function() return "TestRealm" end
+    GetRealmName = function() return "TestRealm" end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    -- 1. Test 5 minutes ago from float days (0.0036689814814815 days ≈ 317s)
+    local floatAge = 317 / 86400
+    local detailed = MarketSync.FormatAuctionAge(floatAge, nil, true)
+    local compact = MarketSync.FormatAuctionAge(floatAge, nil, false)
+    assert(detailed == "5 mins ago", "Expected '5 mins ago', got: " .. tostring(detailed))
+    assert(compact == "5m ago", "Expected '5m ago', got: " .. tostring(compact))
+
+    -- 2. Test exactTime timestamp (10 minutes ago = 600s)
+    local scanTime = time() - 600
+    local detailedTime = MarketSync.FormatAuctionAge(nil, scanTime, true)
+    local compactTime = MarketSync.FormatAuctionAge(nil, scanTime, false)
+    assert(detailedTime == "10 mins ago", "Expected '10 mins ago', got: " .. tostring(detailedTime))
+    assert(compactTime == "10m ago", "Expected '10m ago', got: " .. tostring(compactTime))
+
+    -- 3. Test hours and minutes (2 hours 15 mins = 8100s)
+    local twoHoursAgo = time() - 8100
+    local detailedHrs = MarketSync.FormatAuctionAge(nil, twoHoursAgo, true)
+    local compactHrs = MarketSync.FormatAuctionAge(nil, twoHoursAgo, false)
+    assert(detailedHrs == "2 hrs 15 mins ago", "Expected '2 hrs 15 mins ago', got: " .. tostring(detailedHrs))
+    assert(compactHrs == "2h ago", "Expected '2h ago', got: " .. tostring(compactHrs))
+
+    -- 4. Test multi-day age with decimals stripped (4.72 days)
+    local multiDayAge = 4.72
+    local detailedDays = MarketSync.FormatAuctionAge(multiDayAge, nil, true)
+    local compactDays = MarketSync.FormatAuctionAge(multiDayAge, nil, false)
+    assert(detailedDays == "4 days ago", "Expected '4 days ago', got: " .. tostring(detailedDays))
+    assert(compactDays == "4d ago", "Expected '4d ago', got: " .. tostring(compactDays))
+
+    -- 5. Test 1 day ago
+    local oneDay = MarketSync.FormatAuctionAge(1.0, nil, true)
+    local oneDayCompact = MarketSync.FormatAuctionAge(1.0, nil, false)
+    assert(oneDay == "1 day ago", "Expected '1 day ago', got: " .. tostring(oneDay))
+    assert(oneDayCompact == "1d ago", "Expected '1d ago', got: " .. tostring(oneDayCompact))
+
+    -- 6. Test FormatRelativeTime fallbackDays with float
+    local relTimeFloat = MarketSync.FormatRelativeTime(nil, floatAge)
+    assert(relTimeFloat == "5m ago", "Expected '5m ago' from FormatRelativeTime, got: " .. tostring(relTimeFloat))
+
+    local relTimeMulti = MarketSync.FormatRelativeTime(nil, 3.8)
+    assert(relTimeMulti == "3d ago", "Expected '3d ago' without decimals, got: " .. tostring(relTimeMulti))
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('FormatAuctionAge test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {

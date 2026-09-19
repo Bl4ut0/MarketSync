@@ -113,6 +113,15 @@ function Provider.GetPriceAge(keyOrLink)
     return nil
 end
 
+function Provider.GetPriceTime(keyOrLink)
+    local active = Provider.GetActive()
+    if active and active.GetPriceTime then
+        return active.GetPriceTime(keyOrLink)
+    end
+    local snap = Provider.GetSnapshot(keyOrLink)
+    return snap and snap.seenAt or nil
+end
+
 function Provider.GetCurrentBucket()
     local active = Provider.GetActive()
     if active and active.GetCurrentBucket then

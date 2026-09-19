@@ -232,7 +232,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         -- Offline mirrored personal data { m, d }
         local currentDay = MarketSync.GetCurrentScanDay()
         age = math.max(0, currentDay - dbDay)
-        if age == 0 then
+        if age == 0 or (type(age) == "number" and age < 1) then
             exactTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime
         end
     elseif sourceMode == "neutral" then
@@ -248,23 +248,37 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
             age = Auctionator.Database:GetPriceAge(dbKey)
         end
         
+        -- Check snapshot from Provider if available
+        if MarketSync.Provider and MarketSync.Provider.GetSnapshot then
+            local snap = MarketSync.Provider.GetSnapshot(dbKey)
+            if snap and snap.seenAt then
+                exactTime = snap.seenAt
+            end
+        end
+
+        local isToday = (age == 0) or (type(age) == "number" and (age < 1 or math.floor(age) == 0))
+
         -- Determine source by checking per-day metadata first
         if meta and meta.days and meta.days[dayStr] then
             source = meta.days[dayStr].source or "Guild"
-            exactTime = meta.days[dayStr].time
-        elseif age == 0 then
+            exactTime = meta.days[dayStr].time or exactTime
+        elseif isToday then
             -- If it was scanned today and we have NO sync metadata for today, it must be personal.
             source = "Personal"
-            exactTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime
+            if not exactTime and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+                exactTime = MarketSync.GetRealmDB().PersonalScanTime
+            end
         elseif meta then
             -- Fallback for older sync data that might only have top-level metadata
             source = meta.lastSource or meta.source or "Guild"
-            exactTime = meta.lastTime or meta.time
+            exactTime = meta.lastTime or meta.time or exactTime
         end
         
         -- Final override for Personal scans today even if meta exists (belt and suspenders)
-        if source == "Personal" and age == 0 and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
-            exactTime = MarketSync.GetRealmDB().PersonalScanTime
+        if source == "Personal" and isToday and MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime then
+            if not exactTime then
+                exactTime = MarketSync.GetRealmDB().PersonalScanTime
+            end
         end
     end
 
@@ -1426,11 +1440,10 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     GameTooltip:AddLine(" ")
                     local d = self.itemData
                     -- Auction Age
-                    if d.age then
-                        if d.age == 0 then
-                            GameTooltip:AddDoubleLine("Auction Age:", "Today", 0.6, 0.6, 0.6, 1, 1, 1)
-                        else
-                            GameTooltip:AddDoubleLine("Auction Age:", d.age .. " day(s)", 0.6, 0.6, 0.6, 1, 1, 1)
+                    if d.age or d.exactTime then
+                        local ageText = MarketSync.FormatAuctionAge and MarketSync.FormatAuctionAge(d.age, d.exactTime, true)
+                        if ageText then
+                            GameTooltip:AddDoubleLine("Auction Age:", ageText, 0.6, 0.6, 0.6, 1, 1, 1)
                         end
                     end
                     -- Exact scan time (if available)
@@ -1577,12 +1590,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
                 -- Auction Age (how old the listing data is)
                 local ageStr = "N/A"
-                if d.age then
-                    if d.age == 0 then
-                        ageStr = "Today"
-                    else
-                        ageStr = d.age .. "d ago"
-                    end
+                if d.age or d.exactTime then
+                    ageStr = MarketSync.FormatAuctionAge and MarketSync.FormatAuctionAge(d.age, d.exactTime, false) or "N/A"
                 end
 
                 -- Source Age (when the source scanned it)
