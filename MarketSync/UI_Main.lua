@@ -101,6 +101,7 @@ local function CreateMainFrame()
     else
         MainFrame = CreateFrame("Frame", "MarketSyncMainFrame", UIParent)
     end
+    MarketSync.MainFrame = MainFrame
     MainFrame:SetSize(832, 447)
     MainFrame:SetPoint("CENTER")
     MainFrame:SetMovable(true)
@@ -255,7 +256,7 @@ local function CreateMainFrame()
     -- ================================================================
     -- BOTTOM TABS
     -- ================================================================
-    local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Processing", "Notifications", "Settings"}
+    local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Settings"}
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -312,8 +313,9 @@ local function CreateMainFrame()
             "Personal Scan",
             "Guild Sync",
             "Neutral AH",
+            "Analytics",
             "Processing",
-            "Notifications",
+            "Alerts",
             "Settings"
         }
         
@@ -321,6 +323,7 @@ local function CreateMainFrame()
             "Browse your natively scanned Auction House data.",
             "Browse composite Auction House data synced from guild members.",
             "Browse data from the Neutral Auction House.",
+            "Inspect in-depth price trends, historical distribution, and market metrics.",
             "Organized controls on the left, auction-style arbitrage and crafting results on the right.",
             "Track targets by threshold and watch lists.",
             "Configure MarketSync background settings, caches, and UI behaviors.",
@@ -337,6 +340,7 @@ local function CreateMainFrame()
         MainFrame.titleHitBox.tooltipText = tooltips[id]
         MainFrame.titleHitBox:Show()
     end
+    MarketSync.SelectMainFrameTab = SelectTab
 
     local function CreateMainTab(id, name)
         local tab
@@ -445,63 +449,34 @@ local function CreateMainFrame()
     NeutralContent:Hide()
     table.insert(contentFrames, NeutralContent)
 
+    -- TAB 4: UNIFIED ANALYTICS PANEL
+    AnalyticsPanel = MarketSync.CreateAnalyticsPanel and MarketSync.CreateAnalyticsPanel(MainFrame) or CreateFrame("Frame", nil, MainFrame)
+    AnalyticsPanel:SetAllPoints()
+    AnalyticsPanel:Hide()
+    MainFrame.analyticsPanel = AnalyticsPanel
+    table.insert(contentFrames, AnalyticsPanel)
+
+    -- TAB 5: PROCESSING PANEL
     ProcessingContent = MarketSync.CreateProcessingPanel and MarketSync.CreateProcessingPanel(MainFrame) or CreateFrame("Frame", nil, MainFrame)
     ProcessingContent:SetAllPoints()
     ProcessingContent:Hide()
     table.insert(contentFrames, ProcessingContent)
 
+    -- TAB 6: ALERTS PANEL
     NotificationsContent = MarketSync.CreateNotificationsPanel and MarketSync.CreateNotificationsPanel(MainFrame) or CreateFrame("Frame", nil, MainFrame)
     NotificationsContent:SetAllPoints()
     NotificationsContent:Hide()
     table.insert(contentFrames, NotificationsContent)
 
-    -- ================================================================
-    -- ITEM HISTORY DETAIL PANEL (shared, overlays browse content)
-    -- ================================================================
-    ItemHistoryPanel = MarketSync.CreateItemHistoryPanel(MainFrame)
-    ItemHistoryPanel:Hide()
-    MainFrame.historyPanel = ItemHistoryPanel
-
-    AnalyticsPanel = MarketSync.CreateAnalyticsPanel(MainFrame)
-    AnalyticsPanel:Hide()
-    MainFrame.analyticsPanel = AnalyticsPanel
-
-    -- Back button returns to the active browse tab
-    ItemHistoryPanel.backBtn:SetScript("OnClick", function()
-        ItemHistoryPanel:Hide()
-        -- Show the correct browse content based on active tab
-        if activeBrowseTab == 1 then
-            BrowseContent:Show()
-        elseif activeBrowseTab == 2 then
-            SyncContent:Show()
-        elseif activeBrowseTab == 3 then
-            NeutralContent:Show()
-        end
-        SelectTab(activeBrowseTab) -- Refreshes the title natively
-    end)
-
-    -- Global function to show item history from any browse panel
+    -- Global function to show item history from any browse panel (redirected to unified modern Analytics)
     function MarketSync.ShowItemHistory(dbKey, itemLink, name, icon, price, sourceTab)
-        MarketSync.HideAllTabContent()
-
-        if not sourceTab then
-            if activeBrowseTab == 1 then
-                sourceTab = "personal"
-            elseif activeBrowseTab == 2 then
-                sourceTab = "guild"
-            elseif activeBrowseTab == 3 then
-                sourceTab = "neutral"
-            end
+        if MarketSync.ShowAnalytics then
+            MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price)
         end
-
-        local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
-        titleText:SetText(string.format("%s (%s) - Item History", MarketSync.ADDON_NAME or "MarketSync", versionStr))
-        MainFrame.titleHitBox.tooltipText = nil -- No tooltip for history overlay
-        ItemHistoryPanel:ShowItem(dbKey, itemLink, name, icon, price, sourceTab)
     end
 
     -- ================================================================
-    -- TAB 6: SETTINGS
+    -- TAB 7: SETTINGS
     -- ================================================================
     SettingsContent = CreateFrame("Frame", nil, MainFrame)
     SettingsContent:SetAllPoints()
@@ -1403,6 +1378,8 @@ local function CreateMainFrame()
 end
 
 -- ================================================================
+MarketSync.CreateMainFrame = CreateMainFrame
+
 -- Global Toggle Function
 -- ================================================================
 function MarketSync_ToggleUI()
@@ -1411,7 +1388,9 @@ function MarketSync_ToggleUI()
         MainFrame:Hide()
     else
         MainFrame:Show()
-        MarketSync.BuildSearchIndex()
+        if MarketSync.BuildSearchIndex then
+            MarketSync.BuildSearchIndex()
+        end
     end
 end
 

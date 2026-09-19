@@ -23,17 +23,21 @@ local function CreateMinimapButton()
             if button == "RightButton" then
                 if MarketSync_ToggleUI then
                     MarketSync_ToggleUI()
-                    -- Switch to Settings tab (Tab 6)
-                    if MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
-                        MarketSyncMainFrame.tabs[6]:Click()
+                    -- Switch to Settings tab (Tab 7)
+                    if MarketSync.SelectMainFrameTab then
+                        MarketSync.SelectMainFrameTab(7)
+                    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[7] then
+                        MarketSyncMainFrame.tabs[7]:Click()
                     end
                 end
             elseif button == "MiddleButton" then
                 if MarketSync_ToggleUI then
                     MarketSync_ToggleUI()
-                    -- Switch to Notifications tab (Tab 5)
-                    if MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[5] then
-                        MarketSyncMainFrame.tabs[5]:Click()
+                    -- Switch to Alerts tab (Tab 6)
+                    if MarketSync.SelectMainFrameTab then
+                        MarketSync.SelectMainFrameTab(6)
+                    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
+                        MarketSyncMainFrame.tabs[6]:Click()
                     end
                 end
             else
@@ -131,9 +135,11 @@ btnSettings:SetText("Open Settings")
 btnSettings:SetScript("OnClick", function()
     if MarketSync_ToggleUI then
         MarketSync_ToggleUI()
-        -- Switch to Settings tab (Tab 6)
-        if MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
-            MarketSyncMainFrame.tabs[6]:Click()
+        -- Switch to Settings tab (Tab 7)
+        if MarketSync.SelectMainFrameTab then
+            MarketSync.SelectMainFrameTab(7)
+        elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[7] then
+            MarketSyncMainFrame.tabs[7]:Click()
         end
     end
     HideUIPanel(SettingsPanel)

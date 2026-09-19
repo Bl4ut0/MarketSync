@@ -1091,6 +1091,501 @@ test('Auction age formatting masks float days into human-readable duration witho
   }
 });
 
+test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirects ShowItemHistory to ShowAnalytics', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    MarketSync = MarketSync or {}
+    MarketSyncDB = { LowRamMode = false, PassiveSync = true, EnableNeutralSync = true }
+    UISpecialFrames = {}
+    time = function() return 1773780000 end
+    GetTime = function() return 1000 end
+    GetGameTime = function() return 12, 0 end
+    date = function(fmt, t) return "Sep 18" end
+    GetNormalizedRealmName = function() return "TestRealm" end
+    GetRealmName = function() return "TestRealm" end
+    IsInGuild = function() return true end
+    tinsert = table.insert
+    wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
+
+    PanelTemplates_SelectTab = function(tab) tab.selected = true end
+    PanelTemplates_DeselectTab = function(tab) tab.selected = false end
+    PanelTemplates_TabResize = function(tab) end
+    PanelTemplates_SetNumTabs = function(frame, n) frame.numTabs = n end
+
+    local framesCreated = {}
+    CreateFrame = function(frameType, name, parent, template)
+      local f = {
+        name = name,
+        parent = parent,
+        template = template,
+        shown = true,
+        scripts = {},
+        points = {},
+        Show = function(self) self.shown = true end,
+        Hide = function(self) self.shown = false end,
+        IsShown = function(self) return self.shown end,
+        SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        ClearAllPoints = function(self) self.points = {} end,
+        SetAllPoints = function(self) end,
+        SetSize = function(self, w, h) self.width = w self.height = h end,
+        SetWidth = function(self, w) self.width = w end,
+        SetHeight = function(self, h) self.height = h end,
+        GetWidth = function(self) return self.width or 832 end,
+        GetHeight = function(self) return self.height or 447 end,
+        SetMovable = function(self) end,
+        EnableMouse = function(self) end,
+        EnableMouseWheel = function(self) end,
+        RegisterForDrag = function(self) end,
+        SetFrameStrata = function(self) end,
+        SetToplevel = function(self) end,
+        SetID = function(self, id) self.id = id end,
+        GetID = function(self) return self.id end,
+        SetText = function(self, t) self.text = t end,
+        GetText = function(self) return self.text or "" end,
+        SetTextColor = function(self) end,
+        Click = function(self) if self.scripts["OnClick"] then self.scripts["OnClick"](self) end end,
+        RegisterEvent = function(self) end,
+        SetScript = function(self, name, fn) self.scripts[name] = fn end,
+        GetScript = function(self, name) return self.scripts[name] end,
+        HookScript = function(self, name, fn)
+          local old = self.scripts[name]
+          self.scripts[name] = function(...) if old then old(...) end fn(...) end
+        end,
+        SetBackdrop = function() end,
+        SetBackdropColor = function() end,
+        SetBackdropBorderColor = function() end,
+        SetPortraitToUnit = function() end,
+        CreateTexture = function(self)
+          return {
+            SetColorTexture = function() end,
+            SetTexture = function() end,
+            SetSize = function() end,
+            SetPoint = function() end,
+            SetAllPoints = function() end,
+            Show = function() end,
+            Hide = function() end,
+            SetBlendMode = function() end,
+            SetVertexColor = function() end,
+            SetTexCoord = function() end,
+            AddMaskTexture = function() end,
+            SetHeight = function() end,
+            SetWidth = function() end,
+          }
+        end,
+        CreateMaskTexture = function(self)
+          return { SetTexture = function() end, SetSize = function() end, SetPoint = function() end }
+        end,
+        AddMaskTexture = function(self) end,
+        SetChecked = function(self, val) self.checked = val end,
+        GetChecked = function(self) return self.checked end,
+        SetAutoFocus = function() end,
+        SetNumeric = function() end,
+        SetNumber = function() end,
+        SetMaxLetters = function() end,
+        ClearFocus = function() end,
+        HighlightText = function() end,
+        SetMinMaxValues = function() end,
+        SetValue = function(self, v) self.val = v end,
+        GetValue = function(self) return self.val or 0 end,
+        SetValueStep = function() end,
+        SetObeyStepOnDrag = function() end,
+        SetScrollChild = function() end,
+        GetVerticalScroll = function() return 0 end,
+        SetVerticalScroll = function() end,
+        GetVerticalScrollRange = function() return 0 end,
+        CreateFontString = function(self)
+          return {
+            SetPoint = function() end,
+            ClearAllPoints = function() end,
+            SetText = function(self, t) self.text = t end,
+            GetText = function(self) return self.text or "" end,
+            GetStringWidth = function(self) return 100 end,
+            SetTextColor = function() end,
+            SetFontObject = function() end,
+            SetJustifyH = function() end,
+            SetWidth = function() end,
+            SetSpacing = function() end,
+            Show = function() end,
+            Hide = function() end,
+          }
+        end,
+        SetSpacing = function() end,
+      }
+      if frameType == "CheckButton" or (template and type(template) == "string" and template:find("CheckButton")) then
+        f.text = f:CreateFontString()
+      end
+      if frameType == "Slider" or (template and type(template) == "string" and template:find("Slider")) then
+        f.Low = f:CreateFontString()
+        f.High = f:CreateFontString()
+        f.Text = f:CreateFontString()
+        if name then
+          _G[name .. "Low"] = f.Low
+          _G[name .. "High"] = f.High
+          _G[name .. "Text"] = f.Text
+        end
+      end
+      if name then _G[name] = f end
+      table.insert(framesCreated, f)
+      return f
+    end
+
+    GameTooltip = { SetOwner = function() end, Hide = function() end, Show = function() end, SetText = function() end, AddLine = function() end }
+    UIDropDownMenu_SetWidth = function() end
+    UIDropDownMenu_Initialize = function() end
+    UIDropDownMenu_SetText = function() end
+    UIDropDownMenu_CreateInfo = function() return {} end
+    UIDropDownMenu_AddButton = function() end
+
+    MarketSync.CreateBrowsePanel = function(parent, scope)
+      local f = CreateFrame("Frame", nil, parent)
+      f.scope = scope
+      return f
+    end
+    MarketSync.CreateAnalyticsPanel = function(parent)
+      local f = CreateFrame("Frame", nil, parent)
+      f.isAnalytics = true
+      f.ShowItem = function(self, key, link, name, icon, price)
+        self.lastShownItem = { key = key, link = link, name = name }
+      end
+      return f
+    end
+    MarketSync.CreateProcessingPanel = function(parent)
+      local f = CreateFrame("Frame", nil, parent)
+      f.isProcessing = true
+      return f
+    end
+    MarketSync.CreateNotificationsPanel = function(parent)
+      local f = CreateFrame("Frame", nil, parent)
+      f.isAlerts = true
+      return f
+    end
+    MarketSync.CreateItemDetailPanel = function(parent)
+      return CreateFrame("Frame", nil, parent)
+    end
+    MarketSync.CreateItemHistoryPanel = function(parent)
+      local f = CreateFrame("Frame", nil, parent)
+      f.backBtn = CreateFrame("Button", nil, f)
+      f.ShowItem = function() end
+      return f
+    end
+    MarketSync.CreateModernDialog = function() return CreateFrame("Frame") end
+    MarketSync.ShowModernConfirmation = function() end
+    MarketSync.ShowModernPrompt = function() end
+    MarketSync.GetAddOnMetadata = function() return "1.0" end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const mainLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Main.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(mainLua)) !== 0) {
+    throw new Error('Failed to load UI_Main.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    local mainFrame = MarketSync.CreateMainFrame()
+    assert(mainFrame ~= nil, "MainFrame should exist")
+    assert(mainFrame.tabs ~= nil, "MainFrame.tabs should exist")
+    assert(#mainFrame.tabs == 7, "MainFrame must have 7 tabs, found: " .. tostring(#mainFrame.tabs))
+    assert(mainFrame.tabs[1]:GetText() == "Personal Scan", "Tab 1 must be Personal Scan")
+    assert(mainFrame.tabs[2]:GetText() == "Guild Sync", "Tab 2 must be Guild Sync")
+    assert(mainFrame.tabs[3]:GetText() == "Neutral AH", "Tab 3 must be Neutral AH")
+    assert(mainFrame.tabs[4]:GetText() == "Analytics", "Tab 4 must be Analytics")
+    assert(mainFrame.tabs[5]:GetText() == "Processing", "Tab 5 must be Processing")
+    assert(mainFrame.tabs[6]:GetText() == "Alerts", "Tab 6 must be Alerts")
+    assert(mainFrame.tabs[7]:GetText() == "Settings", "Tab 7 must be Settings")
+
+    -- Test SelectMainFrameTab
+    assert(type(MarketSync.SelectMainFrameTab) == "function", "SelectMainFrameTab should be exposed")
+    MarketSync.SelectMainFrameTab(4)
+    assert(mainFrame.activeTabID == 4, "Tab 4 should be active")
+    assert(mainFrame.contentFrames[4]:IsShown(), "Analytics contentFrame should be shown")
+
+    -- Test ShowItemHistory delegation to ShowAnalytics
+    local analyticsCalledWith = nil
+    MarketSync.ShowAnalytics = function(k, l, n, ic, pr)
+      analyticsCalledWith = { key = k, link = l, name = n }
+    end
+    MarketSync.ShowItemHistory("4471", "item:4471", "Tin Bar", nil, 500)
+    assert(analyticsCalledWith ~= nil, "ShowItemHistory must delegate to MarketSync.ShowAnalytics")
+    assert(analyticsCalledWith.key == "4471", "Analytics received key 4471")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('MainFrame 7-tab check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
+test('AuctionHouse buy frame button hook and sidecar suppression across tabs', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    MarketSync = MarketSync or {}
+    MarketSyncDB = { AHSidecarExpanded = true }
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    time = function() return 1773780000 end
+    GetTime = function() return 1000 end
+    hooksecurefunc = function(t, k, hookFn)
+      local orig = t[k]
+      t[k] = function(...)
+        if orig then orig(...) end
+        hookFn(...)
+      end
+    end
+
+    local createdFrames = {}
+    CreateFrame = function(frameType, name, parent, template)
+      local f = {
+        name = name,
+        parent = parent,
+        template = template,
+        shown = false,
+        scripts = {},
+        points = {},
+        Show = function(self)
+          self.shown = true
+          if self.scripts["OnShow"] then self.scripts["OnShow"](self) end
+        end,
+        Hide = function(self)
+          self.shown = false
+          if self.scripts["OnHide"] then self.scripts["OnHide"](self) end
+        end,
+        IsShown = function(self) return self.shown end,
+        SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        SetAllPoints = function(self) end,
+        SetSize = function(self, w, h) self.width = w self.height = h end,
+        SetWidth = function(self, w) self.width = w end,
+        SetHeight = function(self, h) self.height = h end,
+        GetWidth = function(self) return self.width or 750 end,
+        GetHeight = function(self) return self.height or 447 end,
+        SetText = function(self, t) self.text = t end,
+        GetText = function(self) return self.text or "" end,
+        SetNormalTexture = function(self) end,
+        SetPushedTexture = function(self) end,
+        SetHighlightTexture = function(self) end,
+        Click = function(self) if self.scripts["OnClick"] then self.scripts["OnClick"](self) end end,
+        SetScript = function(self, name, fn) self.scripts[name] = fn end,
+        GetScript = function(self, name) return self.scripts[name] end,
+        HookScript = function(self, name, fn)
+          local old = self.scripts[name]
+          self.scripts[name] = function(...) if old then old(...) end fn(...) end
+        end,
+        CreateTexture = function(self)
+          return { SetColorTexture = function() end, SetTexture = function() end, SetPoint = function() end, SetSize = function() end, Show = function() end, Hide = function() end }
+        end,
+        CreateFontString = function(self)
+          return { SetPoint = function() end, SetText = function(self, t) self.text = t end, GetText = function(self) return self.text or "" end, Show = function() end, Hide = function() end }
+        end,
+      }
+      if name then _G[name] = f end
+      table.insert(createdFrames, f)
+      return f
+    end
+
+    MarketSync.MainFrame = CreateFrame("Frame", "MarketSyncMainFrame")
+    MarketSync.MainFrame:Show() -- initially open
+
+    AuctionHouseFrame = CreateFrame("Frame", "AuctionHouseFrame")
+    AuctionHouseFrame.Tabs = { { displayMode = "buy" }, { displayMode = "sell" } }
+    AuctionHouseFrame.AuctionsTab = { displayMode = "auctions" }
+    AuctionHouseFrame.CommoditiesBuyFrame = CreateFrame("Frame", "CommoditiesBuyFrame", AuctionHouseFrame)
+    AuctionHouseFrame.CommoditiesBuyFrame.BuyDisplay = {
+      ItemDisplay = {
+        itemLink = "|Hitem:13444|h[Major Healing Potion]|h",
+        itemID = 13444,
+        GetItemInfo = function() return "Major Healing Potion", "|Hitem:13444|h[Major Healing Potion]|h", 13444 end
+      }
+    }
+    AuctionHouseFrame.ItemBuyFrame = CreateFrame("Frame", "ItemBuyFrame", AuctionHouseFrame)
+
+    AuctionHouseFrame.displayMode = "buy"
+    AuctionHouseFrame.GetDisplayMode = function(self) return self.displayMode end
+    AuctionHouseFrame.SetDisplayMode = function(self, mode) self.displayMode = mode end
+
+    local createdTabs = {}
+    local mockLibAHTab = {
+      DoesIDExist = function(self, id) return createdTabs[id] ~= nil end,
+      CreateTab = function(self, id, frameRef, text, header)
+        createdTabs[id] = { id = id, frameRef = frameRef, text = text, header = header }
+      end,
+      GetButton = function(self, id) return createdTabs[id] end,
+      SetSelected = function(self, id)
+        if createdTabs[id] and createdTabs[id].frameRef then
+          createdTabs[id].frameRef:Show()
+        end
+      end,
+    }
+    LibStub = function(name) if name == "LibAHTab-1-0" then return mockLibAHTab end end
+
+    MarketSync.CreateAHScannerPanel = function(parent) return CreateFrame("Frame", nil, parent) end
+    MarketSync.CreateProcessingPanel = function(parent) return CreateFrame("Frame", nil, parent) end
+    MarketSync.CreateNotificationsPanel = function(parent) return CreateFrame("Frame", nil, parent) end
+    MarketSync.CreateAnalyticsPanel = function(parent)
+      local f = CreateFrame("Frame", nil, parent)
+      f.ShowItem = function(self, k, l, n) self.activeItem = k end
+      return f
+    end
+    MarketSync.CreateAHSidecar = function(parent)
+      local sc = CreateFrame("Frame", nil, parent)
+      sc.SetMode = function(m) sc.mode = m end
+      sc.SetExpanded = function(exp) sc.expanded = exp end
+      return sc
+    end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const ahLua = fs.readFileSync(path.join(marketSyncDir, 'AuctionHouse.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(ahLua)) !== 0) {
+    throw new Error('Failed to load AuctionHouse.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    local AH = MarketSync.AuctionHouse
+    AH.Attach()
+
+    -- 1. Opening AH should suppress/close MarketSync.MainFrame
+    assert(MarketSync.MainFrame:IsShown() == true, "MainFrame starts shown")
+    AuctionHouseFrame:Show()
+    assert(MarketSync.MainFrame:IsShown() == false, "MainFrame must be hidden when AH opens")
+
+    -- 2. CommoditiesBuyFrame should have MarketSyncCommoditiesAnalyticsBtn
+    local btnCom = _G["MarketSyncCommoditiesAnalyticsBtn"]
+    assert(btnCom ~= nil, "MarketSyncCommoditiesAnalyticsBtn must be attached to CommoditiesBuyFrame")
+    assert(btnCom:GetText():find("Analytics"), "Button text must mention Analytics")
+
+    -- 3. Sidecar suppression on custom tabs:
+    AH.Sidecar:Show()
+    assert(AH.Sidecar:IsShown() == true, "Sidecar starts shown")
+
+    -- Switching to Processing tab hides Sidecar
+    AH.ShowAuctionHousePanel("processing")
+    assert(AH.Sidecar:IsShown() == false, "Sidecar must hide on Processing tab")
+
+    -- Switching to Alerts tab hides Sidecar
+    AH.Sidecar:Show()
+    AH.ShowAuctionHousePanel("alerts")
+    assert(AH.Sidecar:IsShown() == false, "Sidecar must hide on Alerts tab")
+
+    -- Switching to Analytics tab hides Sidecar
+    AH.Sidecar:Show()
+    AH.ShowAuctionHousePanel("analytics")
+    assert(AH.Sidecar:IsShown() == false, "Sidecar must hide on Analytics tab")
+
+    -- Switching back to Scanner tab restores Sidecar
+    AH.ShowAuctionHousePanel("scanner")
+    assert(AH.Sidecar:IsShown() == true, "Sidecar must restore on Scanner tab")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('AH buy button and sidecar suppression check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
+test('Processing and Alerts panels adjust widths responsively for Auction House embedding', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    MarketSync = MarketSync or {}
+    MarketSyncDB = {}
+    UIDropDownMenu_SetWidth = function() end
+    UIDropDownMenu_Initialize = function() end
+    UIDropDownMenu_SetText = function() end
+    UIDropDownMenu_CreateInfo = function() return {} end
+    UIDropDownMenu_AddButton = function() end
+
+    CreateFrame = function(frameType, name, parent, template)
+      local f = {
+        name = name,
+        parent = parent,
+        scripts = {},
+        points = {},
+        Show = function(self) self.shown = true end,
+        Hide = function(self) self.shown = false end,
+        IsShown = function(self) return self.shown end,
+        SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        SetAllPoints = function(self) end,
+        SetSize = function(self, w, h) self.width = w self.height = h end,
+        SetBackdrop = function() end,
+        SetBackdropColor = function() end,
+        SetBackdropBorderColor = function() end,
+        GetWidth = function(self) return self.width or 0 end,
+        GetHeight = function(self) return self.height or 0 end,
+        SetAutoFocus = function() end,
+        SetNumeric = function() end,
+        SetScript = function(self, name, fn) self.scripts[name] = fn end,
+        SetText = function(self, t) self.text = t end,
+        GetText = function(self) return self.text or "" end,
+        HighlightText = function() end,
+        ClearFocus = function() end,
+        SetChecked = function(self, val) self.checked = val end,
+        GetChecked = function(self) return self.checked end,
+        Click = function() end,
+        RegisterForClicks = function() end,
+        LockHighlight = function() end,
+        UnlockHighlight = function() end,
+        SetNormalTexture = function() end,
+        SetPushedTexture = function() end,
+        SetDisabledTexture = function() end,
+        SetHighlightTexture = function() end,
+        SetAlpha = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        SetEnabled = function(self, en) if en then self:Enable() else self:Disable() end end,
+        CreateTexture = function() return { SetColorTexture = function() end, SetTexture = function() end, SetSize = function() end, SetPoint = function() end, SetAllPoints = function() end, SetBlendMode = function() end, SetVertexColor = function() end, SetTexCoord = function() end, Show = function() end, Hide = function() end } end,
+        CreateFontString = function() return { SetPoint = function() end, ClearAllPoints = function() end, SetText = function() end, GetText = function() return "" end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetJustifyH = function() end, SetTextColor = function() end, SetFontObject = function() end, Show = function() end, Hide = function() end } end,
+        EnableMouseWheel = function() end,
+      }
+      if frameType == "CheckButton" or (template and type(template) == "string" and template:find("CheckButton")) then
+        f.text = f:CreateFontString()
+      end
+      return f
+    end
+
+    MarketSync.MainFrame = CreateFrame("Frame", "MarketSyncMainFrame")
+    MarketSync.MainFrame:SetSize(832, 447)
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const procLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Processing.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(procLua)) !== 0) {
+    throw new Error('Failed to load UI_Processing.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const notifLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Notifications.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(notifLua)) !== 0) {
+    throw new Error('Failed to load UI_Notifications.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    -- Standalone MainFrame processing panel
+    local procMain = MarketSync.CreateProcessingPanel(MarketSync.MainFrame)
+    assert(procMain.resultRows[1].width == 632, "MainFrame processing row width should be 632, got: " .. tostring(procMain.resultRows[1].width))
+
+    -- Embedded AH processing panel
+    local ahProcContainer = CreateFrame("Frame", "AHProcContainer")
+    ahProcContainer:SetSize(756, 447)
+    local procAH = MarketSync.CreateProcessingPanel(ahProcContainer)
+    assert(procAH.resultRows[1].width == 576, "Embedded AH processing row width should be 576, got: " .. tostring(procAH.resultRows[1].width))
+    -- Total row right offset: RESULTS_X (162) + ROW_WIDTH (576) = 738px <= 756px
+    assert(162 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
+
+    -- Standalone MainFrame alerts panel
+    local alertsMain = MarketSync.CreateNotificationsPanel(MarketSync.MainFrame)
+    assert(alertsMain.rows[1].width == 576, "MainFrame alerts row width should be 576, got: " .. tostring(alertsMain.rows[1].width))
+
+    -- Embedded AH alerts panel
+    local ahAlertsContainer = CreateFrame("Frame", "AHAlertsContainer")
+    ahAlertsContainer:SetSize(756, 447)
+    local alertsAH = MarketSync.CreateNotificationsPanel(ahAlertsContainer)
+    assert(alertsAH.rows[1].width == 542, "Embedded AH alerts row width should be 542, got: " .. tostring(alertsAH.rows[1].width))
+    -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
+    assert(198 + alertsAH.rows[1].width <= 756, "Alerts table must fit inside AH width <= 756px")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('Responsive layout check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {

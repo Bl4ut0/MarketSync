@@ -998,6 +998,35 @@ function MarketSync.CreateAnalyticsPanel(parent)
         self:Show()
     end
 
+    function panel:SelectByNameOrQuery(query)
+        if not query or query == "" then return false end
+        local itemInfo = ResolveItem(query)
+        if itemInfo then
+            self:ShowItem(itemInfo.dbKey, itemInfo.itemLink, itemInfo.name, itemInfo.icon, itemInfo.price)
+            return true
+        end
+        local cleanQuery = query:lower()
+        if itemsList and #itemsList > 0 then
+            for _, itm in ipairs(itemsList) do
+                if itm.name and itm.name:lower():find(cleanQuery, 1, true) then
+                    self:ShowItem(tostring(itm.itemID), nil, itm.name, itm.icon, itm.price)
+                    return true
+                end
+            end
+        end
+        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+        if realmDB and realmDB.PersonalData then
+            for k, _ in pairs(realmDB.PersonalData) do
+                local info = ResolveItem(k)
+                if info and info.name and info.name:lower():find(cleanQuery, 1, true) then
+                    self:ShowItem(info.dbKey, info.itemLink, info.name, info.icon, info.price)
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
     function panel:OnShow()
         RefreshItemsList()
         if panel.currentItem then
@@ -1025,11 +1054,13 @@ function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price)
     if AuctionHouseFrame and AuctionHouseFrame:IsShown() and MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
         MarketSync.AuctionHouse.ShowAuctionHousePanel("analytics")
     elseif MarketSync.MainFrame then
-        if MarketSync.HideAllTabContent then
-            MarketSync.HideAllTabContent()
-        end
         if not MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Show()
+        end
+        if MarketSync.SelectMainFrameTab then
+            MarketSync.SelectMainFrameTab(4)
+        elseif MarketSync.MainFrame.tabs and MarketSync.MainFrame.tabs[4] then
+            MarketSync.MainFrame.tabs[4]:Click()
         end
     end
 

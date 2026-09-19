@@ -295,6 +295,12 @@ local function CreateBox(parent, x, y, width, height)
 end
 
 function MarketSync.CreateProcessingPanel(parent)
+    local isEmbedded = (parent ~= MarketSync.MainFrame)
+    local LEFT_X = isEmbedded and 12 or 23
+    local LEFT_W = isEmbedded and 145 or 155
+    local RESULTS_X = isEmbedded and 162 or 195
+    local ROW_WIDTH = isEmbedded and 576 or 632
+
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     if parent == MarketSync.MainFrame then
@@ -613,14 +619,22 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.sortField = "valueSort"
     panel.sortAscending = false
 
-    local colDefs = {
-        { name = "Item",   width = 244, sortKey = "itemSort"   },
+    local colDefs = isEmbedded and {
+        { name = "Item",     width = 206, sortKey = "itemSort"   },
+        { name = "Type/Lvl", width = 54,  sortKey = "typeSort"   },
+        { name = "Value",    width = 66,  sortKey = "valueSort"  },
+        { name = "Max",      width = 66,  sortKey = "maxSort"    },
+        { name = "Live",     width = 64,  sortKey = "liveSort"   },
+        { name = "Delta",    width = 64,  sortKey = "deltaSort"  },
+        { name = "Status",   width = 56,  sortKey = "statusSort" },
+    } or {
+        { name = "Item",     width = 244, sortKey = "itemSort"   },
         { name = "Type/Lvl", width = 58,  sortKey = "typeSort"   },
-        { name = "Value",  width = 72,  sortKey = "valueSort"  },
-        { name = "Max",    width = 72,  sortKey = "maxSort"    },
-        { name = "Live",   width = 66,  sortKey = "liveSort"   },
-        { name = "Delta",  width = 66,  sortKey = "deltaSort"  },
-        { name = "Status", width = 58,  sortKey = "statusSort" },
+        { name = "Value",    width = 72,  sortKey = "valueSort"  },
+        { name = "Max",      width = 72,  sortKey = "maxSort"    },
+        { name = "Live",     width = 66,  sortKey = "liveSort"   },
+        { name = "Delta",    width = 66,  sortKey = "deltaSort"  },
+        { name = "Status",   width = 58,  sortKey = "statusSort" },
     }
 
     panel.headerButtons = {}
@@ -743,37 +757,37 @@ function MarketSync.CreateProcessingPanel(parent)
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         row.nameText:SetPoint("TOPLEFT", 43, -3)
-        row.nameText:SetWidth(198)
+        row.nameText:SetWidth(isEmbedded and 160 or 198)
         row.nameText:SetJustifyH("LEFT")
 
         row.typeText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.typeText:SetPoint("TOPLEFT", 246, -3)
-        row.typeText:SetWidth(50)
+        row.typeText:SetPoint("TOPLEFT", isEmbedded and 208 or 246, -3)
+        row.typeText:SetWidth(isEmbedded and 48 or 50)
         row.typeText:SetJustifyH("LEFT")
 
         row.valueText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.valueText:SetPoint("TOPLEFT", 304, -3)
-        row.valueText:SetWidth(60)
+        row.valueText:SetPoint("TOPLEFT", isEmbedded and 262 or 304, -3)
+        row.valueText:SetWidth(isEmbedded and 58 or 60)
         row.valueText:SetJustifyH("RIGHT")
 
         row.maxText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.maxText:SetPoint("TOPLEFT", 374, -3)
-        row.maxText:SetWidth(60)
+        row.maxText:SetPoint("TOPLEFT", isEmbedded and 328 or 374, -3)
+        row.maxText:SetWidth(isEmbedded and 58 or 60)
         row.maxText:SetJustifyH("RIGHT")
 
         row.liveText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.liveText:SetPoint("TOPLEFT", 442, -3)
-        row.liveText:SetWidth(54)
+        row.liveText:SetPoint("TOPLEFT", isEmbedded and 394 or 442, -3)
+        row.liveText:SetWidth(isEmbedded and 56 or 54)
         row.liveText:SetJustifyH("RIGHT")
 
         row.deltaText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.deltaText:SetPoint("TOPLEFT", 506, -3)
-        row.deltaText:SetWidth(54)
+        row.deltaText:SetPoint("TOPLEFT", isEmbedded and 458 or 506, -3)
+        row.deltaText:SetWidth(isEmbedded and 56 or 54)
         row.deltaText:SetJustifyH("RIGHT")
 
         row.statusText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.statusText:SetPoint("TOPLEFT", 570, -3)
-        row.statusText:SetWidth(54)
+        row.statusText:SetPoint("TOPLEFT", isEmbedded and 522 or 570, -3)
+        row.statusText:SetWidth(isEmbedded and 50 or 54)
         row.statusText:SetJustifyH("LEFT")
 
         local selectedBg = row:CreateTexture(nil, "BACKGROUND")
@@ -787,7 +801,7 @@ function MarketSync.CreateProcessingPanel(parent)
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
         highlight:SetTexture("Interface\\HelpFrame\\HelpFrameButton-Highlight")
         highlight:SetBlendMode("ADD")
-        highlight:SetSize(594, 32)
+        highlight:SetSize(ROW_WIDTH - 38, 32)
         highlight:SetPoint("TOPLEFT", 33, -3)
         highlight:SetTexCoord(0, 1.0, 0, 0.578125)
 
@@ -946,13 +960,13 @@ function MarketSync.CreateProcessingPanel(parent)
 
 
     panel.noResultsText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    panel.noResultsText:SetPoint("TOP", panel, "TOP", 115, -200)
+    panel.noResultsText:SetPoint("TOP", panel, "TOP", isEmbedded and 80 or 115, -200)
     panel.noResultsText:SetText("|cff888888Run a mode to see results.|r")
     panel.noResultsText:Show()
 
     local prevBtn = CreateFrame("Button", nil, panel)
     prevBtn:SetSize(28, 28)
-    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -50, 11)
+    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", isEmbedded and -40 or -50, 11)
     prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
     prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
     prevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")

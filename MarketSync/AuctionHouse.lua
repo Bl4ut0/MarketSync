@@ -8,9 +8,64 @@ MarketSync.AuctionHouse = {}
 
 local AH = MarketSync.AuctionHouse
 
+local function GetBuyFrameItem(buyFrame)
+    if not buyFrame then return nil, nil, nil end
+    local itemKey = buyFrame.GetItemKey and buyFrame:GetItemKey()
+    local itemLink = nil
+    local itemID = nil
+    if buyFrame.BuyDisplay and buyFrame.BuyDisplay.ItemDisplay then
+        local disp = buyFrame.BuyDisplay.ItemDisplay
+        itemLink = disp.itemLink
+        itemKey = itemKey or disp.itemKey
+        itemID = disp.itemID or (itemKey and itemKey.itemID)
+    elseif buyFrame.ItemDisplay then
+        local disp = buyFrame.ItemDisplay
+        itemLink = disp.itemLink
+        itemKey = itemKey or disp.itemKey
+        itemID = disp.itemID or (itemKey and itemKey.itemID)
+    end
+    if not itemID and itemKey and itemKey.itemID then
+        itemID = itemKey.itemID
+    end
+    if not itemLink and itemID then
+        if C_Item and C_Item.GetItemInfo then
+            itemLink = select(2, C_Item.GetItemInfo(itemID))
+        elseif GetItemInfo then
+            itemLink = select(2, GetItemInfo(itemID))
+        end
+        itemLink = itemLink or ("item:" .. itemID)
+    end
+    return itemID, itemLink, itemKey
+end
+
+local function AttachBuyAnalyticsButton(buyFrame, btnName)
+    if not buyFrame or buyFrame[btnName] then return end
+    local btn = CreateFrame("Button", btnName, buyFrame, "UIPanelButtonTemplate")
+    btn:SetSize(110, 22)
+    btn:SetText("View Analytics")
+    btn:SetPoint("TOPRIGHT", buyFrame, "TOPRIGHT", -24, -10)
+    btn:SetScript("OnClick", function()
+        local itemID, itemLink = GetBuyFrameItem(buyFrame)
+        if itemID or itemLink then
+            MarketSync.ShowAnalytics(itemID or itemLink, itemLink)
+        end
+    end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(btn, {
+            name = "View Analytics",
+            context = "Button",
+            description = "Open price history and analytics for this item",
+        })
+    end
+    buyFrame[btnName] = btn
+end
+
 function AH.ShowAuctionHousePanel(targetTab)
     if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then return false end
     if not AH.Attach() then return false end
+    if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+        MarketSync.MainFrame:Hide()
+    end
     local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
     if libAHTab then
         local tabID = "MarketSyncScanner"
@@ -66,6 +121,12 @@ function AH.Attach()
         panelScanner.Content = MarketSync.CreateAHScannerPanel(panelScanner)
     end
     panelScanner:SetScript("OnShow", function()
+        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Hide()
+        end
+        if AH.Sidecar and (MarketSyncDB == nil or MarketSyncDB.AHSidecarExpanded ~= false) then
+            AH.Sidecar:Show()
+        end
         if panelScanner.Content then
             if panelScanner.Content.Show then panelScanner.Content:Show() end
             local onShow = panelScanner.Content.OnShow or (panelScanner.Content.GetScript and panelScanner.Content:GetScript("OnShow"))
@@ -91,6 +152,12 @@ function AH.Attach()
         panelProcessing.Content = MarketSync.CreateProcessingPanel(panelProcessing)
     end
     panelProcessing:SetScript("OnShow", function()
+        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Hide()
+        end
+        if AH.Sidecar and AH.Sidecar.Hide then
+            AH.Sidecar:Hide()
+        end
         if panelProcessing.Content then
             if panelProcessing.Content.Show then panelProcessing.Content:Show() end
             local onShow = panelProcessing.Content.OnShow or (panelProcessing.Content.GetScript and panelProcessing.Content:GetScript("OnShow"))
@@ -116,6 +183,12 @@ function AH.Attach()
         panelAlerts.Content = MarketSync.CreateNotificationsPanel(panelAlerts)
     end
     panelAlerts:SetScript("OnShow", function()
+        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Hide()
+        end
+        if AH.Sidecar and AH.Sidecar.Hide then
+            AH.Sidecar:Hide()
+        end
         if panelAlerts.Content then
             if panelAlerts.Content.Show then panelAlerts.Content:Show() end
             local onShow = panelAlerts.Content.OnShow or (panelAlerts.Content.GetScript and panelAlerts.Content:GetScript("OnShow"))
@@ -141,11 +214,35 @@ function AH.Attach()
         panelAnalytics.Content = MarketSync.CreateAnalyticsPanel(panelAnalytics)
     end
     panelAnalytics:SetScript("OnShow", function()
+        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Hide()
+        end
+        if AH.Sidecar and AH.Sidecar.Hide then
+            AH.Sidecar:Hide()
+        end
         if panelAnalytics.Content then
             if panelAnalytics.Content.Show then panelAnalytics.Content:Show() end
             local onShow = panelAnalytics.Content.OnShow or (panelAnalytics.Content.GetScript and panelAnalytics.Content:GetScript("OnShow"))
             if onShow then
                 onShow(panelAnalytics.Content)
+            end
+
+            -- Auto-load active item from BuyFrame or SearchBox if user navigated to Analytics
+            local activeID, activeLink = nil, nil
+            if frame.CommoditiesBuyFrame and frame.CommoditiesBuyFrame:IsShown() then
+                activeID, activeLink = GetBuyFrameItem(frame.CommoditiesBuyFrame)
+            elseif frame.ItemBuyFrame and frame.ItemBuyFrame:IsShown() then
+                activeID, activeLink = GetBuyFrameItem(frame.ItemBuyFrame)
+            end
+            if activeID or activeLink then
+                if panelAnalytics.Content.ShowItem then
+                    panelAnalytics.Content:ShowItem(activeID or activeLink, activeLink)
+                end
+            elseif frame.SearchBar and frame.SearchBar.SearchBox then
+                local txt = frame.SearchBar.SearchBox:GetText()
+                if txt and txt ~= "" and panelAnalytics.Content.SelectByNameOrQuery then
+                    panelAnalytics.Content:SelectByNameOrQuery(txt)
+                end
             end
         end
     end)
@@ -206,21 +303,54 @@ function AH.Attach()
         AH.Sidecar = MarketSync.CreateAHSidecar(frame)
     end
 
+    -- Attach Buy Analytics buttons to Commodities and Item buy frames
+    if frame.CommoditiesBuyFrame then
+        AttachBuyAnalyticsButton(frame.CommoditiesBuyFrame, "MarketSyncCommoditiesAnalyticsBtn")
+    end
+    if frame.ItemBuyFrame then
+        AttachBuyAnalyticsButton(frame.ItemBuyFrame, "MarketSyncItemAnalyticsBtn")
+    end
+
     -- Hook display mode switching
     hooksecurefunc(frame, "SetDisplayMode", function()
-        -- Auto-switch sidecar view depending on whether user is browsing or selling
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetMode then
-            local currentMode = frame:GetDisplayMode()
-            if frame.Tabs and frame.Tabs[2] and currentMode == frame.Tabs[2].displayMode then
-                MarketSync.AHSidecar.SetMode("sell")
-            elseif frame.Tabs and frame.Tabs[1] and currentMode == frame.Tabs[1].displayMode then
-                MarketSync.AHSidecar.SetMode("lists")
+        local currentMode = frame:GetDisplayMode()
+        local isBlizzardBuy = frame.Tabs and frame.Tabs[1] and currentMode == frame.Tabs[1].displayMode
+        local isBlizzardSell = frame.Tabs and frame.Tabs[2] and currentMode == frame.Tabs[2].displayMode
+
+        if isBlizzardBuy or isBlizzardSell then
+            if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+                MarketSync.MainFrame:Hide()
+            end
+            if AH.Sidecar and (MarketSyncDB == nil or MarketSyncDB.AHSidecarExpanded ~= false) then
+                AH.Sidecar:Show()
+            end
+            if MarketSync.AHSidecar and MarketSync.AHSidecar.SetMode then
+                if isBlizzardSell then
+                    MarketSync.AHSidecar.SetMode("sell")
+                else
+                    MarketSync.AHSidecar.SetMode("lists")
+                end
+            end
+            if frame.CommoditiesBuyFrame then
+                AttachBuyAnalyticsButton(frame.CommoditiesBuyFrame, "MarketSyncCommoditiesAnalyticsBtn")
+            end
+            if frame.ItemBuyFrame then
+                AttachBuyAnalyticsButton(frame.ItemBuyFrame, "MarketSyncItemAnalyticsBtn")
             end
         end
     end)
 
     frame:HookScript("OnShow", function()
         MarketSync.IsAuctionHouseOpen = true
+        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Hide()
+        end
+        if frame.CommoditiesBuyFrame then
+            AttachBuyAnalyticsButton(frame.CommoditiesBuyFrame, "MarketSyncCommoditiesAnalyticsBtn")
+        end
+        if frame.ItemBuyFrame then
+            AttachBuyAnalyticsButton(frame.ItemBuyFrame, "MarketSyncItemAnalyticsBtn")
+        end
         if MarketSync.AHSidecar and MarketSync.AHSidecar.SetExpanded then
             local expanded = (MarketSyncDB and MarketSyncDB.AHSidecarExpanded ~= nil) and MarketSyncDB.AHSidecarExpanded or true
             MarketSync.AHSidecar.SetExpanded(expanded)
