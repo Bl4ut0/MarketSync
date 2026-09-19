@@ -920,6 +920,95 @@ test('Tiered retention downsampler, compact records, and analytics clarity', () 
   }
 });
 
+test('Individual scan observation, item normalization, HistoryLog logging, and immediate callback notifications', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    time = function() return 20714 * 86400 end
+    hooksecurefunc = function() end
+    CreateFrame = function()
+      local f = {
+        SetScript = function() end,
+        SetBackdrop = function() end,
+        SetSize = function() end,
+        SetPoint = function() end,
+        SetText = function() end,
+        Show = function() end,
+        Hide = function() end,
+        CreateFontString = function() return { SetPoint = function() end, SetText = function() end } end,
+        RegisterEvent = function() end,
+      }
+      return f
+    end
+    C_Timer = { After = function(delay, fn) end }
+    GetGameTime = function() return 12, 0 end
+    date = function(fmt, t) return "Sep 18" end
+    GetNormalizedRealmName = function() return "TestRealm" end
+    GetRealmName = function() return "TestRealm" end
+    C_Item = {
+      GetItemInfo = function(id) return "Test Item", "item:" .. tostring(id), 1, 1, 1, "Misc", "Misc", 1, "", 134400 end,
+      GetItemLink = function(id) return "item:" .. tostring(id) end
+    }
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const scannerLua = fs.readFileSync(path.join(marketSyncDir, 'Scanner.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(scannerLua)) !== 0) {
+    throw new Error('Failed to load Scanner.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  const check = `
+    -- 1. Test NormalizeItemKey
+    local dbKey1, id1 = MarketSync.NormalizeItemKey(4471)
+    assert(dbKey1 == "4471" and id1 == 4471, "NormalizeItemKey failed for numeric ID")
+
+    local dbKey2, id2 = MarketSync.NormalizeItemKey("4471")
+    assert(dbKey2 == "4471" and id2 == 4471, "NormalizeItemKey failed for string ID")
+
+    local dbKey3, id3 = MarketSync.NormalizeItemKey({ itemID = 4471, itemSuffix = 12 })
+    assert(dbKey3 == "p:4471:12" and id3 == 4471, "NormalizeItemKey failed for suffix table")
+
+    local dbKey4, id4 = MarketSync.NormalizeItemKey("|cffffffff|Hitem:7890:0:0:0|h[Item]|h|r")
+    assert(dbKey4 == "7890" and id4 == 7890, "NormalizeItemKey failed for item link")
+
+    -- 2. Test RecordScanObservation and immediate callback
+    MarketSync.InitializeDB()
+    local callbackFired = false
+    MarketSync.Scanner.RegisterCallback(function()
+      callbackFired = true
+    end)
+
+    MarketSync.RecordScanObservation(4471, 25000, 5, true, false)
+
+    -- Assert callback fired immediately (for sidecar shopping list update)
+    assert(callbackFired == true, "Scanner.RegisterCallback should fire immediately upon scan observation")
+
+    -- Assert PersonalData updated
+    local realmDB = MarketSync.GetRealmDB()
+    assert(realmDB.PersonalData["4471"] ~= nil, "PersonalData must contain scanned item")
+    assert(realmDB.PersonalData["4471"].m == 25000, "PersonalData market price must match unitPrice")
+
+    -- Assert HistoryLog (data logs) contains the scan
+    assert(realmDB.HistoryLog ~= nil and #realmDB.HistoryLog > 0, "HistoryLog must contain the observation")
+    assert(realmDB.HistoryLog[1].price == 25000, "HistoryLog price must match unitPrice")
+    assert(realmDB.HistoryLog[1].sender == "Self", "HistoryLog sender must be Self")
+
+    -- Assert GetAuctionPrice returns the freshly scanned price immediately
+    local price = MarketSync.GetAuctionPrice(4471)
+    assert(price == 25000, "MarketSync.GetAuctionPrice must return 25000, got: " .. tostring(price))
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('Individual scan observation test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));
   for (const f of files) {

@@ -708,7 +708,17 @@ function MarketSync.GetAuctionPrice(itemLink)
         if price ~= nil then return price end
     end
     if Auctionator and Auctionator.API and Auctionator.API.v1 then
-        return Auctionator.API.v1.GetAuctionPriceByItemLink(ADDON_NAME, itemLink)
+        local aPrice = Auctionator.API.v1.GetAuctionPriceByItemLink(ADDON_NAME, itemLink)
+        if aPrice ~= nil then return aPrice end
+    end
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and realmDB.PersonalData and itemLink then
+        local id = tonumber(itemLink) or (type(itemLink) == "string" and tonumber(itemLink:match("item:(%d+)")))
+        local dbKey = id and tostring(id) or tostring(itemLink)
+        local entry = realmDB.PersonalData[dbKey]
+        if entry and entry.m and entry.m > 0 then
+            return entry.m
+        end
     end
     return nil
 end

@@ -128,13 +128,35 @@ function S.Cancel(reason)
     S.Notify()
 end
 
+local function NormalizeItemKey(itemKey)
+    if not itemKey then return nil, nil, nil end
+    local itemID, itemSuffix = nil, 0
+    if type(itemKey) == "table" then
+        itemID = tonumber(itemKey.itemID)
+        itemSuffix = tonumber(itemKey.itemSuffix) or 0
+    elseif type(itemKey) == "number" then
+        itemID = itemKey
+    elseif type(itemKey) == "string" then
+        local prefix, id, suff = itemKey:match("^(%a+):(%d+):?(%d*)$")
+        if id then
+            itemID = tonumber(id)
+            itemSuffix = tonumber(suff) or 0
+        else
+            local linkID = itemKey:match("item:(%d+)")
+            itemID = linkID and tonumber(linkID) or tonumber(itemKey)
+        end
+    end
+    if not itemID or itemID <= 0 then return nil, nil, nil end
+    local dbKey = (itemSuffix and itemSuffix ~= 0) and string.format("p:%d:%d", itemID, itemSuffix) or tostring(itemID)
+    local normalizedKey = { itemID = itemID, itemLevel = 0, itemSuffix = itemSuffix, battlePetSpeciesID = 0 }
+    return dbKey, itemID, normalizedKey
+end
+MarketSync.NormalizeItemKey = NormalizeItemKey
+
 local function RecordScanObservation(itemKey, unitPrice, available, isCommodity, isFullScan)
     if not itemKey or not unitPrice or unitPrice <= 0 then return end
-    local itemID = itemKey.itemID
-    local dbKey = tostring(itemID)
-    if itemKey.itemSuffix and itemKey.itemSuffix ~= 0 then
-        dbKey = "p:" .. itemID .. ":" .. itemKey.itemSuffix
-    end
+    local dbKey, itemID, normalizedKey = NormalizeItemKey(itemKey)
+    if not dbKey or not itemID then return end
 
     local now = time()
     local realmDB = MarketSync.GetRealmDB()
@@ -169,27 +191,42 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     entry.vh[dayStr] = entry.h[dayStr]
 
     realmDB.PersonalScanTime = now
+    realmDB.SwarmTSF = now
     if isFullScan then
         realmDB.FullScanTime = now
-        realmDB.SwarmTSF = now
     else
         realmDB.PartialScanTime = now
-        if not realmDB.SwarmTSF or realmDB.SwarmTSF == 0 then
-            realmDB.SwarmTSF = now
-        end
     end
     realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
 
-    -- Record in live Scanner feed
-    local name, link, quality, _, _, _, _, _, _, icon = C_Item.GetItemInfo(itemID)
+    -- Item info lookup
+    local name, link, quality, _, _, _, _, _, _, icon = nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
+    if C_Item and C_Item.GetItemInfo then
+        name, link, quality, _, _, _, _, _, _, icon = C_Item.GetItemInfo(itemID)
+    elseif GetItemInfo then
+        name, link, quality, _, _, _, _, _, _, icon = GetItemInfo(itemID)
+    end
     if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
         name = MarketSyncDB.ItemInfoCache[itemID].n
         icon = MarketSyncDB.ItemInfoCache[itemID].ic
         quality = MarketSyncDB.ItemInfoCache[itemID].r
     end
+
+    -- Record in data logs (HistoryLog)
+    if not realmDB.HistoryLog then realmDB.HistoryLog = {} end
+    local itemLink = link or (type(itemKey) == "string" and itemKey:match("|Hitem:")) or ("item:" .. itemID)
+    table.insert(realmDB.HistoryLog, 1, {
+        link = itemLink,
+        price = unitPrice,
+        sender = "Self",
+        time = now,
+    })
+    if #realmDB.HistoryLog > 100 then table.remove(realmDB.HistoryLog) end
+
+    -- Record in live Scanner feed
     table.insert(S.RecentResults, 1, {
         itemID = itemID,
-        itemKey = itemKey,
+        itemKey = normalizedKey,
         name = name or ("Item #" .. itemID),
         icon = icon or 134400,
         quality = quality or 1,
@@ -204,7 +241,22 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     if MarketSync.EvaluateNotificationsForRecord then
         pcall(MarketSync.EvaluateNotificationsForRecord, dbKey, unitPrice, "main", "Personal")
     end
+
+    -- Notify subscribers (UI_AHSidecar shopping lists, UI_AHScanner, etc.)
+    S.Notify()
+
+    -- Debounced sync advertisement on partial/individual scans
+    if not isFullScan and MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+        if not S._advScheduled then
+            S._advScheduled = true
+            C_Timer.After(2, function()
+                S._advScheduled = false
+                if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end
+            end)
+        end
+    end
 end
+MarketSync.RecordScanObservation = RecordScanObservation
 
 local function SummarizeSearchResults(key, isCommodityHint)
     local tries = isCommodityHint and { true, false } or { false, true }
@@ -569,24 +621,39 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         or event == "COMMODITY_SEARCH_RESULTS_UPDATED"
         or event == "COMMODITY_SEARCH_RESULTS_ADDED" then
 
-        if not S.Active or not S.Pending then return end
-
         local isCommodity = (event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_ADDED")
         local updatedItemID = nil
+        local updatedItemKey = nil
         if type(arg1) == "table" and arg1.itemID then
             updatedItemID = tonumber(arg1.itemID)
+            updatedItemKey = arg1
         elseif type(arg1) == "number" or type(arg1) == "string" then
             updatedItemID = tonumber(arg1)
+            if updatedItemID then
+                updatedItemKey = { itemID = updatedItemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
+            end
         end
 
-        -- If updated item matches our pending item (or arg1 is omitted), process and advance queue
-        if not updatedItemID or (S.Pending.itemID and updatedItemID == S.Pending.itemID) then
-            local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(S.Pending, isCommodity)
-            if minPrice and minPrice > 0 then
-                RecordScanObservation(S.Pending, minPrice, available, resolvedCommodity, false)
+        if S.Active and S.Pending then
+            -- Automated queue scan: process pending item and advance queue
+            if not updatedItemID or (S.Pending.itemID and updatedItemID == S.Pending.itemID) then
+                local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(S.Pending, isCommodity)
+                if minPrice and minPrice > 0 then
+                    RecordScanObservation(S.Pending, minPrice, available, resolvedCommodity, false)
+                end
+                S.Pending = nil
+                S.ScheduleNext()
             end
-            S.Pending = nil
-            S.ScheduleNext()
+            return
+        end
+
+        -- Individual manual search / single-item scan:
+        if updatedItemKey or updatedItemID then
+            local searchKey = updatedItemKey or { itemID = updatedItemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
+            local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(searchKey, isCommodity)
+            if minPrice and minPrice > 0 then
+                RecordScanObservation(searchKey, minPrice, available, resolvedCommodity, false)
+            end
         end
         return
     end
