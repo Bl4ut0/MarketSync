@@ -13,7 +13,7 @@ local TOP_Y = -68
 local LEFT_W = 196
 local RESULTS_X = 224
 local ROW_WIDTH = 584
-local CONTENT_H = 338
+local CONTENT_H = 348
 local ROW_HEIGHT = 27
 
 local SCOPE_OPTIONS = {
@@ -273,7 +273,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     if isEmbedded then
         editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 216)
     else
-        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 216)
+        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 224)
     end
 
     local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -548,7 +548,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         importBox:SetWidth(LEFT_W)
         importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
     else
-        importBox = CreateBox(panel, LEFT_X, TOP_Y - 224, LEFT_W, 114)
+        importBox = CreateBox(panel, LEFT_X, TOP_Y - 232, LEFT_W, 116)
     end
 
     local importTitle = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -592,23 +592,26 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     local btnDoImport = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
     btnDoImport:SetSize(LEFT_W - 20, 20)
-    btnDoImport:SetPoint("TOPLEFT", 10, -78)
+    btnDoImport:SetPoint("TOPLEFT", 10, -76)
     btnDoImport:SetText("Import List into Watchlist")
 
     local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importStatusText:SetPoint("TOPLEFT", 10, -100)
+    importStatusText:SetPoint("TOPLEFT", 10, -98)
     importStatusText:SetText("")
 
+    local importDesc = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
     if isEmbedded then
-        local importDesc = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
         importDesc:SetPoint("TOPLEFT", 10, -118)
         importDesc:SetPoint("BOTTOMRIGHT", -10, 10)
-        importDesc:SetJustifyH("LEFT")
-        if importDesc.SetJustifyV then
-            importDesc:SetJustifyV("TOP")
-        end
-        importDesc:SetText("|cff777777Automatically populates watchlist price triggers from your favorite items or shopping lists with configured discounts below market price.|r")
+    else
+        importDesc:SetPoint("TOPLEFT", 10, -98)
+        importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
     end
+    importDesc:SetJustifyH("LEFT")
+    if importDesc.SetJustifyV then
+        importDesc:SetJustifyV("TOP")
+    end
+    importDesc:SetText("|cff777777Populates watchlist price triggers from your favorite lists with configured discounts below market price.|r")
 
     -- =========================================================
     -- RIGHT COLUMN: ENCLOSING RESULTS BOX (Height 338)
@@ -966,21 +969,28 @@ function MarketSync.CreateNotificationsPanel(parent)
     countText:SetPoint("BOTTOMLEFT", 10, 8)
     countText:SetText("")
 
-    local btnPrev = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate")
-    btnPrev:SetSize(50, 18)
-    btnPrev:SetPoint("BOTTOMRIGHT", -105, 6)
-    btnPrev:SetText("< Prev")
+    local btnPrev = CreateFrame("Button", nil, rightBox)
+    btnPrev:SetSize(20, 20)
+    btnPrev:SetPoint("BOTTOMRIGHT", -48, 6)
+    btnPrev:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
+    btnPrev:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
+    btnPrev:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
+    local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
+    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+
+    local btnNext = CreateFrame("Button", nil, rightBox)
+    btnNext:SetSize(20, 20)
+    btnNext:SetPoint("LEFT", btnPrev, "RIGHT", 4, 0)
+    btnNext:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
+    btnNext:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
+    btnNext:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
+    local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
+    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
 
     local pageText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    pageText:SetPoint("LEFT", btnPrev, "RIGHT", 4, 0)
-    pageText:SetPoint("RIGHT", rightBox, "BOTTOMRIGHT", -54, 15)
-    pageText:SetJustifyH("CENTER")
+    pageText:SetPoint("RIGHT", btnPrev, "LEFT", -8, 0)
+    pageText:SetJustifyH("RIGHT")
     pageText:SetText("1 / 1")
-
-    local btnNext = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate")
-    btnNext:SetSize(50, 18)
-    btnNext:SetPoint("BOTTOMRIGHT", -6, 6)
-    btnNext:SetText("Next >")
 
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(btnPrev, {
@@ -1261,8 +1271,18 @@ function MarketSync.CreateNotificationsPanel(parent)
         if panel.watchlistPage > maxPage then panel.watchlistPage = maxPage end
         if panel.watchlistPage < 0 then panel.watchlistPage = 0 end
 
-        btnPrev:SetEnabled(panel.watchlistPage > 0)
-        btnNext:SetEnabled(panel.watchlistPage < maxPage)
+        local hasPrev = panel.watchlistPage > 0
+        local hasNext = panel.watchlistPage < maxPage
+        btnPrev:SetEnabled(hasPrev)
+        btnNext:SetEnabled(hasNext)
+        local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
+        if pnt and pnt.SetVertexColor then
+            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+        local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
+        if nnt and nnt.SetVertexColor then
+            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
         pageText:SetText(string.format("%d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
         if tableScrollBar then
             tableScrollBar:Update(panel.watchlistPage, maxPage)
@@ -1405,8 +1425,18 @@ function MarketSync.CreateNotificationsPanel(parent)
         if panel.historyPage > maxPage then panel.historyPage = maxPage end
         if panel.historyPage < 0 then panel.historyPage = 0 end
 
-        btnPrev:SetEnabled(panel.historyPage > 0)
-        btnNext:SetEnabled(panel.historyPage < maxPage)
+        local hasPrev = panel.historyPage > 0
+        local hasNext = panel.historyPage < maxPage
+        btnPrev:SetEnabled(hasPrev)
+        btnNext:SetEnabled(hasNext)
+        local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
+        if pnt and pnt.SetVertexColor then
+            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+        local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
+        if nnt and nnt.SetVertexColor then
+            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
         pageText:SetText(string.format("%d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
         if tableScrollBar then
             tableScrollBar:Update(panel.historyPage, maxPage)

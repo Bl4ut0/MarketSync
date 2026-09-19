@@ -94,6 +94,15 @@ end
 local function CreateMainFrame()
     if MainFrame then return MainFrame end
 
+    -- Ensure Auction House UI is loaded so AuctionHouseFrameDisplayModeTabTemplate and textures are present
+    if C_AddOns and C_AddOns.IsAddOnLoaded and not C_AddOns.IsAddOnLoaded("Blizzard_AuctionHouseUI") then
+        if C_AddOns.LoadAddOn then
+            pcall(C_AddOns.LoadAddOn, "Blizzard_AuctionHouseUI")
+        end
+    elseif UIParentLoadAddOn and (not IsAddOnLoaded or not IsAddOnLoaded("Blizzard_AuctionHouseUI")) then
+        pcall(UIParentLoadAddOn, "Blizzard_AuctionHouseUI")
+    end
+
     -- --- MAIN WINDOW (832 x 447, PortraitFrameTemplate) ---
     local ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent, "PortraitFrameTemplate")
     if ok and res then
@@ -301,10 +310,16 @@ local function CreateMainFrame()
                 if PanelTemplates_SelectTab then
                     PanelTemplates_SelectTab(tab)
                 end
+                if tab.SetSelected then
+                    tab:SetSelected(true)
+                end
                 if contentFrames[i] then contentFrames[i]:Show() end
             else
                 if PanelTemplates_DeselectTab then
                     PanelTemplates_DeselectTab(tab)
+                end
+                if tab.SetSelected then
+                    tab:SetSelected(false)
                 end
                 if contentFrames[i] then contentFrames[i]:Hide() end
             end
@@ -345,23 +360,34 @@ local function CreateMainFrame()
     local function CreateMainTab(id, name)
         local tab
         local tabName = "MarketSyncMainFrameTab" .. id
-        -- Modern WoW (10.0+ / Forever) uses PanelTabButtonTemplate
-        local ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, "PanelTabButtonTemplate")
-        if ok and res then
-            tab = res
-        else
-            -- Legacy fallback for older Classic clients
-            ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, "CharacterFrameTabButtonTemplate")
+
+        -- Match native Blizzard Auction House tabs 1:1
+        local templates = {
+            "AuctionHouseFrameDisplayModeTabTemplate",
+            "AuctionHouseFrameTabTemplate",
+            "PanelTabButtonTemplate",
+            "CharacterFrameTabButtonTemplate",
+        }
+        for _, tmpl in ipairs(templates) do
+            local ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, tmpl)
             if ok and res then
                 tab = res
-            else
-                tab = CreateFrame("Button", tabName, MainFrame, "UIPanelButtonTemplate")
+                break
+            end
+        end
+        if not tab then
+            tab = CreateFrame("Button", tabName, MainFrame)
+            if MarketSync.StyleModernTab then
+                MarketSync.StyleModernTab(tab)
             end
         end
         tab:SetID(id)
         tab:SetText(name)
         if PanelTemplates_TabResize then
-            PanelTemplates_TabResize(tab, 0)
+            PanelTemplates_TabResize(tab, 20, nil, 65)
+        end
+        if PanelTemplates_DeselectTab then
+            PanelTemplates_DeselectTab(tab)
         end
         return tab
     end
@@ -382,11 +408,11 @@ local function CreateMainFrame()
             tab:Hide()
         else
             if not lastVisibleTab then
-                -- First visible tab anchors to the frame bottom (matching native Auction House)
-                tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 20, -30)
+                -- First visible tab docks to the frame bottom border (matching native Auction House)
+                tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
             else
-                -- Subsequent visible tabs anchor to the previous visible tab
-                tab:SetPoint("LEFT", lastVisibleTab, "RIGHT", -15, 0)
+                -- Subsequent visible tabs overlap previous tab by 14px (matching LibAHTab / native AH)
+                tab:SetPoint("LEFT", lastVisibleTab, "RIGHT", -14, 0)
             end
             lastVisibleTab = tab
         end
@@ -417,9 +443,9 @@ local function CreateMainFrame()
             else
                 tab:Show()
                 if not lastVisible then
-                    tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 20, -30)
+                    tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
                 else
-                    tab:SetPoint("LEFT", lastVisible, "RIGHT", -15, 0)
+                    tab:SetPoint("LEFT", lastVisible, "RIGHT", -14, 0)
                 end
                 lastVisible = tab
             end

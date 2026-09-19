@@ -1007,7 +1007,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     filterChild:SetSize(SIDEBAR_WIDTH - 12, 800)
     filterScroll:SetScrollChild(filterChild)
     if MarketSync.SkinModernScrollBar then
-        MarketSync.SkinModernScrollBar(filterScroll, 6, 2)
+        MarketSync.SkinModernScrollBar(filterScroll, 6, -2)
     end
     filterScroll:EnableMouseWheel(true)
     filterScroll:SetScript("OnMouseWheel", function(self, delta)
@@ -1026,52 +1026,79 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     local function MakeFilterButton(parentFrame, labelText, indent, yOff, btnWidth)
         local w = (btnWidth or (SIDEBAR_WIDTH - 14)) - 4
-        local btn = CreateFrame("Button", nil, parentFrame, "BackdropTemplate")
-        btn:SetSize(w, FILTER_HEIGHT)
-        btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
-
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-
         if indent > 0 then
-            btn:SetBackdropColor(0.09, 0.08, 0.07, 0.85)
-            btn:SetBackdropBorderColor(0.24, 0.20, 0.15, 0.60)
-        else
-            btn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+            w = w - indent
         end
+        local btn
+        local ok, res = pcall(CreateFrame, "Button", nil, parentFrame, "AuctionCategoryButtonTemplate")
+        if ok and res then
+            btn = res
+            btn:SetSize(w, 20)
+            btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
+            if btn.NormalTexture then
+                btn.NormalTexture:ClearAllPoints()
+                btn.NormalTexture:SetPoint("TOPLEFT", -2, 0)
+                btn.NormalTexture:SetSize(w + 4, 20)
+            end
+            if btn.Text then
+                btn.Text:SetText(labelText)
+                btn.text = btn.Text
+            end
+            if btn.Lines and indent == 0 then
+                btn.Lines:Hide()
+            end
+        else
+            btn = CreateFrame("Button", nil, parentFrame)
+            btn:SetSize(w, 20)
+            btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
 
-        local text = btn:CreateFontString(nil, "ARTWORK", indent > 0 and "GameFontHighlightSmallLeft" or "GameFontNormalSmallLeft")
-        text:SetPoint("LEFT", 6, 0)
-        text:SetPoint("RIGHT", -6, 0)
-        text:SetText(labelText)
-        btn.text = text
+            local normalTex = btn:CreateTexture(nil, "BACKGROUND")
+            normalTex:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-FilterBg")
+            normalTex:SetPoint("TOPLEFT", -2, 0)
+            normalTex:SetSize(w + 4, 20)
+            btn.NormalTexture = normalTex
 
-        -- Hover highlight: subtle warm amber glow
-        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetColorTexture(1, 0.82, 0, 0.15)
-        hl:SetPoint("TOPLEFT", 2, -2)
-        hl:SetPoint("BOTTOMRIGHT", -2, 2)
+            local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
+            hl:SetBlendMode("ADD")
+            hl:SetAllPoints(normalTex)
+            btn.HighlightTexture = hl
+
+            local sel = btn:CreateTexture(nil, "ARTWORK")
+            if sel.SetAtlas and not pcall(sel.SetAtlas, sel, "auctionhouse-nav-button-select") then
+                sel:SetColorTexture(1, 0.82, 0, 0.20)
+            end
+            sel:SetBlendMode("ADD")
+            sel:SetAllPoints(normalTex)
+            sel:Hide()
+            btn.SelectedTexture = sel
+
+            local text = btn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+            text:SetPoint("LEFT", 6, 0)
+            text:SetPoint("RIGHT", -6, 0)
+            text:SetJustifyH("LEFT")
+            text:SetText(labelText)
+            btn.Text = text
+            btn.text = text
+        end
 
         btn.SetSelected = function(self, isSelected)
             if isSelected then
-                self:SetBackdropColor(0.32, 0.25, 0.08, 0.90)
-                self:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
-                self.text:SetTextColor(1.0, 0.82, 0.0)
+                if self.SelectedTexture then self.SelectedTexture:Show() end
+                local t = self.Text or self.text
+                if t and t.SetTextColor then t:SetTextColor(1.0, 0.82, 0.0) end
+                if self.LockHighlight then self:LockHighlight() end
             else
-                if indent > 0 then
-                    self:SetBackdropColor(0.09, 0.08, 0.07, 0.85)
-                    self:SetBackdropBorderColor(0.24, 0.20, 0.15, 0.60)
-                    self.text:SetTextColor(0.90, 0.90, 0.90)
-                else
-                    self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-                    self:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
-                    self.text:SetTextColor(1.0, 0.82, 0.0)
+                if self.SelectedTexture then self.SelectedTexture:Hide() end
+                local t = self.Text or self.text
+                if t and t.SetTextColor then
+                    if indent > 0 then
+                        t:SetTextColor(0.85, 0.85, 0.85)
+                    else
+                        t:SetTextColor(1.0, 0.82, 0.0)
+                    end
                 end
+                if self.UnlockHighlight then self:UnlockHighlight() end
             end
         end
 
@@ -1217,11 +1244,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.currentResults = {}
 
     local prevBtn = CreateFrame("Button", nil, panel)
-    prevBtn:SetSize(28, 28)
-    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -50, 11)
-    prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
-    prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
-    prevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
+    prevBtn:SetSize(20, 20)
+    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -48, 14)
+    prevBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
+    prevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
+    prevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
+    local pnt = prevBtn.GetNormalTexture and prevBtn:GetNormalTexture()
+    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
     prevBtn:SetScript("OnClick", function()
         if panel.page > 0 then
             panel.page = panel.page - 1
@@ -1231,11 +1260,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.prevBtn = prevBtn
 
     local nextBtn = CreateFrame("Button", nil, panel)
-    nextBtn:SetSize(28, 28)
-    nextBtn:SetPoint("LEFT", prevBtn, "RIGHT", 2, 0)
-    nextBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
-    nextBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
-    nextBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
+    nextBtn:SetSize(20, 20)
+    nextBtn:SetPoint("LEFT", prevBtn, "RIGHT", 4, 0)
+    nextBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
+    nextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
+    nextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
+    local nnt = nextBtn.GetNormalTexture and nextBtn:GetNormalTexture()
+    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
     nextBtn:SetScript("OnClick", function()
         local maxPage = math.floor(#panel.currentResults / NUM_RESULTS_TO_DISPLAY)
         if panel.page < maxPage then
@@ -1247,7 +1278,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     -- Page text (in gold bar, left of arrows)
     panel.pageText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.pageText:SetPoint("BOTTOMRIGHT", prevBtn, "BOTTOMLEFT", -8, 9)
+    panel.pageText:SetPoint("RIGHT", prevBtn, "LEFT", -8, 0)
 
     -- No results text
     panel.noResultsText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -1255,21 +1286,24 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.noResultsText:SetText("Search for items using the box above.")
     panel.noResultsText:Show()
 
-    -- --- STATUS TEXT (inside the bottom gold bar, left side) ---
+    -- --- STATUS TEXT (inside the bottom gold bar, left side, centered vertically) ---
     panel.statusText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.statusText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 30, 20)
+    panel.statusText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 28, 16)
     panel.statusText:SetWidth(200)
+    panel.statusText:SetHeight(16)
     panel.statusText:SetJustifyH("LEFT")
 
     -- --- "Last Guild Sync" LABEL (aligned with Rarity column area) ---
     panel.syncLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.syncLabel:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 195, 20)
+    panel.syncLabel:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 195, 16)
+    panel.syncLabel:SetHeight(16)
     panel.syncLabel:SetJustifyH("LEFT")
 
     -- --- ITEM COUNT TEXT (center-left of gold bar) ---
     panel.itemCountText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.itemCountText:SetPoint("BOTTOM", panel, "BOTTOM", -60, 20)
+    panel.itemCountText:SetPoint("BOTTOM", panel, "BOTTOM", -60, 16)
     panel.itemCountText:SetWidth(200)
+    panel.itemCountText:SetHeight(16)
     panel.itemCountText:SetJustifyH("CENTER")
 
     -- --- OnShow: Update status bar and run initial search ---
@@ -1692,8 +1726,18 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             end
         end
         self.pageText:SetText(statusStr)
-        self.prevBtn:SetEnabled(self.page > 0)
-        self.nextBtn:SetEnabled(self.page < maxPage)
+        local hasPrev = self.page > 0
+        local hasNext = self.page < maxPage
+        self.prevBtn:SetEnabled(hasPrev)
+        self.nextBtn:SetEnabled(hasNext)
+        local pnt = self.prevBtn.GetNormalTexture and self.prevBtn:GetNormalTexture()
+        if pnt and pnt.SetVertexColor then
+            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+        local nnt = self.nextBtn.GetNormalTexture and self.nextBtn:GetNormalTexture()
+        if nnt and nnt.SetVertexColor then
+            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
         if self.tableScrollBar then
             self.tableScrollBar:Update(self.page, maxPage)
         end

@@ -1341,6 +1341,53 @@ function MarketSync.FormatColoredItemName(name, quality)
 end
 
 -- ================================================================
+-- UI HELPER: StyleModernTab
+-- Fallback skinner for tabs when native AuctionHouseFrameDisplayModeTabTemplate
+-- is not available in mock/legacy environments.
+-- ================================================================
+function MarketSync.StyleModernTab(tab)
+    if not tab then return end
+    tab:SetHeight(32)
+
+    local bg = tab:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.08, 0.07, 0.06, 0.95)
+    tab._modernBg = bg
+
+    local border = tab:CreateTexture(nil, "BORDER")
+    border:SetPoint("TOPLEFT", 1, -1)
+    border:SetPoint("BOTTOMRIGHT", -1, 1)
+    border:SetColorTexture(0.30, 0.25, 0.16, 0.85)
+    tab._modernBorder = border
+
+    local hl = tab:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
+    hl:SetBlendMode("ADD")
+    tab._modernHl = hl
+
+    local text = tab.GetFontString and tab:GetFontString()
+    if text then
+        if text.SetFontObject then text:SetFontObject("GameFontNormalSmall") end
+        if text.SetTextColor then text:SetTextColor(0.75, 0.70, 0.60) end
+    end
+
+    tab.SetSelected = function(self, isSelected)
+        if isSelected then
+            if self._modernBg and self._modernBg.SetColorTexture then self._modernBg:SetColorTexture(0.16, 0.13, 0.08, 0.98) end
+            if self._modernBorder and self._modernBorder.SetColorTexture then self._modernBorder:SetColorTexture(1.0, 0.82, 0.0, 0.95) end
+            local t = self.GetFontString and self:GetFontString()
+            if t and t.SetTextColor then t:SetTextColor(1.0, 0.82, 0.0) end
+        else
+            if self._modernBg and self._modernBg.SetColorTexture then self._modernBg:SetColorTexture(0.08, 0.07, 0.06, 0.95) end
+            if self._modernBorder and self._modernBorder.SetColorTexture then self._modernBorder:SetColorTexture(0.30, 0.25, 0.16, 0.85) end
+            local t = self.GetFontString and self:GetFontString()
+            if t and t.SetTextColor then t:SetTextColor(0.75, 0.70, 0.60) end
+        end
+    end
+end
+
+-- ================================================================
 -- UI HELPER: SkinModernScrollBar
 -- Converts legacy Classic button-sliders into modern WoW Retail /
 -- Classic 1.15+ borderless slim scrollbars matching the client AH.
@@ -1397,18 +1444,31 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
         thumb:SetSize(barWidth, 32)
     end
 
+    local function ApplyButtonTextures(btn, isUp)
+        if not btn then return end
+        local upTex = isUp and "Interface\\Buttons\\Arrow-Up-Up" or "Interface\\Buttons\\Arrow-Down-Up"
+        local downTex = isUp and "Interface\\Buttons\\Arrow-Up-Down" or "Interface\\Buttons\\Arrow-Down-Down"
+        local disTex = isUp and "Interface\\Buttons\\Arrow-Up-Disabled" or "Interface\\Buttons\\Arrow-Down-Disabled"
+        if btn.SetNormalTexture then btn:SetNormalTexture(upTex) end
+        if btn.SetPushedTexture then btn:SetPushedTexture(downTex) end
+        if btn.SetDisabledTexture then btn:SetDisabledTexture(disTex) end
+
+        local nt = btn.GetNormalTexture and btn:GetNormalTexture()
+        local dt = btn.GetDisabledTexture and btn:GetDisabledTexture()
+        if btn:IsEnabled() then
+            if nt and nt.SetVertexColor then nt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+        else
+            if nt and nt.SetVertexColor then nt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if dt and dt.SetVertexColor then dt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+    end
+
     -- Modern Chevron Up Button
     if upBtn then
         upBtn:ClearAllPoints()
         upBtn:SetPoint("BOTTOM", scrollBar, "TOP", 0, 1)
         upBtn:SetSize(barWidth + 4, 12)
-        if upBtn.SetNormalTexture then
-            upBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Up-Up")
-            upBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Up-Down")
-            upBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Up-Disabled")
-            local nt = upBtn:GetNormalTexture()
-            if nt and nt.SetVertexColor then nt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
-        end
+        ApplyButtonTextures(upBtn, true)
     end
 
     -- Modern Chevron Down Button
@@ -1416,13 +1476,7 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
         downBtn:ClearAllPoints()
         downBtn:SetPoint("TOP", scrollBar, "BOTTOM", 0, -1)
         downBtn:SetSize(barWidth + 4, 12)
-        if downBtn.SetNormalTexture then
-            downBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Down-Up")
-            downBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Down-Down")
-            downBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Down-Disabled")
-            local nt = downBtn:GetNormalTexture()
-            if nt and nt.SetVertexColor then nt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
-        end
+        ApplyButtonTextures(downBtn, false)
     end
 
     -- Hover effect on thumb
@@ -1446,12 +1500,8 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
                     local curH = thumb:GetHeight() or 32
                     thumb:SetSize(barWidth, math.max(20, curH))
                 end
-                if upBtn and upBtn.GetNormalTexture and upBtn:GetNormalTexture() and upBtn:GetNormalTexture().SetVertexColor then
-                    upBtn:GetNormalTexture():SetVertexColor(0.70, 0.65, 0.55, 0.90)
-                end
-                if downBtn and downBtn.GetNormalTexture and downBtn:GetNormalTexture() and downBtn:GetNormalTexture().SetVertexColor then
-                    downBtn:GetNormalTexture():SetVertexColor(0.70, 0.65, 0.55, 0.90)
-                end
+                ApplyButtonTextures(upBtn, true)
+                ApplyButtonTextures(downBtn, false)
             end
         end)
     end
@@ -1594,8 +1644,28 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
             slider:Show()
             upBtn:Show()
             downBtn:Show()
-            if currentPage <= 0 then upBtn:Disable() else upBtn:Enable() end
-            if currentPage >= maxPage then downBtn:Disable() else downBtn:Enable() end
+            if currentPage <= 0 then
+                upBtn:Disable()
+                local uTex = upBtn.GetNormalTexture and upBtn:GetNormalTexture()
+                if uTex and uTex.SetVertexColor then uTex:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+                local uDis = upBtn.GetDisabledTexture and upBtn:GetDisabledTexture()
+                if uDis and uDis.SetVertexColor then uDis:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            else
+                upBtn:Enable()
+                local uTex = upBtn.GetNormalTexture and upBtn:GetNormalTexture()
+                if uTex and uTex.SetVertexColor then uTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+            end
+            if currentPage >= maxPage then
+                downBtn:Disable()
+                local dTex = downBtn.GetNormalTexture and downBtn:GetNormalTexture()
+                if dTex and dTex.SetVertexColor then dTex:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+                local dDis = downBtn.GetDisabledTexture and downBtn:GetDisabledTexture()
+                if dDis and dDis.SetVertexColor then dDis:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            else
+                downBtn:Enable()
+                local dTex = downBtn.GetNormalTexture and downBtn:GetNormalTexture()
+                if dTex and dTex.SetVertexColor then dTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+            end
         else
             slider:Hide()
             upBtn:Hide()

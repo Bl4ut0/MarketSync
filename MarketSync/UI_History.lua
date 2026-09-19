@@ -450,11 +450,13 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     panel.scanPageText:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 400, 20)
 
     local scanPrevBtn = CreateFrame("Button", nil, panel)
-    scanPrevBtn:SetSize(28, 28)
-    scanPrevBtn:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 510, 11)
-    scanPrevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
-    scanPrevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
-    scanPrevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
+    scanPrevBtn:SetSize(20, 20)
+    scanPrevBtn:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", 510, 14)
+    scanPrevBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
+    scanPrevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
+    scanPrevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
+    local spnt = scanPrevBtn.GetNormalTexture and scanPrevBtn:GetNormalTexture()
+    if spnt and spnt.SetVertexColor then spnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
     scanPrevBtn:SetScript("OnClick", function()
         if panel.scanPage > 0 then
             panel.scanPage = panel.scanPage - 1
@@ -464,11 +466,13 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     panel.scanPrevBtn = scanPrevBtn
 
     local scanNextBtn = CreateFrame("Button", nil, panel)
-    scanNextBtn:SetSize(28, 28)
-    scanNextBtn:SetPoint("LEFT", scanPrevBtn, "RIGHT", 2, 0)
-    scanNextBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
-    scanNextBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
-    scanNextBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
+    scanNextBtn:SetSize(20, 20)
+    scanNextBtn:SetPoint("LEFT", scanPrevBtn, "RIGHT", 4, 0)
+    scanNextBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
+    scanNextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
+    scanNextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
+    local snnt = scanNextBtn.GetNormalTexture and scanNextBtn:GetNormalTexture()
+    if snnt and snnt.SetVertexColor then snnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
     scanNextBtn:SetScript("OnClick", function()
         local maxPage = math.max(0, math.ceil(#panel.historyData / SCANS_PER_PAGE) - 1)
         if panel.scanPage < maxPage then
@@ -669,8 +673,18 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
 
         local maxPage = math.max(0, math.ceil(total / SCANS_PER_PAGE) - 1)
         self.scanPageText:SetText(total .. " scans (Page " .. (self.scanPage + 1) .. "/" .. (maxPage + 1) .. ")")
-        self.scanPrevBtn:SetEnabled(self.scanPage > 0)
-        self.scanNextBtn:SetEnabled(self.scanPage < maxPage)
+        local hasPrev = self.scanPage > 0
+        local hasNext = self.scanPage < maxPage
+        self.scanPrevBtn:SetEnabled(hasPrev)
+        self.scanNextBtn:SetEnabled(hasNext)
+        local pnt = self.scanPrevBtn.GetNormalTexture and self.scanPrevBtn:GetNormalTexture()
+        if pnt and pnt.SetVertexColor then
+            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+        local nnt = self.scanNextBtn.GetNormalTexture and self.scanNextBtn:GetNormalTexture()
+        if nnt and nnt.SetVertexColor then
+            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
 
         if total == 0 then
             self.noDataText:Show()

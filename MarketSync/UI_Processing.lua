@@ -4,13 +4,13 @@
 -- =============================================================
 
 local RESULTS_PER_PAGE = 8
-local CUSTOM_ROWS = 2
+local CUSTOM_ROWS = 4
 
 local LEFT_X = 23
-local TOP_Y = -105
+local TOP_Y = -70
 local LEFT_W = 155
 local LEFT_TOP_H = 188
-local LEFT_BOTTOM_H = 109
+local LEFT_BOTTOM_H = 150
 local BOX_GAP = 8
 
 local RESULTS_X = 195
@@ -322,17 +322,17 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local leftTopBox, leftBottomBox, rightBox
     if isEmbedded then
-        leftTopBox = CreateBox(panel, LEFT_X, -8, LEFT_W, 230)
-        leftBottomBox = CreateBox(panel, LEFT_X, -244, LEFT_W, 220)
+        leftTopBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 204)
+        leftBottomBox = CreateBox(panel, LEFT_X, -246, LEFT_W, 214)
         leftBottomBox:SetWidth(LEFT_W)
         leftBottomBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
-        rightBox = CreateBox(panel, RESULTS_X, -30, ROW_WIDTH, 440)
+        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, 436)
         rightBox:SetWidth(ROW_WIDTH)
         rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
     else
         leftTopBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, LEFT_TOP_H)
         leftBottomBox = CreateBox(panel, LEFT_X, TOP_Y - LEFT_TOP_H - BOX_GAP, LEFT_W, LEFT_BOTTOM_H)
-        rightBox = CreateBox(panel, RESULTS_X - 2, -75, ROW_WIDTH + 4, 335)
+        rightBox = CreateBox(panel, RESULTS_X - 2, TOP_Y, ROW_WIDTH + 4, 346)
     end
     panel.leftTopBox = leftTopBox
     panel.leftBottomBox = leftBottomBox
@@ -340,7 +340,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local leftTopTitle = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     leftTopTitle:SetPoint("TOPLEFT", 8, -8)
-    leftTopTitle:SetText("|cffffd700Selection Controls|r")
+    leftTopTitle:SetText("|cffffd700Target Material Controls|r")
 
     local modeButtons = {}
     local btnRun
@@ -377,41 +377,37 @@ function MarketSync.CreateProcessingPanel(parent)
             local btn = modeButtons[def.key]
             if btn then
                 if def.key == panel.activeMode then
-                    btn:SetBackdropColor(0.32, 0.25, 0.08, 0.90)
-                    btn:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
-                    btn.text:SetTextColor(1.0, 0.82, 0.0)
+                    btn:Disable()
+                    local t = btn.GetFontString and btn:GetFontString()
+                    if t and t.SetTextColor then t:SetTextColor(1.0, 0.82, 0.0) end
                 else
-                    btn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-                    btn:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
-                    btn.text:SetTextColor(0.90, 0.90, 0.90)
+                    btn:Enable()
+                    local t = btn.GetFontString and btn:GetFontString()
+                    if t and t.SetTextColor then t:SetTextColor(0.90, 0.90, 0.90) end
                 end
+            end
+        end
+        if leftTopTitle then
+            if panel.activeMode == "target" then
+                leftTopTitle:SetText("|cffffd700Target Material Controls|r")
+            elseif panel.activeMode == "process" then
+                leftTopTitle:SetText("|cffffd700Process Scan Controls|r")
+            else
+                leftTopTitle:SetText("|cffffd700Craft Profit Controls|r")
             end
         end
     end
 
-    local function CreateModeButton(def, yOffset)
-        local btn = CreateFrame("Button", nil, leftTopBox, "BackdropTemplate")
-        btn:SetSize(LEFT_W - 16, 22)
-        btn:SetPoint("TOPLEFT", 8, yOffset)
-
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        btn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-        btn:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
-
-        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetColorTexture(1, 0.82, 0, 0.15)
-        hl:SetPoint("TOPLEFT", 2, -2)
-        hl:SetPoint("BOTTOMRIGHT", -2, 2)
-
-        local txt = btn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        txt:SetPoint("CENTER")
-        txt:SetText(def.label)
-        btn.text = txt
+    -- Top Sub-Tab Mode Buttons (Target Material / Process Scan / Craft Profit)
+    local function CreateModeTab(def, index)
+        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        btn:SetSize(isEmbedded and 115 or 122, 22)
+        if index == 1 then
+            btn:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 8 or 76, isEmbedded and -8 or -34)
+        else
+            btn:SetPoint("LEFT", modeButtons[MODE_OPTIONS[index - 1].key], "RIGHT", 6, 0)
+        end
+        btn:SetText(def.label)
 
         btn:SetScript("OnClick", function()
             if panel.activeMode ~= def.key then
@@ -427,21 +423,20 @@ function MarketSync.CreateProcessingPanel(parent)
                 end
             end
         end)
-
         return btn
     end
 
-    modeButtons.target = CreateModeButton(MODE_OPTIONS[1], -24)
-    modeButtons.process = CreateModeButton(MODE_OPTIONS[2], -48)
-    modeButtons.craft = CreateModeButton(MODE_OPTIONS[3], -72)
+    modeButtons.target = CreateModeTab(MODE_OPTIONS[1], 1)
+    modeButtons.process = CreateModeTab(MODE_OPTIONS[2], 2)
+    modeButtons.craft = CreateModeTab(MODE_OPTIONS[3], 3)
 
     local targetLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    targetLabel:SetPoint("TOPLEFT", 8, -94)
+    targetLabel:SetPoint("TOPLEFT", 8, -26)
     targetLabel:SetText("Target (Name/ID)")
 
     local targetInputBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
     targetInputBox:SetSize(LEFT_W - 16, 18)
-    targetInputBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -110)
+    targetInputBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
     targetInputBox:SetAutoFocus(false)
     targetInputBox:SetText("")
     targetInputBox:SetScript("OnEnter", function(self)
@@ -518,10 +513,17 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -126)
+    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -64)
+
+    local targetDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    targetDesc:SetPoint("TOPLEFT", 8, -122)
+    targetDesc:SetPoint("BOTTOMRIGHT", -8, 8)
+    targetDesc:SetJustifyH("LEFT")
+    if targetDesc.SetJustifyV then targetDesc:SetJustifyV("TOP") end
+    targetDesc:SetText("|cff777777Calculates arbitrage profit from buying this material and processing it into secondary yields.|r")
 
     local processLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    processLabel:SetPoint("TOPLEFT", 8, -94)
+    processLabel:SetPoint("TOPLEFT", 8, -26)
     processLabel:SetText("Process")
 
     local processDropdown
@@ -540,14 +542,21 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -104)
+    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -42)
     UIDropDownMenu_SetText(processDropdown, "ALL")
+
+    local processDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    processDesc:SetPoint("TOPLEFT", 8, -102)
+    processDesc:SetPoint("BOTTOMRIGHT", -8, 8)
+    processDesc:SetJustifyH("LEFT")
+    if processDesc.SetJustifyV then processDesc:SetJustifyV("TOP") end
+    processDesc:SetText("|cff777777Evaluates all auction house ores, herbs, and gear for mass processing profit.|r")
 
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
     panel.selectedProfession = professionOptions[1] or nil
 
     local professionLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    professionLabel:SetPoint("TOPLEFT", 8, -94)
+    professionLabel:SetPoint("TOPLEFT", 8, -26)
     professionLabel:SetText("Profession")
 
     local professionDropdown
@@ -566,11 +575,18 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -104)
+    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -42)
     UIDropDownMenu_SetText(professionDropdown, panel.selectedProfession or "No professions")
 
+    local craftDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    craftDesc:SetPoint("TOPLEFT", 8, -102)
+    craftDesc:SetPoint("BOTTOMRIGHT", -8, 8)
+    craftDesc:SetJustifyH("LEFT")
+    if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
+    craftDesc:SetText("|cff777777Calculates profit for all recipes in your known profession against current auction prices.|r")
+
     local marginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    marginLabel:SetPoint("TOPLEFT", 8, -138)
+    marginLabel:SetPoint("TOPLEFT", 8, -98)
     marginLabel:SetText("Margin %")
 
     local marginBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
@@ -596,7 +612,7 @@ function MarketSync.CreateProcessingPanel(parent)
     marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
 
     local minMarginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    minMarginLabel:SetPoint("TOPLEFT", 8, -138)
+    minMarginLabel:SetPoint("TOPLEFT", 8, -74)
     minMarginLabel:SetText("Min Craft")
 
     local minMarginGoldBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
@@ -639,16 +655,16 @@ function MarketSync.CreateProcessingPanel(parent)
         statusSummary:SetWidth(280)
         statusSummary:SetJustifyH("LEFT")
     else
-        btnRun:SetSize(100, 22)
-        btnExport:SetSize(100, 22)
-        btnTrack:SetSize(100, 22)
+        btnRun:SetSize(90, 22)
+        btnExport:SetSize(65, 22)
+        btnTrack:SetSize(65, 22)
 
-        btnRun:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -238, -44)
-        btnExport:SetPoint("LEFT", btnRun, "RIGHT", 6, 0)
-        btnTrack:SetPoint("LEFT", btnExport, "RIGHT", 6, 0)
+        btnTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -34)
+        btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
+        btnRun:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
 
-        statusSummary:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -66)
-        statusSummary:SetWidth(320)
+        statusSummary:SetPoint("RIGHT", btnRun, "LEFT", -10, 0)
+        statusSummary:SetWidth(220)
         statusSummary:SetJustifyH("RIGHT")
     end
     btnExport:SetText("Export")
@@ -724,8 +740,8 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local numResultsPerPage = isEmbedded and 11 or 8
     local rowHeight = isEmbedded and 36 or 37
-    local hdrY = isEmbedded and -32 or -77
-    local rowStartY = isEmbedded and -54 or -103
+    local hdrY = isEmbedded and -32 or -70
+    local rowStartY = isEmbedded and -54 or -94
 
     local colX = RESULTS_X - 2
     for i, col in ipairs(colDefs) do
@@ -1041,26 +1057,30 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.noResultsText:Show()
 
     local prevBtn = CreateFrame("Button", nil, panel)
-    prevBtn:SetSize(28, 28)
-    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", isEmbedded and -40 or -50, 11)
-    prevBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
-    prevBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
-    prevBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
+    prevBtn:SetSize(20, 20)
+    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", isEmbedded and -40 or -48, 14)
+    prevBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
+    prevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
+    prevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
+    local pnt = prevBtn.GetNormalTexture and prevBtn:GetNormalTexture()
+    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
 
     local nextBtn = CreateFrame("Button", nil, panel)
-    nextBtn:SetSize(28, 28)
-    nextBtn:SetPoint("LEFT", prevBtn, "RIGHT", 2, 0)
-    nextBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
-    nextBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
-    nextBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
+    nextBtn:SetSize(20, 20)
+    nextBtn:SetPoint("LEFT", prevBtn, "RIGHT", 4, 0)
+    nextBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
+    nextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
+    nextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
+    local nnt = nextBtn.GetNormalTexture and nextBtn:GetNormalTexture()
+    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
 
     panel.pageText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.pageText:SetPoint("BOTTOMRIGHT", prevBtn, "BOTTOMLEFT", -8, 9)
+    panel.pageText:SetPoint("RIGHT", prevBtn, "LEFT", -8, 0)
     panel.pageText:SetText("0 results")
 
     local btnResyncProf = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnResyncProf:SetSize(118, 20)
-    btnResyncProf:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RESULTS_X + 2, 15)
+    btnResyncProf:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RESULTS_X + 2, 14)
     btnResyncProf:SetText("Resync Profs")
     btnResyncProf:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -1149,15 +1169,23 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.customPageText:SetPoint("BOTTOMLEFT", 8, 8)
     panel.customPageText:SetText("1/1")
 
-    local customPrevBtn = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
-    customPrevBtn:SetSize(22, 16)
-    customPrevBtn:SetPoint("BOTTOMRIGHT", -28, 6)
-    customPrevBtn:SetText("<")
+    local customPrevBtn = CreateFrame("Button", nil, leftBottomBox)
+    customPrevBtn:SetSize(16, 16)
+    customPrevBtn:SetPoint("BOTTOMRIGHT", -26, 6)
+    customPrevBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
+    customPrevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
+    customPrevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
+    local cpnt = customPrevBtn.GetNormalTexture and customPrevBtn:GetNormalTexture()
+    if cpnt and cpnt.SetVertexColor then cpnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
 
-    local customNextBtn = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
-    customNextBtn:SetSize(22, 16)
+    local customNextBtn = CreateFrame("Button", nil, leftBottomBox)
+    customNextBtn:SetSize(16, 16)
     customNextBtn:SetPoint("LEFT", customPrevBtn, "RIGHT", 4, 0)
-    customNextBtn:SetText(">")
+    customNextBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
+    customNextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
+    customNextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
+    local cnnt = customNextBtn.GetNormalTexture and customNextBtn:GetNormalTexture()
+    if cnnt and cnnt.SetVertexColor then cnnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
 
     local function ModeLabel(mode)
         if mode == "process" then return "Process Scan" end
@@ -1229,13 +1257,22 @@ function MarketSync.CreateProcessingPanel(parent)
 
         SetControlVisible(targetLabel, isTarget)
         SetControlVisible(targetInputBox, isTarget)
-        SetControlVisible(targetDropdown, false)
+        SetControlVisible(targetDropdown, isTarget)
+        SetControlVisible(targetDesc, isTarget)
 
         SetControlVisible(processLabel, isProcess)
         SetControlVisible(processDropdown, isProcess)
+        SetControlVisible(processDesc, isProcess)
 
         SetControlVisible(professionLabel, isCraft)
         SetControlVisible(professionDropdown, isCraft)
+        SetControlVisible(craftDesc, isCraft)
+
+        if isTarget then
+            marginLabel:SetPoint("TOPLEFT", 8, -98)
+        else
+            marginLabel:SetPoint("TOPLEFT", 8, -76)
+        end
 
         SetControlVisible(marginLabel, (isTarget or isProcess))
         SetControlVisible(marginBox, (isTarget or isProcess))
@@ -1324,8 +1361,18 @@ function MarketSync.CreateProcessingPanel(parent)
         local pageShown = (total > 0) and (panel.page + 1) or 1
         panel.pageText:SetText(string.format("%d results (Page %d/%d)", total, pageShown, totalPages))
 
-        prevBtn:SetEnabled(panel.page > 0)
-        nextBtn:SetEnabled(total > 0 and panel.page < (totalPages - 1))
+        local hasPrev = panel.page > 0
+        local hasNext = total > 0 and panel.page < (totalPages - 1)
+        prevBtn:SetEnabled(hasPrev)
+        nextBtn:SetEnabled(hasNext)
+        local pnt = prevBtn.GetNormalTexture and prevBtn:GetNormalTexture()
+        if pnt and pnt.SetVertexColor then
+            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+        local nnt = nextBtn.GetNormalTexture and nextBtn:GetNormalTexture()
+        if nnt and nnt.SetVertexColor then
+            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
 
         if total > 0 then
             panel.noResultsText:Hide()
@@ -1812,8 +1859,18 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.customPageText:SetText("0/0")
         end
 
-        customPrevBtn:SetEnabled(panel.customPage > 0)
-        customNextBtn:SetEnabled(total > 0 and panel.customPage < (totalPages - 1))
+        local hasCPrev = panel.customPage > 0
+        local hasCNext = total > 0 and panel.customPage < (totalPages - 1)
+        customPrevBtn:SetEnabled(hasCPrev)
+        customNextBtn:SetEnabled(hasCNext)
+        local cpnt = customPrevBtn.GetNormalTexture and customPrevBtn:GetNormalTexture()
+        if cpnt and cpnt.SetVertexColor then
+            if hasCPrev then cpnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else cpnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
+        local cnnt = customNextBtn.GetNormalTexture and customNextBtn:GetNormalTexture()
+        if cnnt and cnnt.SetVertexColor then
+            if hasCNext then cnnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else cnnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+        end
     end
 
     targetInputBox:SetScript("OnEnterPressed", function(self)
