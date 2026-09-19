@@ -297,9 +297,9 @@ end
 function MarketSync.CreateProcessingPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local LEFT_X = isEmbedded and 12 or 23
-    local LEFT_W = isEmbedded and 145 or 155
-    local RESULTS_X = isEmbedded and 162 or 195
-    local ROW_WIDTH = isEmbedded and 576 or 632
+    local LEFT_W = isEmbedded and 180 or 155
+    local RESULTS_X = isEmbedded and 198 or 195
+    local ROW_WIDTH = isEmbedded and 550 or 632
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
@@ -322,11 +322,13 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local leftTopBox, leftBottomBox, rightBox
     if isEmbedded then
-        leftTopBox = CreateBox(panel, LEFT_X, -8, LEFT_W, 215)
-        leftBottomBox = CreateBox(panel, LEFT_X, -231, LEFT_W, nil)
+        leftTopBox = CreateBox(panel, LEFT_X, -8, LEFT_W, 230)
+        leftBottomBox = CreateBox(panel, LEFT_X, -244, LEFT_W, 220)
+        leftBottomBox:SetWidth(LEFT_W)
         leftBottomBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
-        rightBox = CreateBox(panel, RESULTS_X - 6, -30, ROW_WIDTH + 10, nil)
-        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
+        rightBox = CreateBox(panel, RESULTS_X, -30, ROW_WIDTH, 440)
+        rightBox:SetWidth(ROW_WIDTH)
+        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
     else
         leftTopBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, LEFT_TOP_H)
         leftBottomBox = CreateBox(panel, LEFT_X, TOP_Y - LEFT_TOP_H - BOX_GAP, LEFT_W, LEFT_BOTTOM_H)
@@ -502,14 +504,14 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -8, -126)
+    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -126)
 
     local processLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     processLabel:SetPoint("TOPLEFT", 8, -94)
     processLabel:SetText("Process")
 
     local processDropdown
-    processDropdown = BuildDropdown(parentPrefix .. "ProcessingTypeDropdown", leftTopBox, LEFT_W - 26, function(self, level)
+    processDropdown = BuildDropdown(parentPrefix .. "ProcessingTypeDropdown", leftTopBox, LEFT_W - 54, function(self, level)
         if panel.selectedProcess and not IsSupportedProcessType(panel.selectedProcess) then
             panel.selectedProcess = nil
         end
@@ -524,7 +526,7 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -8, -104)
+    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -104)
     UIDropDownMenu_SetText(processDropdown, "ALL")
 
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
@@ -535,7 +537,7 @@ function MarketSync.CreateProcessingPanel(parent)
     professionLabel:SetText("Profession")
 
     local professionDropdown
-    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, LEFT_W - 26, function(self, level)
+    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, LEFT_W - 54, function(self, level)
         professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or professionOptions
         for _, p in ipairs(professionOptions) do
             local opt = UIDropDownMenu_CreateInfo()
@@ -550,7 +552,7 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -8, -104)
+    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", -12, -104)
     UIDropDownMenu_SetText(professionDropdown, panel.selectedProfession or "No professions")
 
     local marginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -558,8 +560,8 @@ function MarketSync.CreateProcessingPanel(parent)
     marginLabel:SetText("Margin %")
 
     local marginBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    marginBox:SetSize(45, 18)
-    marginBox:SetPoint("LEFT", marginLabel, "RIGHT", 8, 0)
+    marginBox:SetSize(36, 18)
+    marginBox:SetPoint("LEFT", marginLabel, "RIGHT", 6, 0)
     marginBox:SetAutoFocus(false)
     marginBox:SetNumeric(true)
     marginBox:SetText("10")
@@ -567,19 +569,43 @@ function MarketSync.CreateProcessingPanel(parent)
         MarketSync.RegisterLinkAwareEditBox(marginBox)
     end
 
+    local marginBtn10 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
+    marginBtn10:SetSize(32, 18)
+    marginBtn10:SetPoint("LEFT", marginBox, "RIGHT", 4, 0)
+    marginBtn10:SetText("10%")
+    marginBtn10:SetScript("OnClick", function() marginBox:SetText("10") end)
+
+    local marginBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
+    marginBtn20:SetSize(32, 18)
+    marginBtn20:SetPoint("LEFT", marginBtn10, "RIGHT", 2, 0)
+    marginBtn20:SetText("20%")
+    marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
+
     local minMarginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     minMarginLabel:SetPoint("TOPLEFT", 8, -138)
-    minMarginLabel:SetText("Min Craft g")
+    minMarginLabel:SetText("Min Craft")
 
     local minMarginGoldBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    minMarginGoldBox:SetSize(45, 18)
-    minMarginGoldBox:SetPoint("LEFT", minMarginLabel, "RIGHT", 8, 0)
+    minMarginGoldBox:SetSize(36, 18)
+    minMarginGoldBox:SetPoint("LEFT", minMarginLabel, "RIGHT", 6, 0)
     minMarginGoldBox:SetAutoFocus(false)
     minMarginGoldBox:SetNumeric(true)
     minMarginGoldBox:SetText("5")
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(minMarginGoldBox)
     end
+
+    local minGoldBtn5 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
+    minGoldBtn5:SetSize(28, 18)
+    minGoldBtn5:SetPoint("LEFT", minMarginGoldBox, "RIGHT", 4, 0)
+    minGoldBtn5:SetText("5g")
+    minGoldBtn5:SetScript("OnClick", function() minMarginGoldBox:SetText("5") end)
+
+    local minGoldBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
+    minGoldBtn20:SetSize(32, 18)
+    minGoldBtn20:SetPoint("LEFT", minGoldBtn5, "RIGHT", 2, 0)
+    minGoldBtn20:SetText("20g")
+    minGoldBtn20:SetScript("OnClick", function() minMarginGoldBox:SetText("20") end)
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -647,7 +673,7 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.sortAscending = false
 
     local colDefs = isEmbedded and {
-        { name = "Item",     width = 206, sortKey = "itemSort"   },
+        { name = "Item",     width = 180, sortKey = "itemSort"   },
         { name = "Type/Lvl", width = 54,  sortKey = "typeSort"   },
         { name = "Value",    width = 66,  sortKey = "valueSort"  },
         { name = "Max",      width = 66,  sortKey = "maxSort"    },
@@ -789,36 +815,36 @@ function MarketSync.CreateProcessingPanel(parent)
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         row.nameText:SetPoint("TOPLEFT", 43, -3)
-        row.nameText:SetWidth(isEmbedded and 160 or 198)
+        row.nameText:SetWidth(isEmbedded and 134 or 198)
         row.nameText:SetJustifyH("LEFT")
 
         row.typeText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.typeText:SetPoint("TOPLEFT", isEmbedded and 208 or 246, -3)
+        row.typeText:SetPoint("TOPLEFT", isEmbedded and 184 or 246, -3)
         row.typeText:SetWidth(isEmbedded and 48 or 50)
         row.typeText:SetJustifyH("LEFT")
 
         row.valueText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.valueText:SetPoint("TOPLEFT", isEmbedded and 262 or 304, -3)
+        row.valueText:SetPoint("TOPLEFT", isEmbedded and 238 or 304, -3)
         row.valueText:SetWidth(isEmbedded and 58 or 60)
         row.valueText:SetJustifyH("RIGHT")
 
         row.maxText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.maxText:SetPoint("TOPLEFT", isEmbedded and 328 or 374, -3)
+        row.maxText:SetPoint("TOPLEFT", isEmbedded and 304 or 374, -3)
         row.maxText:SetWidth(isEmbedded and 58 or 60)
         row.maxText:SetJustifyH("RIGHT")
 
         row.liveText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.liveText:SetPoint("TOPLEFT", isEmbedded and 394 or 442, -3)
+        row.liveText:SetPoint("TOPLEFT", isEmbedded and 370 or 442, -3)
         row.liveText:SetWidth(isEmbedded and 56 or 54)
         row.liveText:SetJustifyH("RIGHT")
 
         row.deltaText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.deltaText:SetPoint("TOPLEFT", isEmbedded and 458 or 506, -3)
+        row.deltaText:SetPoint("TOPLEFT", isEmbedded and 434 or 506, -3)
         row.deltaText:SetWidth(isEmbedded and 56 or 54)
         row.deltaText:SetJustifyH("RIGHT")
 
         row.statusText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.statusText:SetPoint("TOPLEFT", isEmbedded and 522 or 570, -3)
+        row.statusText:SetPoint("TOPLEFT", isEmbedded and 498 or 570, -3)
         row.statusText:SetWidth(isEmbedded and 50 or 54)
         row.statusText:SetJustifyH("LEFT")
 
@@ -1058,7 +1084,7 @@ function MarketSync.CreateProcessingPanel(parent)
     customNameLabel:SetText("Preset")
 
     local customNameBox = CreateFrame("EditBox", nil, leftBottomBox, "InputBoxTemplate")
-    customNameBox:SetSize(88, 18)
+    customNameBox:SetSize(110, 18)
     customNameBox:SetPoint("LEFT", customNameLabel, "RIGHT", 6, 0)
     customNameBox:SetAutoFocus(false)
     if MarketSync.RegisterLinkAwareEditBox then
@@ -1066,7 +1092,7 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     local btnSaveCustom = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
-    btnSaveCustom:SetSize(50, 18)
+    btnSaveCustom:SetSize(52, 18)
     btnSaveCustom:SetPoint("TOPLEFT", 8, -46)
     btnSaveCustom:SetText("Save")
 
@@ -1084,17 +1110,17 @@ function MarketSync.CreateProcessingPanel(parent)
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         row.nameText:SetPoint("LEFT", 0, 0)
-        row.nameText:SetWidth(96)
+        row.nameText:SetWidth(108)
         row.nameText:SetJustifyH("LEFT")
 
         row.applyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.applyBtn:SetSize(22, 16)
-        row.applyBtn:SetPoint("LEFT", 100, 0)
+        row.applyBtn:SetSize(24, 16)
+        row.applyBtn:SetPoint("LEFT", 112, 0)
         row.applyBtn:SetText("L")
 
         row.deleteBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.deleteBtn:SetSize(22, 16)
-        row.deleteBtn:SetPoint("LEFT", 126, 0)
+        row.deleteBtn:SetSize(24, 16)
+        row.deleteBtn:SetPoint("LEFT", 140, 0)
         row.deleteBtn:SetText("X")
 
         row:Hide()
@@ -1195,9 +1221,13 @@ function MarketSync.CreateProcessingPanel(parent)
 
         SetControlVisible(marginLabel, (isTarget or isProcess))
         SetControlVisible(marginBox, (isTarget or isProcess))
+        SetControlVisible(marginBtn10, (isTarget or isProcess))
+        SetControlVisible(marginBtn20, (isTarget or isProcess))
 
         SetControlVisible(minMarginLabel, isCraft)
         SetControlVisible(minMarginGoldBox, isCraft)
+        SetControlVisible(minGoldBtn5, isCraft)
+        SetControlVisible(minGoldBtn20, isCraft)
         RefreshResultHeaders()
     end
 

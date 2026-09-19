@@ -119,8 +119,9 @@ function MarketSync.CreateAHScannerPanel(parent)
     -- Multi-list checklist scroll area
     local listScroll = CreateFrame("ScrollFrame", "MarketSyncScanListScroll", leftInset, "UIPanelScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", leftHeader, "BOTTOMLEFT", 0, -4)
-    listScroll:SetPoint("RIGHT", -22, 0)
+    listScroll:SetPoint("RIGHT", -14, 0)
     listScroll:SetHeight(130)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(listScroll) end
 
     local listScrollContent = CreateFrame("Frame", nil, listScroll)
     listScrollContent:SetSize(232, 1)
@@ -177,7 +178,8 @@ function MarketSync.CreateAHScannerPanel(parent)
     -- Active List Items ScrollFrame
     local itemsScroll = CreateFrame("ScrollFrame", "MarketSyncScanItemsScroll", leftInset, "UIPanelScrollFrameTemplate")
     itemsScroll:SetPoint("TOPLEFT", activeListLabel, "BOTTOMLEFT", 0, -4)
-    itemsScroll:SetPoint("BOTTOMRIGHT", -22, 34)
+    itemsScroll:SetPoint("BOTTOMRIGHT", -14, 34)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(itemsScroll) end
     itemsScroll:EnableMouse(true)
     itemsScroll:SetScript("OnReceiveDrag", HandleScannerItemDrop)
     itemsScroll:SetScript("OnMouseUp", function(self, button)
@@ -667,7 +669,8 @@ function MarketSync.CreateAHScannerPanel(parent)
     -- Results Scroll Frame
     local resultsScroll = CreateFrame("ScrollFrame", "MarketSyncAHScanResultsScroll", rightInset, "UIPanelScrollFrameTemplate")
     resultsScroll:SetPoint("TOPLEFT", colContainer, "BOTTOMLEFT", 0, -4)
-    resultsScroll:SetPoint("BOTTOMRIGHT", -22, 10)
+    resultsScroll:SetPoint("BOTTOMRIGHT", -14, 10)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(resultsScroll) end
 
     local resultsContent = CreateFrame("Frame", nil, resultsScroll)
     resultsContent:SetSize(480, 1)

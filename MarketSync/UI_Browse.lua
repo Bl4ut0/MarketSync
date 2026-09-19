@@ -987,11 +987,16 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     local tableInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 182, -75, 630, 335)
     panel.tableInset = tableInset
 
-    -- Creating raw ScrollFrame WITHOUT UIPanelScrollFrameTemplate removes all visual scrollbar elements completely
-    local filterScroll = CreateFrame("ScrollFrame", nil, panel)
+    -- Modern slim scrollbar matching native Auction House client
+    local filterScroll = CreateFrame("ScrollFrame", "MarketSyncBrowseFilterScroll", panel, "UIPanelScrollFrameTemplate")
     filterScroll:SetPoint("TOPLEFT", categoryInset or panel, "TOPLEFT", 3, -4)
-    filterScroll:SetSize(SIDEBAR_WIDTH - 6, SIDEBAR_HEIGHT - 8)
-    local filterChild = CreateFrame("Frame"); filterChild:SetSize(SIDEBAR_WIDTH - 6, 800); filterScroll:SetScrollChild(filterChild)
+    filterScroll:SetSize(SIDEBAR_WIDTH - 12, SIDEBAR_HEIGHT - 8)
+    local filterChild = CreateFrame("Frame")
+    filterChild:SetSize(SIDEBAR_WIDTH - 12, 800)
+    filterScroll:SetScrollChild(filterChild)
+    if MarketSync.SkinModernScrollBar then
+        MarketSync.SkinModernScrollBar(filterScroll, 6, 2)
+    end
     filterScroll:EnableMouseWheel(true)
     filterScroll:SetScript("OnMouseWheel", function(self, delta)
         local step = FILTER_HEIGHT * 3
@@ -1008,7 +1013,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.activeSubCategory = nil
 
     local function MakeFilterButton(parentFrame, labelText, indent, yOff, btnWidth)
-        local w = (btnWidth or (SIDEBAR_WIDTH - 6)) - 4
+        local w = (btnWidth or (SIDEBAR_WIDTH - 14)) - 4
         local btn = CreateFrame("Button", nil, parentFrame, "BackdropTemplate")
         btn:SetSize(w, FILTER_HEIGHT)
         btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)

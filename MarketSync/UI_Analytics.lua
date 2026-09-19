@@ -462,7 +462,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local scrollName = parentPrefix .. "AnalyticsItemsScroll"
     local itemsScroll = CreateFrame("ScrollFrame", scrollName, leftInset, "UIPanelScrollFrameTemplate")
     itemsScroll:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -2, -6)
-    itemsScroll:SetPoint("BOTTOMRIGHT", -22, 6)
+    itemsScroll:SetPoint("BOTTOMRIGHT", -14, 6)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(itemsScroll) end
     itemsScroll:EnableMouse(true)
     itemsScroll:SetScript("OnReceiveDrag", HandleItemDrop)
     itemsScroll:SetScript("OnMouseUp", function() HandleItemDrop() end)

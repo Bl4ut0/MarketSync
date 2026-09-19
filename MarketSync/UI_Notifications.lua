@@ -544,7 +544,8 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local importBox
     if isEmbedded then
-        importBox = CreateBox(panel, LEFT_X, -256, LEFT_W, nil)
+        importBox = CreateBox(panel, LEFT_X, -260, LEFT_W, 200)
+        importBox:SetWidth(LEFT_W)
         importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
     else
         importBox = CreateBox(panel, LEFT_X, TOP_Y - 224, LEFT_W, 114)
@@ -555,8 +556,8 @@ function MarketSync.CreateNotificationsPanel(parent)
     importTitle:SetText("|cffffd700Preferred List Import|r")
 
     local importDropdown = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(importDropdown, LEFT_W - 40)
-    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", -6, -22)
+    UIDropDownMenu_SetWidth(importDropdown, LEFT_W - 54)
+    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", -12, -22)
 
     local discountLabel = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     discountLabel:SetPoint("TOPLEFT", 10, -53)
@@ -598,12 +599,24 @@ function MarketSync.CreateNotificationsPanel(parent)
     importStatusText:SetPoint("TOPLEFT", 10, -100)
     importStatusText:SetText("")
 
+    if isEmbedded then
+        local importDesc = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+        importDesc:SetPoint("TOPLEFT", 10, -118)
+        importDesc:SetPoint("BOTTOMRIGHT", -10, 10)
+        importDesc:SetJustifyH("LEFT")
+        if importDesc.SetJustifyV then
+            importDesc:SetJustifyV("TOP")
+        end
+        importDesc:SetText("|cff777777Automatically populates watchlist price triggers from your favorite items or shopping lists with configured discounts below market price.|r")
+    end
+
     -- =========================================================
     -- RIGHT COLUMN: ENCLOSING RESULTS BOX (Height 338)
     -- =========================================================
     local rightBox
     if isEmbedded then
-        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, nil)
+        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, 440)
+        rightBox:SetWidth(ROW_WIDTH)
         rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
     else
         rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H)

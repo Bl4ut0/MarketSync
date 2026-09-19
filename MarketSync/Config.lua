@@ -1265,6 +1265,10 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
     end
     if width and height then
         inset:SetSize(width, height)
+    elseif width then
+        inset:SetWidth(width)
+    elseif height then
+        inset:SetHeight(height)
     end
     return inset
 end
@@ -1335,3 +1339,67 @@ function MarketSync.FormatColoredItemName(name, quality)
     end
     return string.format("|c%s%s|r", colorHex, name)
 end
+
+-- ================================================================
+-- UI HELPER: SkinModernScrollBar
+-- Converts legacy Classic button-sliders into modern WoW Retail /
+-- Classic 1.15+ borderless slim scrollbars matching the client AH.
+-- ================================================================
+function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
+    if not scrollFrame then return end
+    local name = scrollFrame:GetName()
+    local scrollBar = (name and _G[name .. "ScrollBar"]) or scrollFrame.ScrollBar
+    if not scrollBar then return end
+
+    local barWidth = customWidth or 6
+    local xOff = offsetX or 0
+
+    -- Hide ancient Classic up/down buttons
+    local upBtn = (name and _G[name .. "ScrollBarScrollUpButton"]) or scrollBar.ScrollUpButton or scrollBar.Back
+    local downBtn = (name and _G[name .. "ScrollBarScrollDownButton"]) or scrollBar.ScrollDownButton or scrollBar.Forward
+    if upBtn then
+        upBtn:Hide()
+        upBtn:SetAlpha(0)
+        upBtn:SetSize(0.1, 0.1)
+        upBtn:EnableMouse(false)
+    end
+    if downBtn then
+        downBtn:Hide()
+        downBtn:SetAlpha(0)
+        downBtn:SetSize(0.1, 0.1)
+        downBtn:EnableMouse(false)
+    end
+
+    -- Re-anchor scrollBar to span from top to bottom seamlessly
+    scrollBar:ClearAllPoints()
+    scrollBar:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", xOff + barWidth + 2, -2)
+    scrollBar:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", xOff + barWidth + 2, 2)
+    scrollBar:SetWidth(barWidth)
+
+    -- Style track background: subtle dark stone gutter
+    if not scrollBar.modernTrack then
+        local track = scrollBar:CreateTexture(nil, "BACKGROUND")
+        track:SetAllPoints()
+        track:SetColorTexture(0.04, 0.04, 0.04, 0.45)
+        scrollBar.modernTrack = track
+    end
+
+    -- Style thumb: modern sleek rounded pill
+    local thumb = (name and _G[name .. "ScrollBarThumbTexture"]) or scrollBar.ThumbTexture or (scrollBar.GetThumbTexture and scrollBar:GetThumbTexture())
+    if thumb then
+        thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
+        thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) -- Warm bronze/stone
+        thumb:SetSize(barWidth, 32)
+    end
+
+    -- Hover effect on thumb
+    if scrollBar.HookScript then
+        scrollBar:HookScript("OnEnter", function()
+            if thumb then thumb:SetColorTexture(0.48, 0.38, 0.18, 0.95) end
+        end)
+        scrollBar:HookScript("OnLeave", function()
+            if thumb then thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) end
+        end)
+    end
+end
+

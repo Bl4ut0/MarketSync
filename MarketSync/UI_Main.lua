@@ -1100,7 +1100,8 @@ local function CreateMainFrame()
 
     local scrollFrame = CreateFrame("ScrollFrame", "MarketSyncUserMgmtScrollFrame", listInset, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 2, -2)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -22, 2)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -14, 2)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(scrollFrame) end
     scrollFrame:EnableMouseWheel(true)
 
     local umScrollChild = CreateFrame("Frame", nil, scrollFrame)

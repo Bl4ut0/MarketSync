@@ -1537,7 +1537,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         SetEnabled = function(self, en) if en then self:Enable() else self:Disable() end end,
         CreateTexture = function() return { SetColorTexture = function() end, SetTexture = function() end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetPoint = function() end, SetAllPoints = function() end, SetBlendMode = function() end, SetVertexColor = function() end, SetTexCoord = function() end, Show = function() end, Hide = function() end } end,
         CreateLine = function() return { SetThickness = function() end, SetColorTexture = function() end, SetStartPoint = function() end, SetEndPoint = function() end, Show = function() end, Hide = function() end } end,
-        CreateFontString = function() return { SetPoint = function() end, ClearAllPoints = function() end, SetText = function() end, GetText = function() return "" end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetJustifyH = function() end, SetTextColor = function() end, SetFontObject = function() end, Show = function() end, Hide = function() end } end,
+        CreateFontString = function() return { SetPoint = function() end, ClearAllPoints = function() end, SetText = function() end, GetText = function() return "" end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetJustifyH = function() end, SetJustifyV = function() end, SetTextColor = function() end, SetFontObject = function() end, Show = function() end, Hide = function() end } end,
         EnableMouseWheel = function() end,
         EnableMouse = function() end,
       }
@@ -1577,10 +1577,10 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     local ahProcContainer = CreateFrame("Frame", "AHProcContainer")
     ahProcContainer:SetSize(756, 447)
     local procAH = MarketSync.CreateProcessingPanel(ahProcContainer)
-    assert(procAH.resultRows[1].width == 576, "Embedded AH processing row width should be 576, got: " .. tostring(procAH.resultRows[1].width))
+    assert(procAH.resultRows[1].width == 550, "Embedded AH processing row width should be 550, got: " .. tostring(procAH.resultRows[1].width))
     assert(#procAH.resultRows == 11, "Embedded AH processing rows should be 11, got: " .. tostring(#procAH.resultRows))
-    -- Total row right offset: RESULTS_X (162) + ROW_WIDTH (576) = 738px <= 756px
-    assert(162 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
+    -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
+    assert(198 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
 
     -- Standalone MainFrame alerts panel
     local alertsMain = MarketSync.CreateNotificationsPanel(MarketSync.MainFrame)

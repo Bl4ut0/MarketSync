@@ -603,7 +603,8 @@ function MarketSync.CreateAHSidecar(parent)
     -- Scrollable List Items Table
     local listScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarListScroll", listInset, "UIPanelScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", 2, -3)
-    listScroll:SetPoint("BOTTOMRIGHT", -22, 3)
+    listScroll:SetPoint("BOTTOMRIGHT", -14, 3)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(listScroll) end
     listScroll:EnableMouse(true)
     listScroll:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
     listScroll:SetScript("OnMouseUp", function(self, button)
@@ -804,7 +805,8 @@ function MarketSync.CreateAHSidecar(parent)
 
     local sellScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarSellScroll", sellInset, "UIPanelScrollFrameTemplate")
     sellScroll:SetPoint("TOPLEFT", 2, -3)
-    sellScroll:SetPoint("BOTTOMRIGHT", -22, 3)
+    sellScroll:SetPoint("BOTTOMRIGHT", -14, 3)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(sellScroll) end
 
     local sellScrollContent = CreateFrame("Frame", nil, sellScroll)
     sellScrollContent:SetSize(288, 1)
