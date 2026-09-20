@@ -1301,13 +1301,16 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
 
     local label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("LEFT", 6, 0)
+    label:SetPoint("RIGHT", -15, 0)
+    label:SetJustifyH("LEFT")
+    if label.SetWordWrap then label:SetWordWrap(false) end
     label:SetText(text or "")
     hdr.label = label
 
     local arrow = hdr:CreateTexture(nil, "OVERLAY")
     arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
     arrow:SetSize(9, 8)
-    arrow:SetPoint("LEFT", label, "RIGHT", 4, -1)
+    arrow:SetPoint("RIGHT", -4, -1)
     arrow:SetTexCoord(0, 0.5625, 0, 1.0)
     arrow:Hide()
     hdr.arrow = arrow

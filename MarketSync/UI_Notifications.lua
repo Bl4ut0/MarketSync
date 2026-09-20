@@ -176,7 +176,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local btnTabWatchlist = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     btnTabWatchlist:SetSize(130, 22)
-    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 8 or 76, isEmbedded and -8 or -34)
+    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, isEmbedded and -8 or -34)
     btnTabWatchlist:SetText("Tracked Watchlist")
 
     local btnTabHistory = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
