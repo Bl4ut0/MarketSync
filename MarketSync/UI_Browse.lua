@@ -5,7 +5,7 @@
 
 local NUM_RESULTS_TO_DISPLAY = 8
 local RESULT_HEIGHT = 37
-local FILTER_HEIGHT = 20
+local FILTER_HEIGHT = 21
 
 -- ---- Money Formatter (colorized with g/s/c) ----
 local function FormatMoney(copper)
@@ -1001,13 +1001,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     -- Modern slim scrollbar matching native Auction House client
     local scrollName = "MarketSyncBrowse" .. tostring(dataSourceName or "Scan") .. "FilterScroll"
     local filterScroll = CreateFrame("ScrollFrame", scrollName, panel, "UIPanelScrollFrameTemplate")
-    filterScroll:SetPoint("TOPLEFT", categoryInset or panel, "TOPLEFT", 3, -4)
-    filterScroll:SetSize(SIDEBAR_WIDTH - 12, SIDEBAR_HEIGHT - 8)
+    filterScroll:SetPoint("TOPLEFT", categoryInset or panel, "TOPLEFT", 2, -3)
+    filterScroll:SetSize(SIDEBAR_WIDTH - 22, SIDEBAR_HEIGHT - 8)
     local filterChild = CreateFrame("Frame")
-    filterChild:SetSize(SIDEBAR_WIDTH - 12, 800)
+    filterChild:SetSize(SIDEBAR_WIDTH - 22, 800)
     filterScroll:SetScrollChild(filterChild)
     if MarketSync.SkinModernScrollBar then
-        MarketSync.SkinModernScrollBar(filterScroll, 6, -2)
+        MarketSync.SkinModernScrollBar(filterScroll, 8, 4)
     end
     filterScroll:EnableMouseWheel(true)
     filterScroll:SetScript("OnMouseWheel", function(self, delta)
@@ -1025,80 +1025,71 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.activeSubCategory = nil
 
     local function MakeFilterButton(parentFrame, labelText, indent, yOff, btnWidth)
-        local w = (btnWidth or (SIDEBAR_WIDTH - 14)) - 4
+        local w = (btnWidth or 132)
         if indent > 0 then
             w = w - indent
         end
-        local btn
-        local ok, res = pcall(CreateFrame, "Button", nil, parentFrame, "AuctionCategoryButtonTemplate")
-        if ok and res then
-            btn = res
-            btn:SetSize(w, 20)
-            btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
-            if btn.NormalTexture then
-                btn.NormalTexture:ClearAllPoints()
-                btn.NormalTexture:SetPoint("TOPLEFT", -2, 0)
-                btn.NormalTexture:SetSize(w + 4, 20)
-            end
-            if btn.Text then
-                btn.Text:SetText(labelText)
-                btn.text = btn.Text
-            end
-            if btn.Lines and indent == 0 then
-                btn.Lines:Hide()
-            end
+        local isSub = (indent > 0)
+        local btn = CreateFrame("Button", nil, parentFrame)
+        btn:SetSize(w, FILTER_HEIGHT)
+        btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
+
+        local normalTex = btn:CreateTexture(nil, "BACKGROUND")
+        local selectedTex = btn:CreateTexture(nil, "ARTWORK")
+        local highlightTex = btn:CreateTexture(nil, "HIGHLIGHT")
+
+        local hasAtlas = normalTex.SetAtlas and pcall(normalTex.SetAtlas, normalTex, isSub and "auctionhouse-nav-button-secondary" or "auctionhouse-nav-button")
+        if hasAtlas then
+            normalTex:SetAllPoints()
+            selectedTex:SetAtlas(isSub and "auctionhouse-nav-button-secondary-select" or "auctionhouse-nav-button-select")
+            selectedTex:SetAllPoints()
+            highlightTex:SetAtlas(isSub and "auctionhouse-nav-button-secondary-highlight" or "auctionhouse-nav-button-highlight")
+            highlightTex:SetAllPoints()
         else
-            btn = CreateFrame("Button", nil, parentFrame)
-            btn:SetSize(w, 20)
-            btn:SetPoint("TOPLEFT", (indent > 0) and (indent + 2) or 2, -yOff)
-
-            local normalTex = btn:CreateTexture(nil, "BACKGROUND")
             normalTex:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-FilterBg")
-            normalTex:SetPoint("TOPLEFT", -2, 0)
-            normalTex:SetSize(w + 4, 20)
-            btn.NormalTexture = normalTex
+            normalTex:SetTexCoord(0, 0.53125, 0, 0.625)
+            normalTex:SetAllPoints()
 
-            local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
-            hl:SetBlendMode("ADD")
-            hl:SetAllPoints(normalTex)
-            btn.HighlightTexture = hl
+            selectedTex:SetTexture("Interface\\Buttons\\WHITE8X8")
+            selectedTex:SetColorTexture(0.20, 0.50, 0.90, 0.35)
+            selectedTex:SetAllPoints()
 
-            local sel = btn:CreateTexture(nil, "ARTWORK")
-            if sel.SetAtlas and not pcall(sel.SetAtlas, sel, "auctionhouse-nav-button-select") then
-                sel:SetColorTexture(1, 0.82, 0, 0.20)
-            end
-            sel:SetBlendMode("ADD")
-            sel:SetAllPoints(normalTex)
-            sel:Hide()
-            btn.SelectedTexture = sel
-
-            local text = btn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-            text:SetPoint("LEFT", 6, 0)
-            text:SetPoint("RIGHT", -6, 0)
-            text:SetJustifyH("LEFT")
-            text:SetText(labelText)
-            btn.Text = text
-            btn.text = text
+            highlightTex:SetTexture("Interface\\Buttons\\WHITE8X8")
+            highlightTex:SetColorTexture(1.0, 1.0, 1.0, 0.10)
+            highlightTex:SetAllPoints()
         end
+        selectedTex:Hide()
+
+        btn.NormalTexture = normalTex
+        btn.SelectedTexture = selectedTex
+        btn.HighlightTexture = highlightTex
+
+        local text = btn:CreateFontString(nil, "OVERLAY", isSub and "GameFontHighlightSmall" or "GameFontNormalSmall")
+        text:SetPoint("LEFT", btn, "LEFT", isSub and 12 or 8, 0)
+        text:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+        text:SetJustifyH("LEFT")
+        if text.SetWordWrap then text:SetWordWrap(false) end
+        text:SetText(labelText)
+        btn.Text = text
+        btn.text = text
 
         btn.SetSelected = function(self, isSelected)
             if isSelected then
                 if self.SelectedTexture then self.SelectedTexture:Show() end
+                if self.NormalTexture then self.NormalTexture:Hide() end
                 local t = self.Text or self.text
-                if t and t.SetTextColor then t:SetTextColor(1.0, 0.82, 0.0) end
-                if self.LockHighlight then self:LockHighlight() end
+                if t and t.SetTextColor then t:SetTextColor(1.0, 1.0, 1.0) end
             else
                 if self.SelectedTexture then self.SelectedTexture:Hide() end
+                if self.NormalTexture then self.NormalTexture:Show() end
                 local t = self.Text or self.text
                 if t and t.SetTextColor then
-                    if indent > 0 then
+                    if isSub then
                         t:SetTextColor(0.85, 0.85, 0.85)
                     else
                         t:SetTextColor(1.0, 0.82, 0.0)
                     end
                 end
-                if self.UnlockHighlight then self:UnlockHighlight() end
             end
         end
 
@@ -1109,7 +1100,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         for _, b in ipairs(self.filterButtons) do b:Hide() end
         wipe(self.filterButtons)
 
-        local btnWidth = SIDEBAR_WIDTH - 6
+        local btnWidth = 132
         local y = 2
         for _, cat in ipairs(CATEGORIES) do
             local btn = MakeFilterButton(self.filterChild, cat.name, 0, y, btnWidth)

@@ -225,7 +225,7 @@ local function CreateMainFrame()
 
     -- --- SYNC MONITOR ---
     local syncMonitor = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    syncMonitor:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -36, -26)
+    syncMonitor:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -36, -5)
     syncMonitor:SetJustifyH("RIGHT")
     syncMonitor:SetText("|cff888888Network: Idle|r")
     MainFrame.syncMonitor = syncMonitor
@@ -445,6 +445,12 @@ local function CreateMainFrame()
                 tab:Hide()
             else
                 tab:Show()
+                if tab.Text then
+                    tab.Text:SetWidth(0)
+                end
+                if PanelTemplates_TabResize then
+                    PanelTemplates_TabResize(tab, 20, nil, 65)
+                end
                 if not lastVisible then
                     tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
                 else
@@ -462,6 +468,12 @@ local function CreateMainFrame()
         end
     end
     MainFrame.RefreshTabVisibility = RefreshTabVisibility
+
+    MainFrame:HookScript("OnShow", function(self)
+        if self.RefreshTabVisibility then
+            self:RefreshTabVisibility()
+        end
+    end)
 
     -- ================================================================
     -- TAB 1, 2, 3: BROWSE PANELS (Personal / Guild / Neutral)
