@@ -258,8 +258,8 @@ function MarketSync.UpsertNotificationRequest(req)
     existing.thresholdCopper = tonumber(req.thresholdCopper) or existing.thresholdCopper or 0
     existing.scope = scope
     existing.variantMode = NormalizeVariantMode(req.variantMode)
-    -- Use 30-minute default if not specified
-    existing.cooldownSec = tonumber(req.cooldownSec) or existing.cooldownSec or (realmDB.NotificationSettings and realmDB.NotificationSettings.defaultCooldownSec or 1800)
+    -- Hard 1-hour cooldown (3600s) default
+    existing.cooldownSec = 3600
     existing.enabled = (req.enabled == nil) and (existing.enabled ~= false) or not not req.enabled
     existing.urgent = (req.urgent == nil) and (existing.urgent == true) or not not req.urgent
     existing.createdAt = existing.createdAt or now
@@ -326,28 +326,35 @@ end
 local function EvaluateMatchedRequest(realmDB, id, req, price, eventScope, sourceName, itemName, now)
     local threshold = tonumber(req.thresholdCopper) or 0
     if threshold <= 0 then return false end
+    if price > threshold then return false end
 
     local state = GetRequestState(realmDB, id)
     local settings = realmDB.NotificationSettings or {}
-    local cooldown = tonumber(req.cooldownSec) or tonumber(settings.defaultCooldownSec) or 300
-    local rearmPct = tonumber(settings.rearmBufferPct) or 5
-    local rearmAfterSec = tonumber(settings.rearmAfterSec) or 1800
+    local HARD_HOURLY_LIMIT = 3600
+    local cooldown = HARD_HOURLY_LIMIT
     local urgentMinInterval = math.max(1, tonumber(settings.urgentMinIntervalSec) or 10)
     local sinceAlert = now - (state.lastAlertAt or 0)
-    local rearmThreshold = math.floor(threshold * (1 + (rearmPct / 100)))
 
-    if state.armed == false and (price > rearmThreshold or sinceAlert >= rearmAfterSec) then
-        state.armed = true
+    -- Check if price actually changed within the last hour
+    local hasLastPrice = (state.lastAlertPrice ~= nil and state.lastAlertPrice > 0)
+    local priceChanged = (not hasLastPrice) or (price ~= state.lastAlertPrice)
+
+    if sinceAlert < cooldown then
+        -- Within the 1-hour window: only alert if there is actually a price change
+        if not priceChanged then
+            return false
+        end
+        -- Enforce debounce between price-change notifications to avoid multi-packet bursts
+        if sinceAlert < urgentMinInterval then
+            return false
+        end
     end
 
-    local urgentDue = req.urgent == true and price <= threshold and sinceAlert >= urgentMinInterval
-    local normalDue = state.armed ~= false and price <= threshold and sinceAlert >= cooldown
-    if not urgentDue and not normalDue then return false end
-
+    local isUrgent = (req.urgent == true)
     state.lastAlertAt = now
     state.lastAlertPrice = price
     state.armed = false
-    AlertNotification(req, state, itemName, price, eventScope, sourceName, urgentDue)
+    AlertNotification(req, state, itemName, price, eventScope, sourceName, isUrgent)
     return true
 end
 

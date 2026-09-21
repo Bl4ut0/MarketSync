@@ -417,20 +417,15 @@ function MarketSync.CreateNotificationsPanel(parent)
         })
     end
 
-    local btn10Pct = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btn10Pct:SetSize(36, 18)
-    btn10Pct:SetPoint("LEFT", threshBox, "RIGHT", 4, 0)
-    btn10Pct:SetText("-10%")
-
-    local btn20Pct = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btn20Pct:SetSize(36, 18)
-    btn20Pct:SetPoint("LEFT", btn10Pct, "RIGHT", 2, 0)
-    btn20Pct:SetText("-20%")
+    local btnUndercut = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
+    btnUndercut:SetSize(44, 18)
+    btnUndercut:SetPoint("LEFT", threshBox, "RIGHT", 4, 0)
+    btnUndercut:SetText("-10%")
 
     local btnMarket = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btnMarket:SetSize(38, 18)
-    btnMarket:SetPoint("LEFT", btn20Pct, "RIGHT", 2, 0)
-    btnMarket:SetText("Mkt")
+    btnMarket:SetSize(48, 18)
+    btnMarket:SetPoint("LEFT", btnUndercut, "RIGHT", 2, 0)
+    btnMarket:SetText("Market")
 
     local function ApplyThresholdPreset(multiplier)
         local mp = panel.editorMarketPrice or 0
@@ -440,13 +435,21 @@ function MarketSync.CreateNotificationsPanel(parent)
         end
     end
 
-    btn10Pct:SetScript("OnClick", function() ApplyThresholdPreset(0.9) end)
-    btn20Pct:SetScript("OnClick", function() ApplyThresholdPreset(0.8) end)
+    local function RefreshUndercutButtons()
+        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        btnUndercut:SetText("-" .. tostring(pct) .. "%")
+    end
+    panel.RefreshUndercutButtons = RefreshUndercutButtons
+
+    btnUndercut:SetScript("OnClick", function()
+        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        ApplyThresholdPreset(math.max(0, 1 - (pct / 100)))
+    end)
     btnMarket:SetScript("OnClick", function() ApplyThresholdPreset(1.0) end)
 
     -- Dedicated Scope Row
     local scopeLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    scopeLabel:SetPoint("TOPLEFT", 10, -130)
+    scopeLabel:SetPoint("TOPLEFT", 10, -132)
     scopeLabel:SetText("Scope:")
 
     local scopeDropdown = BuildScopeDropdown(
@@ -456,51 +459,12 @@ function MarketSync.CreateNotificationsPanel(parent)
         function() return panel.editorScope end,
         function(v) panel.editorScope = v end
     )
-    scopeDropdown:SetPoint("TOPLEFT", editorBox, "TOPLEFT", 45, -125)
-
-    -- Dedicated Cooldown Row
-    local cooldownLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    cooldownLabel:SetPoint("TOPLEFT", 10, -150)
-    cooldownLabel:SetText("Cooldown:")
-
-    local cd5m = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd5m:SetSize(24, 18)
-    cd5m:SetPoint("LEFT", cooldownLabel, "RIGHT", 6, 0)
-    cd5m:SetText("5m")
-
-    local cd15m = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd15m:SetSize(28, 18)
-    cd15m:SetPoint("LEFT", cd5m, "RIGHT", 2, 0)
-    cd15m:SetText("15m")
-
-    local cd30m = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd30m:SetSize(28, 18)
-    cd30m:SetPoint("LEFT", cd15m, "RIGHT", 2, 0)
-    cd30m:SetText("30m")
-
-    local cd1h = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    cd1h:SetSize(24, 18)
-    cd1h:SetPoint("LEFT", cd30m, "RIGHT", 2, 0)
-    cd1h:SetText("1h")
-
-    local function HighlightCooldownBtn(seconds)
-        panel.editorCooldown = seconds
-        cd5m:SetAlpha(seconds == 300 and 1.0 or 0.6)
-        cd15m:SetAlpha(seconds == 900 and 1.0 or 0.6)
-        cd30m:SetAlpha(seconds == 1800 and 1.0 or 0.6)
-        cd1h:SetAlpha(seconds == 3600 and 1.0 or 0.6)
-    end
-
-    cd5m:SetScript("OnClick", function() HighlightCooldownBtn(300) end)
-    cd15m:SetScript("OnClick", function() HighlightCooldownBtn(900) end)
-    cd30m:SetScript("OnClick", function() HighlightCooldownBtn(1800) end)
-    cd1h:SetScript("OnClick", function() HighlightCooldownBtn(3600) end)
-    HighlightCooldownBtn(300)
+    scopeDropdown:SetPoint("TOPLEFT", editorBox, "TOPLEFT", 45, -127)
 
     -- Urgent Checkbox
     local urgentCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
     urgentCheck:SetSize(18, 18)
-    urgentCheck:SetPoint("TOPLEFT", 10, -170)
+    urgentCheck:SetPoint("TOPLEFT", 10, -156)
     local urgentText = urgentCheck.text or urgentCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     urgentCheck.text = urgentText
     urgentText:SetText("Urgent (Raid Warning)")
@@ -508,14 +472,16 @@ function MarketSync.CreateNotificationsPanel(parent)
     urgentText:SetPoint("LEFT", urgentCheck, "RIGHT", 4, 0)
     urgentCheck:SetChecked(false)
 
-    -- Action Buttons
+    -- Action Buttons (dynamically sized to never spill over LEFT_W - 20)
+    local saveW = isEmbedded and 104 or 114
+    local clearW = isEmbedded and 52 or 58
     local btnSave = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btnSave:SetSize(115, 20)
-    btnSave:SetPoint("TOPLEFT", 10, -190)
+    btnSave:SetSize(saveW, 20)
+    btnSave:SetPoint("TOPLEFT", 10, -182)
     btnSave:SetText("Add Alert")
 
     local btnClear = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate")
-    btnClear:SetSize(58, 20)
+    btnClear:SetSize(clearW, 20)
     btnClear:SetPoint("LEFT", btnSave, "RIGHT", 4, 0)
     btnClear:SetText("Clear")
 
@@ -563,37 +529,40 @@ function MarketSync.CreateNotificationsPanel(parent)
     discountLabel:SetPoint("TOPLEFT", 10, -53)
     discountLabel:SetText("Discount:")
 
-    local impBtn10 = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    impBtn10:SetSize(38, 18)
-    impBtn10:SetPoint("LEFT", discountLabel, "RIGHT", 4, 0)
-    impBtn10:SetText("-10%")
-
-    local impBtn20 = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    impBtn20:SetSize(38, 18)
-    impBtn20:SetPoint("LEFT", impBtn10, "RIGHT", 2, 0)
-    impBtn20:SetText("-20%")
+    local impBtnUndercut = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
+    impBtnUndercut:SetSize(48, 18)
+    impBtnUndercut:SetPoint("LEFT", discountLabel, "RIGHT", 6, 0)
+    impBtnUndercut:SetText("-10%")
 
     local impBtnMarket = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    impBtnMarket:SetSize(38, 18)
-    impBtnMarket:SetPoint("LEFT", impBtn20, "RIGHT", 2, 0)
-    impBtnMarket:SetText("Mkt")
+    impBtnMarket:SetSize(48, 18)
+    impBtnMarket:SetPoint("LEFT", impBtnUndercut, "RIGHT", 4, 0)
+    impBtnMarket:SetText("Market")
 
     local function HighlightImportDiscount(pct)
         panel.importDiscountPct = pct
-        impBtn10:SetAlpha(pct == 10 and 1.0 or 0.6)
-        impBtn20:SetAlpha(pct == 20 and 1.0 or 0.6)
+        local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        impBtnUndercut:SetAlpha(pct == userPct and 1.0 or 0.6)
         impBtnMarket:SetAlpha(pct == 0 and 1.0 or 0.6)
     end
 
-    impBtn10:SetScript("OnClick", function() HighlightImportDiscount(10) end)
-    impBtn20:SetScript("OnClick", function() HighlightImportDiscount(20) end)
+    local function RefreshImportUndercutButton()
+        local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        impBtnUndercut:SetText("-" .. tostring(userPct) .. "%")
+    end
+    panel.RefreshImportUndercutButton = RefreshImportUndercutButton
+
+    impBtnUndercut:SetScript("OnClick", function()
+        local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        HighlightImportDiscount(userPct)
+    end)
     impBtnMarket:SetScript("OnClick", function() HighlightImportDiscount(0) end)
     HighlightImportDiscount(10)
 
     local btnDoImport = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
     btnDoImport:SetSize(LEFT_W - 20, 20)
     btnDoImport:SetPoint("TOPLEFT", 10, -76)
-    btnDoImport:SetText("Import List into Watchlist")
+    btnDoImport:SetText("Import to Watchlist")
 
     local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     importStatusText:SetPoint("TOPLEFT", 10, -98)
@@ -744,19 +713,15 @@ function MarketSync.CreateNotificationsPanel(parent)
     wHdrIcon:SetText("Item")
 
     local wHdrThresh = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrThresh:SetPoint("TOPLEFT", isEmbedded and 215 or 235, -34)
+    wHdrThresh:SetPoint("TOPLEFT", isEmbedded and 245 or 275, -34)
     wHdrThresh:SetText("Threshold")
 
     local wHdrScope = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrScope:SetPoint("TOPLEFT", isEmbedded and 305 or 335, -34)
+    wHdrScope:SetPoint("TOPLEFT", isEmbedded and 360 or 395, -34)
     wHdrScope:SetText("Scope")
 
-    local wHdrCooldown = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrCooldown:SetPoint("TOPLEFT", isEmbedded and 375 or 405, -34)
-    wHdrCooldown:SetText("Cooldown")
-
     local wHdrActive = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrActive:SetPoint("TOPLEFT", isEmbedded and 440 or 475, -34)
+    wHdrActive:SetPoint("TOPLEFT", isEmbedded and 445 or 480, -34)
     wHdrActive:SetText("Active")
 
     local wHdrDel = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
@@ -794,7 +759,6 @@ function MarketSync.CreateNotificationsPanel(parent)
         wHdrIcon:SetShown(isWatch)
         wHdrThresh:SetShown(isWatch)
         wHdrScope:SetShown(isWatch)
-        wHdrCooldown:SetShown(isWatch)
         wHdrActive:SetShown(isWatch)
         wHdrDel:SetShown(isWatch)
 
@@ -862,36 +826,34 @@ function MarketSync.CreateNotificationsPanel(parent)
         -- Watchlist items
         local wName = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         wName:SetPoint("LEFT", iconBtn, "RIGHT", 6, 0)
-        wName:SetSize(isEmbedded and 175 or 195, 20)
+        wName:SetSize(isEmbedded and 205 or 235, 20)
         wName:SetJustifyH("LEFT")
         row.wName = wName
 
         local wThresh = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wThresh:SetPoint("LEFT", isEmbedded and 211 or 231, 0)
-        wThresh:SetSize(isEmbedded and 85 or 90, 20)
+        wThresh:SetPoint("LEFT", isEmbedded and 241 or 271, 0)
+        wThresh:SetSize(isEmbedded and 105 or 110, 20)
         wThresh:SetJustifyH("LEFT")
         row.wThresh = wThresh
 
         local wScope = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wScope:SetPoint("LEFT", isEmbedded and 301 or 331, 0)
-        wScope:SetSize(isEmbedded and 65 or 60, 20)
+        wScope:SetPoint("LEFT", isEmbedded and 356 or 391, 0)
+        wScope:SetSize(isEmbedded and 75 or 75, 20)
         wScope:SetJustifyH("LEFT")
         row.wScope = wScope
 
         local wCooldown = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wCooldown:SetPoint("LEFT", isEmbedded and 371 or 401, 0)
-        wCooldown:SetSize(isEmbedded and 60 or 55, 20)
-        wCooldown:SetJustifyH("LEFT")
+        wCooldown:Hide()
         row.wCooldown = wCooldown
 
         local wActiveCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
         wActiveCheck:SetSize(18, 18)
-        wActiveCheck:SetPoint("LEFT", isEmbedded and 442 or 477, 0)
+        wActiveCheck:SetPoint("LEFT", isEmbedded and 447 or 482, 0)
         row.wActiveCheck = wActiveCheck
 
         local wDelBtn = CreateFrame("Button", nil, row)
         wDelBtn:SetSize(18, 18)
-        wDelBtn:SetPoint("LEFT", isEmbedded and 503 or 538, 0)
+        wDelBtn:SetPoint("LEFT", isEmbedded and 505 or 540, 0)
         local delText = wDelBtn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         delText:SetPoint("CENTER")
         delText:SetText("|cffff4444✕|r")
@@ -943,7 +905,6 @@ function MarketSync.CreateNotificationsPanel(parent)
                 threshBox:SetText(FormatGoldInput(row.request.thresholdCopper))
                 panel.editorScope = row.request.scope or "all"
                 UIDropDownMenu_SetText(scopeDropdown, ScopeLabel(panel.editorScope))
-                HighlightCooldownBtn(tonumber(row.request.cooldownSec) or 300)
                 urgentCheck:SetChecked(row.request.urgent == true)
             elseif row.historyEntry then
                 SetEditorItem(row.historyEntry.itemLink or row.historyEntry.itemID or row.historyEntry.itemName)
@@ -1111,7 +1072,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         threshBox:SetText("0")
         panel.editorScope = "all"
         UIDropDownMenu_SetText(scopeDropdown, "All Scopes")
-        HighlightCooldownBtn(300)
+        if panel.RefreshUndercutButtons then panel.RefreshUndercutButtons() end
         urgentCheck:SetChecked(false)
         btnSave:SetText("Add Alert")
     end
@@ -1168,7 +1129,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             thresholdCopper = threshCopper,
             scope = panel.editorScope or "all",
             variantMode = "any_suffix",
-            cooldownSec = panel.editorCooldown or 300,
+            cooldownSec = 3600,
             urgent = urgentCheck:GetChecked() and true or false,
             enabled = true,
         })
@@ -1349,10 +1310,7 @@ function MarketSync.CreateNotificationsPanel(parent)
                 row.wScope:SetText(ScopeLabel(req.scope))
                 row.wScope:Show()
 
-                local cdSec = tonumber(req.cooldownSec) or 300
-                local cdText = (cdSec >= 3600) and string.format("%dh", math.floor(cdSec / 3600)) or string.format("%dm", math.floor(cdSec / 60))
-                row.wCooldown:SetText(cdText)
-                row.wCooldown:Show()
+                if row.wCooldown then row.wCooldown:Hide() end
 
                 row.wActiveCheck:SetChecked(req.enabled ~= false)
                 row.wActiveCheck:SetScript("OnClick", function(self)
@@ -1551,6 +1509,12 @@ function MarketSync.CreateNotificationsPanel(parent)
         end
         if soundCheck then
             soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
+        end
+        if RefreshUndercutButtons then
+            RefreshUndercutButtons()
+        end
+        if RefreshImportUndercutButton then
+            RefreshImportUndercutButton()
         end
         UpdateSubTabButtons()
         RefreshImportDropdown()

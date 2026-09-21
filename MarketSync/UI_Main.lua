@@ -223,37 +223,78 @@ local function CreateMainFrame()
     end)
     MainFrame.titleHitBox = titleHitBox
 
-    -- --- SYNC MONITOR ---
-    local syncMonitor = MainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    syncMonitor:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -36, -5)
+    -- --- TITLE BAR SYNC STATUS MONITOR ---
+    local syncButton = CreateFrame("Button", nil, MainFrame)
+    syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -38, -14)
+    syncButton:SetHeight(20)
+    syncButton:SetWidth(150)
+
+    local syncMonitor = syncButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    syncMonitor:SetPoint("RIGHT", syncButton, "RIGHT", 0, 0)
     syncMonitor:SetJustifyH("RIGHT")
-    syncMonitor:SetText("|cff888888Network: Idle|r")
+    syncMonitor:SetText("|cff00ff00●|r |cff888888Sync: Idle|r")
     MainFrame.syncMonitor = syncMonitor
+    MainFrame.syncButton = syncButton
+
+    syncButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
+        GameTooltip:SetText("MarketSync Network Status", 1, 0.82, 0)
+        local inGuild = IsInGuild and IsInGuild()
+        if not inGuild then
+            GameTooltip:AddLine("Guild Sync: |cffff8800Disabled (Not in a guild)|r", 0.85, 0.85, 0.85, true)
+        elseif MarketSyncDB and MarketSyncDB.PassiveSync == false then
+            GameTooltip:AddLine("Guild Sync: |cffaaaaaaDisabled (Settings)|r", 0.85, 0.85, 0.85, true)
+        else
+            GameTooltip:AddLine("Guild Sync: |cff00ff00Active (Listening)|r", 0.85, 0.85, 0.85, true)
+        end
+        local tx = MarketSync.TxRate or 0
+        local rx = MarketSync.RxRate or 0
+        GameTooltip:AddLine(string.format("Traffic: Tx %d/s | Rx %d/s", tx, rx), 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("Click to toggle Network Monitor Console.", 0.5, 0.8, 1, true)
+        GameTooltip:Show()
+    end)
+    syncButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    syncButton:SetScript("OnClick", function()
+        if MarketSync.ToggleNetworkMonitor then
+            MarketSync.ToggleNetworkMonitor()
+        end
+    end)
     
     function MarketSync.UpdateNetworkUI(txRate, rxRate, txAPIRate, txBytesRate, addonRates)
+        MarketSync.TxRate = txRate or 0
+        MarketSync.RxRate = rxRate or 0
         if MainFrame and MainFrame.syncMonitor then
-            if type(txAPIRate) == "string" then -- Traditional statusText passthrough
-                MainFrame.syncMonitor:SetText(txAPIRate)
+            local text
+            if type(txAPIRate) == "string" then
+                text = txAPIRate
+            elseif not IsInGuild or not IsInGuild() then
+                text = "|cff888888●|r |cff666666Sync: No Guild|r"
+            elseif MarketSyncDB and MarketSyncDB.PassiveSync == false then
+                text = "|cff888888●|r |cff666666Sync: Disabled|r"
             elseif txRate > 0 and rxRate > 0 then
-                MainFrame.syncMonitor:SetText(string.format("|cff00ff00Rx: %d/s|r   |cffff8800Tx: %d/s|r", rxRate, txRate))
+                text = string.format("|cff00ff00● Rx: %d/s|r  |cffff8800Tx: %d/s|r", rxRate, txRate)
             elseif txRate > 0 then
-                MainFrame.syncMonitor:SetText(string.format("|cffff8800Sending: %d items/s|r", txRate))
+                text = string.format("|cffff8800● Tx: %d items/s|r", txRate)
             elseif rxRate > 0 then
-                MainFrame.syncMonitor:SetText(string.format("|cff00ff00Receiving: %d items/s|r", rxRate))
+                text = string.format("|cff00ff00● Rx: %d items/s|r", rxRate)
             else
-                MainFrame.syncMonitor:SetText("|cff888888Network: Idle|r")
+                text = "|cff00ff00●|r |cff888888Sync: Idle|r"
+            end
+            MainFrame.syncMonitor:SetText(text)
+            if MainFrame.syncButton and MainFrame.syncMonitor.GetStringWidth then
+                MainFrame.syncButton:SetWidth(math.max(80, MainFrame.syncMonitor:GetStringWidth() + 10))
             end
         end
 
         if MarketSyncMonitorFrame and MarketSyncMonitorFrame:IsShown() then
-            MarketSyncMonitorFrame.txLabel:SetText(string.format("|cffff8800Tx: %d items/s|r", txRate))
-            MarketSyncMonitorFrame.rxLabel:SetText(string.format("|cff00ff00Rx: %d items/s|r", rxRate))
+            MarketSyncMonitorFrame.txLabel:SetText(string.format("|cffff8800Tx: %d items/s|r", txRate or 0))
+            MarketSyncMonitorFrame.rxLabel:SetText(string.format("|cff00ff00Rx: %d items/s|r", rxRate or 0))
             
             if type(txAPIRate) == "string" then
                 MarketSyncMonitorFrame.queueLabel:SetText(txAPIRate)
-            elseif txRate > 0 or rxRate > 0 then
+            elseif (txRate or 0) > 0 or (rxRate or 0) > 0 then
                 MarketSyncMonitorFrame.queueLabel:SetText("|cff00ff00Sync Active|r")
-            elseif not IsInGuild() then
+            elseif not IsInGuild or not IsInGuild() then
                 MarketSyncMonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Disabled (No Guild)|r")
             else
                 MarketSyncMonitorFrame.queueLabel:SetText("|cffaaaaaaNetwork: Idle|r")
@@ -387,7 +428,7 @@ local function CreateMainFrame()
         tab:SetID(id)
         tab:SetText(name)
         if PanelTemplates_TabResize then
-            PanelTemplates_TabResize(tab, 20, nil, 65)
+            PanelTemplates_TabResize(tab, 6, nil, 50)
         end
         if PanelTemplates_DeselectTab then
             PanelTemplates_DeselectTab(tab)
@@ -414,8 +455,8 @@ local function CreateMainFrame()
                 -- First visible tab docks to the frame bottom border (matching native Auction House)
                 tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
             else
-                -- Subsequent visible tabs overlap previous tab by 14px (matching LibAHTab / native AH)
-                tab:SetPoint("LEFT", lastVisibleTab, "RIGHT", -14, 0)
+                -- Subsequent visible tabs overlap previous tab by 12px
+                tab:SetPoint("LEFT", lastVisibleTab, "RIGHT", -12, 0)
             end
             lastVisibleTab = tab
         end
@@ -427,6 +468,9 @@ local function CreateMainFrame()
     MainFrame.tabs = tabs
     if PanelTemplates_SetNumTabs then
         PanelTemplates_SetNumTabs(MainFrame, #tabs)
+    end
+    if PanelTemplates_ResizeTabsToFit then
+        PanelTemplates_ResizeTabsToFit(MainFrame, 790)
     end
 
     -- Dynamically show/hide tabs and re-anchor visible ones
@@ -449,15 +493,18 @@ local function CreateMainFrame()
                     tab.Text:SetWidth(0)
                 end
                 if PanelTemplates_TabResize then
-                    PanelTemplates_TabResize(tab, 20, nil, 65)
+                    PanelTemplates_TabResize(tab, 6, nil, 50)
                 end
                 if not lastVisible then
                     tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
                 else
-                    tab:SetPoint("LEFT", lastVisible, "RIGHT", -14, 0)
+                    tab:SetPoint("LEFT", lastVisible, "RIGHT", -12, 0)
                 end
                 lastVisible = tab
             end
+        end
+        if PanelTemplates_ResizeTabsToFit then
+            PanelTemplates_ResizeTabsToFit(MainFrame, 790)
         end
         -- If the currently selected tab is now hidden, switch to Personal Scan
         if MainFrame.selectedTab then
@@ -676,6 +723,33 @@ local function CreateMainFrame()
     chkDebug:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.DebugMode) end
     end)
+
+    local undercutHeader = leftGlobalBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    undercutHeader:SetPoint("TOPLEFT", chkDebug, "BOTTOMLEFT", 6, -10)
+    undercutHeader:SetText("Alert Undercut (%)")
+    undercutHeader:SetTextColor(1, 0.82, 0)
+
+    local undercutSlider = CreateFrame("Slider", "MarketSyncAlertUndercutSlider", leftGlobalBox, "OptionsSliderTemplate")
+    undercutSlider:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", 4, -14)
+    undercutSlider:SetWidth(140)
+    undercutSlider:SetMinMaxValues(1, 50)
+    undercutSlider:SetValueStep(1)
+    undercutSlider:SetObeyStepOnDrag(true)
+    undercutSlider.Low:SetText("1%")
+    undercutSlider.High:SetText("50%")
+    undercutSlider.Text:SetText("10%")
+
+    undercutSlider:SetScript("OnValueChanged", function(self, value)
+        local val = math.floor(value + 0.5)
+        MarketSyncDB.AlertUndercutPct = val
+        self.Text:SetText(string.format("%d%%", val))
+    end)
+    undercutSlider:SetScript("OnShow", function(self)
+        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        self:SetValue(val)
+        self.Text:SetText(string.format("%d%%", val))
+    end)
+    AttachTooltip(undercutSlider, "Configure the default undercut percentage for quick alert buttons and preferred list imports (1% to 50%).")
 
     -- ================================================================
     -- COLUMN 2: TOGGLE FEATURES

@@ -230,6 +230,7 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
+    if not MarketSyncDB.AlertUndercutPct then MarketSyncDB.AlertUndercutPct = 10 end
     -- Legacy PurgeCycleDays is superseded by tiered retention (Hot/Warm/Cold/Purge).
     -- Default to 180 days (6 months of weekly macro-history) if not set.
     if MarketSyncDB.PurgeCycleDays == nil then MarketSyncDB.PurgeCycleDays = 180 end
