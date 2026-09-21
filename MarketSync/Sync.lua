@@ -1818,14 +1818,22 @@ local function SendDirectedPullNow(scope, sinceRevision, sourceIdentity, adverti
         MarketSync.myRealm, tostring(sourceIdentity), tonumber(advertisedRevision) or 0,
         tonumber(advertisedScanTime) or 0, tonumber(sinceRevision) or 0,
         SYNC_PROTOCOL_REVISION, GetLocalAddonVersion())
-    QueueControlMessage(pullPayload, "PULL:" .. scope, true)
+
+    -- When the lane is idle, send PULL immediately so all peers observe it and
+    -- cancel their pending lottery timers without waiting up to 0.35s in queue.
+    if not outboundTransfer and guildLane.phase ~= "receiving" then
+        SendAddonMessage(PREFIX, pullPayload, "GUILD")
+    else
+        QueueControlMessage(pullPayload, "PULL:" .. scope, true)
+    end
+
     MarketSync.SetPullRequestPending(true)
     if MarketSync.UpdateSwarmUI then
         MarketSync.UpdateSwarmUI(UnitName("player"), scope == "N" and "Awaiting Neutral Data" or "Awaiting Data")
     end
     if MarketSync.LogNetworkEvent then
         MarketSync.LogNetworkEvent(string.format(
-            "Outgoing |cffff8800[%s]|r queued for exact source %s (advertised %d, local %d).",
+            "Outgoing |cffff8800[%s]|r sent for exact source %s (advertised %d, local %d).",
             msgType, tostring(sourceIdentity), tonumber(advertisedRevision) or 0, tonumber(sinceRevision) or 0))
     end
     return true
@@ -2460,26 +2468,46 @@ end
 local passiveTicker
 
 function MarketSync.StartPassiveSync()
-    if passiveTicker then passiveTicker:Cancel() end
+    if passiveTicker then passiveTicker:Cancel(); passiveTicker = nil end
 
-    -- Advertise availability after a short delay on login
-    C_Timer.After(15, function()
+    -- Use deterministic identity hash jitter on initial login (15s to 45s)
+    -- to prevent dozens of guild members announcing at the exact same second on login/restart
+    local localName = MarketSync.GetLocalSyncIdentity and MarketSync.GetLocalSyncIdentity() or UnitName("player") or "Player"
+    local loginJitter = 15 + ((HashIdentity(localName) % 3000) / 100)
+
+    C_Timer.After(loginJitter, function()
         if MarketSyncDB then
             MarketSync.SendAdvertisement()
             if MarketSync.SendNeutralAdvertisement then
-                MarketSync.SendNeutralAdvertisement()
+                -- Stagger neutral advertisement by 6 seconds to avoid sending 2 frames in the same tick
+                C_Timer.After(6, function()
+                    if MarketSync.SendNeutralAdvertisement then
+                        MarketSync.SendNeutralAdvertisement()
+                    end
+                end)
             end
         end
     end)
 
-    -- Re-advertise every 5 minutes
-    passiveTicker = C_Timer.NewTicker(300, function()
-        if not MarketSyncDB then return end
-        MarketSync.SendAdvertisement() -- CanSync() inside handles combat/instance/arena suppression
-        if MarketSync.SendNeutralAdvertisement then
-            MarketSync.SendNeutralAdvertisement()
-        end
-    end)
+    -- Dynamic re-advertisement with randomized jitter (270s to 330s)
+    -- Prevents periodic timer synchronization (thundering herd effect across large guilds)
+    local function ScheduleNextPeriodicAdvertisement()
+        local nextInterval = 270 + math.random(0, 60)
+        passiveTicker = C_Timer.NewTimer(nextInterval, function()
+            if MarketSyncDB then
+                MarketSync.SendAdvertisement()
+                if MarketSync.SendNeutralAdvertisement then
+                    C_Timer.After(6, function()
+                        if MarketSync.SendNeutralAdvertisement then
+                            MarketSync.SendNeutralAdvertisement()
+                        end
+                    end)
+                end
+            end
+            ScheduleNextPeriodicAdvertisement()
+        end)
+    end
+    ScheduleNextPeriodicAdvertisement()
 end
 
 -- ================================================================
