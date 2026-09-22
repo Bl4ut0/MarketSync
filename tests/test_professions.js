@@ -12,9 +12,12 @@ const { lua, lauxlib, lualib, to_luastring } = require(path.join(deps, 'fengari'
 
 const marketSyncDir = path.resolve(__dirname, '../MarketSync');
 const coreLua = fs.readFileSync(path.join(marketSyncDir, 'Core.lua'), 'utf8');
+const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
 const processingLua = fs.readFileSync(path.join(marketSyncDir, 'Processing.lua'), 'utf8');
 const uiProcessingLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Processing.lua'), 'utf8');
 const uiBrowseLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Browse.lua'), 'utf8');
+const uiCraftingInfoLua = fs.readFileSync(path.join(marketSyncDir, 'UI_CraftingInfo.lua'), 'utf8');
+const uiItemDetailLua = fs.readFileSync(path.join(marketSyncDir, 'UI_ItemDetail.lua'), 'utf8');
 
 let passed = 0;
 function test(name, fn) {
@@ -32,9 +35,12 @@ function test(name, fn) {
 test('AST syntax check on modified files', () => {
   const files = [
     { name: 'Core.lua', content: coreLua },
+    { name: 'Config.lua', content: configLua },
     { name: 'Processing.lua', content: processingLua },
     { name: 'UI_Processing.lua', content: uiProcessingLua },
     { name: 'UI_Browse.lua', content: uiBrowseLua },
+    { name: 'UI_CraftingInfo.lua', content: uiCraftingInfoLua },
+    { name: 'UI_ItemDetail.lua', content: uiItemDetailLua },
   ];
   for (const f of files) {
     luaparse.parse(f.content, { luaVersion: '5.1' });
@@ -240,4 +246,197 @@ test('dynamically aggregates scanned Alchemy health potions into First Aid (Heal
   `);
 });
 
+// 6. Vendor Price Lookup Test
+test('resolves static and cached vendor prices accurately', () => {
+  const L = createLuaState();
+  execLua(L, `
+    assert(MarketSync.GetVendorPrice(3371) == 40, "Empty Vial should be 40 copper")
+    assert(MarketSync.GetVendorPrice(2321) == 100, "Fine Thread should be 100 copper")
+    assert(MarketSync.GetVendorPrice(3857) == 500, "Coal should be 500 copper")
+    assert(MarketSync.GetVendorPrice(4289) == 10, "Salt should be 10 copper")
+    assert(MarketSync.GetVendorPrice(38682) == 1000, "Enchanting Vellum should be 1000 copper")
+
+    -- Dynamic realm cache test
+    MarketSyncDB.VendorPrices = { [99999] = 1234 }
+    assert(MarketSync.GetVendorPrice(99999) == 1234, "Dynamic realm cache vendor price should be resolved")
+  `);
+});
+
+// 7. Intermediate Recipe Lookup Test
+test('resolves intermediate recipes for multi-tier components', () => {
+  const L = createLuaState();
+  execLua(L, `
+    local linenBolt = MarketSync.GetRecipeForOutput(2996)
+    assert(linenBolt ~= nil, "Bolt of Linen Cloth recipe should exist")
+    assert(linenBolt.mats[1].itemID == 2592, "Bolt of Linen Cloth should require Linen Cloth")
+    assert(linenBolt.mats[1].qty == 2, "Bolt of Linen Cloth should require 2 Linen Cloth")
+
+    local steelBar = MarketSync.GetRecipeForOutput(3859)
+    assert(steelBar ~= nil, "Steel Bar recipe should exist")
+    assert(#steelBar.mats == 2, "Steel Bar should require 2 reagents (Iron Bar + Coal)")
+
+    local grindingStone = MarketSync.GetRecipeForOutput(2863)
+    assert(grindingStone ~= nil, "Rough Grinding Stone recipe should exist")
+  `);
+});
+
+// 8. Recursive Ground-Up Craft Cost & Savings Test
+test('calculates multi-tier recursive ground-up craft costs and savings', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      local prices = {
+        [2775] = 200,   -- Iron Ore: 2s (200c)
+        [3575] = 1500,  -- Iron Bar on AH: 15s (1500c)
+        [3859] = 2500,  -- Steel Bar on AH: 25s (2500c)
+      }
+      return prices[id] or 0
+    end
+  `);
+
+  execLua(L, `
+    -- Steel Bar requires: 1x Iron Bar (3575) + 1x Coal (3857, vendor: 500c)
+    -- Iron Bar can be smelted from 1x Iron Ore (2775, AH: 200c)
+    -- Direct craft cost = 1500c (Iron Bar) + 500c (Coal) = 2000c
+    -- Ground-up craft cost = 200c (Iron Ore) + 500c (Coal) = 700c
+    -- Savings = 1300c (65% saved!)
+
+    local cost = MarketSync.CalculateGroundUpCraftCost(3859)
+    assert(cost ~= nil, "Expected cost data for Steel Bar")
+    assert(cost.directCraftCost == 2000, "Expected directCraftCost == 2000, got " .. tostring(cost.directCraftCost))
+    assert(cost.groundUpCost == 700, "Expected groundUpCost == 700, got " .. tostring(cost.groundUpCost))
+    assert(cost.effectiveCost == 700, "Expected effectiveCost == 700, got " .. tostring(cost.effectiveCost))
+    assert(cost.savings == 1300, "Expected savings == 1300, got " .. tostring(cost.savings))
+    assert(cost.savingsPct == 65, "Expected savingsPct == 65, got " .. tostring(cost.savingsPct))
+  `);
+});
+
+// 9. Checklist User Overrides Test
+test('respects user overrides on intermediate craftables', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      local prices = {
+        [2775] = 200,   -- Iron Ore
+        [3575] = 1500,  -- Iron Bar
+        [3859] = 2500,  -- Steel Bar
+      }
+      return prices[id] or 0
+    end
+  `);
+
+  execLua(L, `
+    -- Force buy finished Iron Bar directly on AH instead of smelting
+    local overrides = { [3575] = false }
+    local cost = MarketSync.CalculateGroundUpCraftCost(3859, overrides)
+
+    assert(cost.effectiveCost == 2000, "Effective cost should reflect direct AH purchase when override is false: " .. tostring(cost.effectiveCost))
+    assert(cost.savings == 0, "Savings should be 0 when user chooses to buy finished: " .. tostring(cost.savings))
+
+    -- Force craft Iron Bar
+    local overridesCraft = { [3575] = true }
+    local costCraft = MarketSync.CalculateGroundUpCraftCost(3859, overridesCraft)
+    assert(costCraft.effectiveCost == 700, "Effective cost should reflect ground-up craft: " .. tostring(costCraft.effectiveCost))
+    assert(costCraft.savings == 1300, "Savings should be 1300: " .. tostring(costCraft.savings))
+  `);
+});
+
+// 10. Recipe Profit & 5% AH Cut Calculation Test
+test('calculates recipe net profit with 5% AH cut', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      local prices = {
+        [2775] = 200,   -- Iron Ore
+        [3575] = 1500,  -- Iron Bar
+        [3859] = 2500,  -- Steel Bar
+      }
+      return prices[id] or 0
+    end
+  `);
+
+  execLua(L, `
+    local profit = MarketSync.CalculateRecipeProfit(3859)
+    assert(profit ~= nil, "Expected profit calculation for Steel Bar")
+    assert(profit.grossRevenue == 2500, "Gross revenue should be 2500")
+    assert(profit.netRevenue == 2375, "Net revenue after 5% cut should be 2375, got " .. tostring(profit.netRevenue))
+    assert(profit.directProfit == 375, "Direct profit should be 2375 - 2000 = 375, got " .. tostring(profit.directProfit))
+    assert(profit.groundUpProfit == 1675, "Ground-up profit should be 2375 - 700 = 1675, got " .. tostring(profit.groundUpProfit))
+    assert(profit.effectiveMarginPct == 239, "Effective margin % should be 239%, got " .. tostring(profit.effectiveMarginPct))
+  `);
+});
+
+// 11. Custom Shopping List Generation Test
+test('exports custom shopping list reflecting user checklist decisions', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      local prices = { [2775] = 200, [3575] = 1500 }
+      return prices[id] or 0
+    end
+    Auctionator = {
+      API = {
+        v1 = {
+          CreateShoppingList = function(caller, name, items)
+            _G.LastExportedItems = items
+            return true
+          end,
+          ConvertToSearchString = function(caller, term)
+            return term.searchString
+          end
+        }
+      }
+    }
+  `);
+
+  execLua(L, `
+    local costCraft = MarketSync.CalculateGroundUpCraftCost(3859, { [3575] = true })
+    local ok1, count1 = MarketSync.ExportCustomShoppingList(costCraft.reagentsTree, { [3575] = true }, "Test List 1")
+    assert(ok1 == true, "Expected export to succeed")
+
+    local foundIronOre = false
+    local foundIronBar = false
+    for _, str in ipairs(_G.LastExportedItems or {}) do
+      if str:find("2775") or str:find("Iron Ore") then foundIronOre = true end
+      if str:find("3575") or str:find("Iron Bar") then foundIronBar = true end
+    end
+    assert(foundIronOre == true, "Shopping list should contain Iron Ore when intermediate craft is checked")
+    assert(foundIronBar == false, "Shopping list should NOT contain Iron Bar when intermediate craft is checked")
+
+    -- Now export when user unchecks craft (buying finished Iron Bar)
+    local costBuy = MarketSync.CalculateGroundUpCraftCost(3859, { [3575] = false })
+    local ok2, count2 = MarketSync.ExportCustomShoppingList(costBuy.reagentsTree, { [3575] = false }, "Test List 2")
+    assert(ok2 == true, "Expected export to succeed")
+
+    foundIronOre = false
+    foundIronBar = false
+    for _, str in ipairs(_G.LastExportedItems or {}) do
+      if str:find("2775") or str:find("Iron Ore") then foundIronOre = true end
+      if str:find("3575") or str:find("Iron Bar") then foundIronBar = true end
+    end
+    assert(foundIronBar == true, "Shopping list should contain Iron Bar when user decides to buy directly")
+    assert(foundIronOre == false, "Shopping list should NOT contain Iron Ore when buy is selected")
+  `);
+});
+
+// 12. Cycle Detection Test
+test('handles cyclic dependencies gracefully without infinite recursion', () => {
+  const L = createLuaState();
+  execLua(L, `
+    -- Clear auction prices so cycle items have no price
+    MarketSync.GetAuctionPrice = function(id) return nil end
+
+    -- Artificially insert a cycle into IntermediateRecipes
+    MarketSync.IntermediateRecipes[9991] = {
+      name = "Cycle A", outputItemID = 9991, outputQty = 1,
+      mats = { { itemID = 9992, qty = 1 } }
+    }
+    MarketSync.IntermediateRecipes[9992] = {
+      name = "Cycle B", outputItemID = 9992, outputQty = 1,
+      mats = { { itemID = 9991, qty = 1 } }
+    }
+
+    local cost = MarketSync.CalculateGroundUpCraftCost(9991)
+    assert(cost ~= nil, "Cycle detection should terminate safely and return cost structure")
+    assert(cost.hasMissing == true, "Cycle with no baseline prices should flag hasMissing")
+  `);
+});
+
 console.log(`\nAll ${passed} profession tests passed successfully!`);
+

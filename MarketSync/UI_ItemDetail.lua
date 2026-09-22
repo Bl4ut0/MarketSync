@@ -223,7 +223,7 @@ function MarketSync.CreateItemDetailPanel(parent)
     end
 
     local alertsBox = CreateBox(INFO_START_X, CONTENT_TOP, 350, 140, "Notification Settings")
-    local valuesBox = CreateBox(INFO_START_X, CONTENT_TOP - 165, 350, 115, "Market Value Breakdown")
+    local valuesBox = CreateBox(INFO_START_X, CONTENT_TOP - 165, 350, 155, "Market Value Breakdown")
 
     -- --- ALERTS CONTROLS ---
     local function CreateLabel(parent, x, y, text)
@@ -332,10 +332,23 @@ function MarketSync.CreateItemDetailPanel(parent)
         return val
     end
 
-    panel.valCurrent = CreateMetric(-15, "Current Market Price")
-    panel.valAvg30 = CreateMetric(-35, "30-Day Avg Price")
-    panel.valDE = CreateMetric(-60, "Disenchant Value")
-    panel.valProc = CreateMetric(-80, "Prospect/Mill Value")
+    panel.valCurrent = CreateMetric(-14, "Current Market Price")
+    panel.valAvg30 = CreateMetric(-32, "30-Day Avg Price")
+    panel.valDE = CreateMetric(-50, "Disenchant Value")
+    panel.valProc = CreateMetric(-68, "Prospect/Mill Value")
+    panel.valCraft = CreateMetric(-88, "Ground-Up Craft Cost")
+    panel.valProfit = CreateMetric(-106, "Craft Profit")
+
+    local btnCraftBreakdown = CreateFrame("Button", nil, valuesBox, "UIPanelButtonTemplate")
+    btnCraftBreakdown:SetSize(130, 20); btnCraftBreakdown:SetPoint("BOTTOMRIGHT", -12, 8); btnCraftBreakdown:SetText("Materials Tree ▼")
+    btnCraftBreakdown:SetNormalFontObject("GameFontNormalSmall")
+    btnCraftBreakdown:SetHighlightFontObject("GameFontHighlightSmall")
+    btnCraftBreakdown:SetScript("OnClick", function()
+        if MarketSync.OpenCraftingTree and panel.currentItemItemID then
+            MarketSync.OpenCraftingTree(panel.currentItemItemID, panel)
+        end
+    end)
+    panel.btnCraftBreakdown = btnCraftBreakdown
 
     -- Footer
     local backBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -451,6 +464,39 @@ function MarketSync.CreateItemDetailPanel(parent)
                     else self.valProc:SetText(FormatMoney(p.yieldValue)) end
                 end
             end
+        end
+
+        -- Crafting & Ground-Up Metrics
+        local craftRecipe = MarketSync.GetRecipeForOutput and MarketSync.GetRecipeForOutput(itemID)
+        if craftRecipe then
+            local profitData = MarketSync.CalculateRecipeProfit and MarketSync.CalculateRecipeProfit(craftRecipe)
+            if profitData and profitData.costData then
+                local cost = profitData.costData
+                local costStr = FormatMoney(cost.effectiveCost)
+                if cost.savings and cost.savings > 0 then
+                    self.valCraft:SetText(string.format("%s |cff00ff00(-%s)|r", costStr, FormatMoney(cost.savings)))
+                else
+                    self.valCraft:SetText(costStr)
+                end
+
+                if profitData.outputPrice and profitData.outputPrice > 0 then
+                    local pVal = profitData.effectiveProfit
+                    local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                    local pStr = FormatMoney(math.abs(pVal))
+                    self.valProfit:SetText(string.format("%s%s|r (%d%%)", pCol, pStr, profitData.effectiveMarginPct))
+                else
+                    self.valProfit:SetText("|cff888888No AH Price|r")
+                end
+                self.btnCraftBreakdown:Show()
+            else
+                self.valCraft:SetText("|cff888888N/A|r")
+                self.valProfit:SetText("|cff888888N/A|r")
+                self.btnCraftBreakdown:Hide()
+            end
+        else
+            self.valCraft:SetText("|cff888888N/A|r")
+            self.valProfit:SetText("|cff888888N/A|r")
+            self.btnCraftBreakdown:Hide()
         end
 
         self:Show()

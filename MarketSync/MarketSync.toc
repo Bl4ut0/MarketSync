@@ -46,6 +46,7 @@ UI_Browse.lua
 UI_History.lua
 UI_Monitor.lua
 UI_Processing.lua
+UI_CraftingInfo.lua
 UI_Notifications.lua
 UI_ItemDetail.lua
 

@@ -1934,11 +1934,555 @@ function MarketSync.ExportCraftMatsToAuctionator(craftResults, listName)
 end
 
 -- ================================================================
--- TOOLTIP HOOKS (Disenchanting, Milling, Prospecting)
+-- VENDOR REAGENTS & INTERMEDIATE RECIPES
+-- ================================================================
+
+-- Static table of common fixed-price vendor reagents (prices in copper)
+MarketSync.VendorPrices = {
+    -- Vials & Containers
+    [3371]  = 40,     -- Empty Vial
+    [3372]  = 300,    -- Leaded Vial
+    [8925]  = 4000,   -- Crystal Vial
+    [22849] = 16000,  -- Fel Glass Vial
+    [39684] = 10000,  -- Imbued Vial
+    -- Threads
+    [2320]  = 10,     -- Coarse Thread
+    [2321]  = 100,    -- Fine Thread
+    [4291]  = 5000,   -- Silken Thread
+    [14341] = 5000,   -- Rune Thread
+    [21892] = 30000,  -- Eternium Thread
+    [44703] = 50000,  -- Frost Thread
+    -- Flux, Coal, Stocks
+    [2880]  = 20,     -- Weak Flux
+    [3466]  = 2000,   -- Strong Flux
+    [3857]  = 500,    -- Coal
+    [4371]  = 400,    -- Wooden Stock
+    [4372]  = 2000,   -- Heavy Stock
+    -- Salts
+    [4289]  = 10,     -- Salt
+    [3470]  = 100,    -- Coarse Salt
+    [3471]  = 500,    -- Heavy Salt
+    [20815] = 500,    -- Rock Salt
+    -- Spices, Flour & Water
+    [2678]  = 10,     -- Mild Spices
+    [2692]  = 100,    -- Hot Spices
+    [3713]  = 200,    -- Soothing Spices
+    [159]   = 25,     -- Refreshing Spring Water
+    [3081]  = 25,     -- Simple Flour
+    [1179]  = 125,    -- Ice Cold Milk
+    -- Parchment (Inscription)
+    [39354] = 20,     -- Light Parchment
+    [39501] = 100,    -- Common Parchment
+    [39502] = 500,    -- Heavy Parchment
+    [43145] = 1000,   -- Resilient Parchment
+    -- Enchanting
+    [38682] = 1000,   -- Enchanting Vellum
+}
+
+-- Standard intermediate recipes for multi-tier ground-up resolution
+MarketSync.IntermediateRecipes = {
+    -- Smelting (Mining)
+    [2840]  = { name = "Copper Bar", outputItemID = 2840, outputQty = 1, mats = { { itemID = 2770, qty = 1 } } }, -- Copper Ore
+    [3576]  = { name = "Tin Bar", outputItemID = 3576, outputQty = 1, mats = { { itemID = 2771, qty = 1 } } }, -- Tin Ore
+    [2841]  = { name = "Bronze Bar", outputItemID = 2841, outputQty = 2, mats = { { itemID = 2840, qty = 1 }, { itemID = 3576, qty = 1 } } }, -- 1 Copper Bar + 1 Tin Bar -> 2 Bronze
+    [2842]  = { name = "Silver Bar", outputItemID = 2842, outputQty = 1, mats = { { itemID = 2772, qty = 1 } } }, -- Silver Ore
+    [3575]  = { name = "Iron Bar", outputItemID = 3575, outputQty = 1, mats = { { itemID = 2775, qty = 1 } } }, -- Iron Ore
+    [3859]  = { name = "Steel Bar", outputItemID = 3859, outputQty = 1, mats = { { itemID = 3575, qty = 1 }, { itemID = 3857, qty = 1 } } }, -- Iron Bar + Coal
+    [3577]  = { name = "Gold Bar", outputItemID = 3577, outputQty = 1, mats = { { itemID = 2776, qty = 1 } } }, -- Gold Ore
+    [3860]  = { name = "Mithril Bar", outputItemID = 3860, outputQty = 1, mats = { { itemID = 3858, qty = 1 } } }, -- Mithril Ore
+    [6037]  = { name = "Truesilver Bar", outputItemID = 6037, outputQty = 1, mats = { { itemID = 7911, qty = 1 } } }, -- Truesilver Ore
+    [12359] = { name = "Thorium Bar", outputItemID = 12359, outputQty = 1, mats = { { itemID = 10620, qty = 1 } } }, -- Thorium Ore
+    [23445] = { name = "Fel Iron Bar", outputItemID = 23445, outputQty = 1, mats = { { itemID = 23424, qty = 2 } } }, -- Fel Iron Ore x2
+    [23446] = { name = "Adamantite Bar", outputItemID = 23446, outputQty = 1, mats = { { itemID = 23425, qty = 2 } } }, -- Adamantite Ore x2
+    [23573] = { name = "Hardened Adamantite Bar", outputItemID = 23573, outputQty = 1, mats = { { itemID = 23446, qty = 10 } } }, -- Adamantite Bar x10
+    [23571] = { name = "Eternium Bar", outputItemID = 23571, outputQty = 1, mats = { { itemID = 23426, qty = 2 } } }, -- Eternium Ore x2
+    [23449] = { name = "Khorium Bar", outputItemID = 23449, outputQty = 1, mats = { { itemID = 23427, qty = 2 } } }, -- Khorium Ore x2
+    [23448] = { name = "Felsteel Bar", outputItemID = 23448, outputQty = 1, mats = { { itemID = 23445, qty = 3 }, { itemID = 23571, qty = 2 } } }, -- 3 Fel Iron + 2 Eternium
+    [37663] = { name = "Cobalt Bar", outputItemID = 37663, outputQty = 1, mats = { { itemID = 36909, qty = 1 } } }, -- Cobalt Ore
+    [37664] = { name = "Saronite Bar", outputItemID = 37664, outputQty = 1, mats = { { itemID = 36912, qty = 2 } } }, -- Saronite Ore x2
+    [41163] = { name = "Titanium Bar", outputItemID = 41163, outputQty = 1, mats = { { itemID = 36910, qty = 2 } } }, -- Titanium Ore x2
+
+    -- Tailoring (Bolts of Cloth)
+    [2996]  = { name = "Bolt of Linen Cloth", outputItemID = 2996, outputQty = 1, mats = { { itemID = 2592, qty = 2 } } }, -- Linen Cloth x2
+    [2997]  = { name = "Bolt of Woolen Cloth", outputItemID = 2997, outputQty = 1, mats = { { itemID = 2589, qty = 3 } } }, -- Wool Cloth x3
+    [4305]  = { name = "Bolt of Silk Cloth", outputItemID = 4305, outputQty = 1, mats = { { itemID = 4306, qty = 4 } } }, -- Silk Cloth x4
+    [4339]  = { name = "Bolt of Mageweave", outputItemID = 4339, outputQty = 1, mats = { { itemID = 4338, qty = 4 } } }, -- Mageweave Cloth x4
+    [10290] = { name = "Bolt of Runecloth", outputItemID = 10290, outputQty = 1, mats = { { itemID = 14047, qty = 5 } } }, -- Runecloth x5
+    [21840] = { name = "Bolt of Netherweave", outputItemID = 21840, outputQty = 1, mats = { { itemID = 21877, qty = 5 } } }, -- Netherweave Cloth x5
+    [21842] = { name = "Bolt of Imbued Netherweave", outputItemID = 21842, outputQty = 1, mats = { { itemID = 21840, qty = 3 }, { itemID = 22445, qty = 2 } } }, -- 3 Netherweave Bolts + 2 Arcane Dust
+    [21844] = { name = "Bolt of Soulcloth", outputItemID = 21844, outputQty = 1, mats = { { itemID = 21840, qty = 1 }, { itemID = 22448, qty = 8 } } }, -- 1 Netherweave Bolt + 8 Soul Essence
+    [41510] = { name = "Bolt of Frostweave", outputItemID = 41510, outputQty = 1, mats = { { itemID = 41529, qty = 5 } } }, -- Frostweave Cloth x5
+    [41511] = { name = "Bolt of Imbued Frostweave", outputItemID = 41511, outputQty = 1, mats = { { itemID = 41510, qty = 2 }, { itemID = 34054, qty = 2 } } }, -- 2 Frostweave Bolts + 2 Infinite Dust
+    [53643] = { name = "Bolt of Embersilk Cloth", outputItemID = 53643, outputQty = 1, mats = { { itemID = 53010, qty = 5 } } }, -- Embersilk Cloth x5
+
+    -- Blacksmithing & Engineering (Stones, Powders, Bolts)
+    [2862]  = { name = "Rough Sharpening Stone", outputItemID = 2862, outputQty = 1, mats = { { itemID = 2835, qty = 1 } } }, -- Rough Stone
+    [2863]  = { name = "Rough Grinding Stone", outputItemID = 2863, outputQty = 1, mats = { { itemID = 2835, qty = 2 } } }, -- 2 Rough Stone
+    [2868]  = { name = "Coarse Sharpening Stone", outputItemID = 2868, outputQty = 1, mats = { { itemID = 2836, qty = 1 } } }, -- Coarse Stone
+    [2870]  = { name = "Coarse Grinding Stone", outputItemID = 2870, outputQty = 1, mats = { { itemID = 2836, qty = 2 } } }, -- 2 Coarse Stone
+    [2871]  = { name = "Heavy Sharpening Stone", outputItemID = 2871, outputQty = 1, mats = { { itemID = 2838, qty = 1 } } }, -- Heavy Stone
+    [3478]  = { name = "Heavy Grinding Stone", outputItemID = 3478, outputQty = 1, mats = { { itemID = 2838, qty = 3 } } }, -- 3 Heavy Stone
+    [7964]  = { name = "Solid Sharpening Stone", outputItemID = 7964, outputQty = 1, mats = { { itemID = 7912, qty = 1 } } }, -- Solid Stone
+    [7966]  = { name = "Solid Grinding Stone", outputItemID = 7966, outputQty = 1, mats = { { itemID = 7912, qty = 4 } } }, -- 4 Solid Stone
+    [12404] = { name = "Dense Sharpening Stone", outputItemID = 12404, outputQty = 1, mats = { { itemID = 12365, qty = 1 } } }, -- Dense Stone
+    [12644] = { name = "Dense Grinding Stone", outputItemID = 12644, outputQty = 1, mats = { { itemID = 12365, qty = 4 } } }, -- 4 Dense Stone
+    [3239]  = { name = "Rough Weightstone", outputItemID = 3239, outputQty = 1, mats = { { itemID = 2835, qty = 1 } } },
+    [3240]  = { name = "Coarse Weightstone", outputItemID = 3240, outputQty = 1, mats = { { itemID = 2836, qty = 1 } } },
+    [3241]  = { name = "Heavy Weightstone", outputItemID = 3241, outputQty = 1, mats = { { itemID = 2838, qty = 1 } } },
+    [7965]  = { name = "Solid Weightstone", outputItemID = 7965, outputQty = 1, mats = { { itemID = 7912, qty = 1 } } },
+    [12643] = { name = "Dense Weightstone", outputItemID = 12643, outputQty = 1, mats = { { itemID = 12365, qty = 1 } } },
+    [4357]  = { name = "Rough Blasting Powder", outputItemID = 4357, outputQty = 1, mats = { { itemID = 2835, qty = 1 } } },
+    [4364]  = { name = "Coarse Blasting Powder", outputItemID = 4364, outputQty = 1, mats = { { itemID = 2836, qty = 1 } } },
+    [4371]  = { name = "Heavy Blasting Powder", outputItemID = 4371, outputQty = 1, mats = { { itemID = 2838, qty = 1 } } },
+    [10505] = { name = "Solid Blasting Powder", outputItemID = 10505, outputQty = 1, mats = { { itemID = 7912, qty = 2 } } },
+    [18587] = { name = "Dense Blasting Powder", outputItemID = 18587, outputQty = 2, mats = { { itemID = 12365, qty = 2 } } },
+    [4359]  = { name = "Handful of Copper Bolts", outputItemID = 4359, outputQty = 1, mats = { { itemID = 2840, qty = 1 } } },
+    [23784] = { name = "Handful of Fel Iron Bolts", outputItemID = 23784, outputQty = 1, mats = { { itemID = 23445, qty = 1 } } },
+    [23782] = { name = "Fel Iron Casing", outputItemID = 23782, outputQty = 1, mats = { { itemID = 23445, qty = 3 } } },
+    [39690] = { name = "Handful of Cobalt Bolts", outputItemID = 39690, outputQty = 2, mats = { { itemID = 37663, qty = 2 } } },
+
+    -- Leatherworking (Upgrades & Scraps)
+    [21887] = { name = "Knothide Leather", outputItemID = 21887, outputQty = 1, mats = { { itemID = 21886, qty = 5 } } }, -- 5 Knothide Scraps
+    [23793] = { name = "Heavy Knothide Leather", outputItemID = 23793, outputQty = 1, mats = { { itemID = 21887, qty = 5 } } }, -- 5 Knothide Leather
+    [33568] = { name = "Borean Leather", outputItemID = 33568, outputQty = 1, mats = { { itemID = 33567, qty = 5 } } }, -- 5 Borean Scraps
+    [38425] = { name = "Heavy Borean Leather", outputItemID = 38425, outputQty = 1, mats = { { itemID = 33568, qty = 6 } } }, -- 6 Borean Leather
+
+    -- Inscription (Common Inks from Pigments)
+    [39469] = { name = "Moonglow Ink", outputItemID = 39469, outputQty = 1, mats = { { itemID = 39151, qty = 2 } } },
+    [39774] = { name = "Midnight Ink", outputItemID = 39774, outputQty = 1, mats = { { itemID = 39334, qty = 2 } } },
+    [43116] = { name = "Lion's Ink", outputItemID = 43116, outputQty = 1, mats = { { itemID = 39338, qty = 2 } } },
+    [43118] = { name = "Jadefire Ink", outputItemID = 43118, outputQty = 1, mats = { { itemID = 39339, qty = 2 } } },
+    [43120] = { name = "Celestial Ink", outputItemID = 43120, outputQty = 1, mats = { { itemID = 39340, qty = 2 } } },
+    [43122] = { name = "Shimmering Ink", outputItemID = 43122, outputQty = 1, mats = { { itemID = 39341, qty = 2 } } },
+    [43124] = { name = "Ethereal Ink", outputItemID = 43124, outputQty = 1, mats = { { itemID = 39342, qty = 2 } } },
+    [43126] = { name = "Ink of the Sea", outputItemID = 43126, outputQty = 1, mats = { { itemID = 39343, qty = 2 } } },
+    [43127] = { name = "Snowfall Ink", outputItemID = 43127, outputQty = 1, mats = { { itemID = 39345, qty = 2 } } },
+}
+
+function MarketSync.GetVendorPrice(itemID)
+    if not itemID then return nil end
+    local id = tonumber(itemID)
+    if not id then return nil end
+
+    -- 1. Static dictionary
+    if MarketSync.VendorPrices and MarketSync.VendorPrices[id] then
+        return MarketSync.VendorPrices[id]
+    end
+
+    -- 2. RealmDB dynamic cache from MERCHANT_SHOW
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and realmDB.VendorPrices and realmDB.VendorPrices[id] then
+        return realmDB.VendorPrices[id]
+    end
+
+    -- 3. Auctionator API fallback
+    if Auctionator and Auctionator.API and Auctionator.API.v1 and Auctionator.API.v1.GetVendorPriceByItemID then
+        local ok, price = pcall(Auctionator.API.v1.GetVendorPriceByItemID, CALLER_ID, id)
+        if ok and type(price) == "number" and price > 0 then
+            return price
+        end
+    end
+
+    return nil
+end
+
+function MarketSync.GetRecipeForOutput(outputItemID)
+    if not outputItemID then return nil end
+    local id = tonumber(outputItemID)
+    if not id then return nil end
+
+    -- 1. Current character's scanned recipes
+    local store = GetKnownCraftingStore()
+    local charKey = GetCraftingCharacterKey()
+    if charKey and store then
+        for profName, profData in pairs(store) do
+            if type(profData) == "table" and type(profData.recipes) == "table" then
+                for _, r in ipairs(profData.recipes) do
+                    if tonumber(r.outputItemID) == id then
+                        return r, profName
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Realm-wide character recipes
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and type(realmDB.KnownCraftingRecipes) == "table" then
+        for cKey, charProfs in pairs(realmDB.KnownCraftingRecipes) do
+            if type(charProfs) == "table" then
+                for pName, pData in pairs(charProfs) do
+                    if type(pData) == "table" and type(pData.recipes) == "table" then
+                        for _, r in ipairs(pData.recipes) do
+                            if tonumber(r.outputItemID) == id then
+                                return r, pName
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 3. IntermediateRecipes
+    if MarketSync.IntermediateRecipes and MarketSync.IntermediateRecipes[id] then
+        return MarketSync.IntermediateRecipes[id], "Intermediate"
+    end
+
+    -- 4. Built-in CraftingData
+    if MarketSync.CraftingData then
+        for pName, recipes in pairs(MarketSync.CraftingData) do
+            if type(recipes) == "table" then
+                for _, r in ipairs(recipes) do
+                    if tonumber(r.outputItemID) == id then
+                        return r, pName
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+-- ================================================================
+-- RECURSIVE GROUND-UP ENGINE
+-- ================================================================
+
+local function ResolveReagentNode(itemID, reqQty, visited, depth, userOverrides)
+    visited = visited or {}
+    depth = depth or 0
+    reqQty = math.max(1, tonumber(reqQty) or 1)
+
+    local node = {
+        itemID = itemID,
+        name = GetItemName(itemID) or ("Item " .. tostring(itemID)),
+        qty = reqQty,
+        depth = depth,
+        isVendor = false,
+        directUnitPrice = 0,
+        directTotalPrice = 0,
+        craftUnitPrice = nil,
+        craftTotalPrice = nil,
+        subMats = nil,
+        canCraft = false,
+        chooseCraft = false,
+        effectiveUnitPrice = 0,
+        effectiveTotalPrice = 0,
+        unitSavings = 0,
+        totalSavings = 0,
+        hasMissing = false,
+        hasStale = false,
+    }
+
+    -- 1. Direct Purchase Price
+    local vendorPrice = MarketSync.GetVendorPrice(itemID)
+    local ahPrice, _, ahStale = GetPriceInfoByItemID(itemID)
+    if vendorPrice and vendorPrice > 0 then
+        node.isVendor = true
+        node.directUnitPrice = vendorPrice
+    elseif ahPrice and ahPrice > 0 then
+        node.directUnitPrice = ahPrice
+        if ahStale then node.hasStale = true end
+    else
+        node.hasMissing = true
+    end
+    node.directTotalPrice = node.directUnitPrice * reqQty
+
+    -- 2. Sub-Craft Resolution
+    if depth < 6 and not visited[itemID] then
+        local subRecipe = MarketSync.GetRecipeForOutput(itemID)
+        if subRecipe and type(subRecipe.mats) == "table" and #subRecipe.mats > 0 then
+            node.canCraft = true
+            local newVisited = {}
+            for k, v in pairs(visited) do newVisited[k] = v end
+            newVisited[itemID] = true
+
+            local subOutputQty = math.max(1, tonumber(subRecipe.outputQty) or 1)
+            local subTreeList = {}
+            local subUnitCraftCost = 0
+            local subHasMissing = false
+            local subHasStale = false
+
+            for _, mat in ipairs(subRecipe.mats) do
+                local mID = tonumber(mat.itemID)
+                local mQtyPerAction = tonumber(mat.qty) or 1
+                local totalMatQty = math.max(1, math.ceil(mQtyPerAction * (reqQty / subOutputQty)))
+                local subNode = ResolveReagentNode(mID, totalMatQty, newVisited, depth + 1, userOverrides)
+                table.insert(subTreeList, subNode)
+                if subNode.hasMissing then subHasMissing = true end
+                if subNode.hasStale then subHasStale = true end
+                subUnitCraftCost = subUnitCraftCost + (subNode.effectiveUnitPrice * mQtyPerAction)
+            end
+
+            local unitCostToCraft = math.floor(subUnitCraftCost / subOutputQty)
+            node.craftUnitPrice = unitCostToCraft
+            node.craftTotalPrice = unitCostToCraft * reqQty
+            node.subMats = subTreeList
+            node.subRecipe = subRecipe
+
+            if subHasStale then node.hasStale = true end
+            if subHasMissing then node.craftMissing = true end
+        end
+    end
+
+    -- 3. Decision: Craft vs Buy
+    local override = userOverrides and userOverrides[itemID]
+    if override ~= nil and node.canCraft and not node.craftMissing then
+        node.chooseCraft = (override == true)
+    elseif node.canCraft and not node.craftMissing then
+        if node.directUnitPrice > 0 and node.craftUnitPrice and node.craftUnitPrice > 0 then
+            node.chooseCraft = (node.craftUnitPrice < node.directUnitPrice)
+        elseif node.directUnitPrice == 0 and node.craftUnitPrice and node.craftUnitPrice > 0 then
+            node.chooseCraft = true
+        else
+            node.chooseCraft = false
+        end
+    else
+        node.chooseCraft = false
+    end
+
+    -- 4. Effective Price
+    if node.chooseCraft and node.craftUnitPrice and node.craftUnitPrice > 0 then
+        node.effectiveUnitPrice = node.craftUnitPrice
+        node.effectiveTotalPrice = node.craftTotalPrice
+        node.unitSavings = math.max(0, node.directUnitPrice - node.craftUnitPrice)
+        node.totalSavings = node.unitSavings * reqQty
+        node.isCrafted = true
+        node.hasMissing = false
+    else
+        node.effectiveUnitPrice = node.directUnitPrice
+        node.effectiveTotalPrice = node.directTotalPrice
+        node.unitSavings = 0
+        node.totalSavings = 0
+        node.isCrafted = false
+    end
+
+    return node
+end
+
+function MarketSync.CalculateGroundUpCraftCost(recipeOrOutputItemID, userOverrides, targetMultiplier)
+    local recipe = nil
+    if type(recipeOrOutputItemID) == "table" and recipeOrOutputItemID.mats then
+        recipe = recipeOrOutputItemID
+    elseif tonumber(recipeOrOutputItemID) then
+        recipe = MarketSync.GetRecipeForOutput(recipeOrOutputItemID)
+    end
+    if not recipe or type(recipe.mats) ~= "table" or #recipe.mats == 0 then
+        return nil
+    end
+
+    local mult = math.max(1, tonumber(targetMultiplier) or 1)
+    local outputQty = math.max(1, tonumber(recipe.outputQty) or 1) * mult
+    local directCost = 0
+    local groundUpOptimalCost = 0
+    local effectiveCost = 0
+    local hasMissingDirect = false
+    local hasMissingEffective = false
+    local hasStale = false
+    local reagentNodes = {}
+
+    for _, mat in ipairs(recipe.mats) do
+        local mID = tonumber(mat.itemID)
+        local mQty = (tonumber(mat.qty) or 1) * mult
+
+        local optimalNode = ResolveReagentNode(mID, mQty, {}, 0, nil)
+        local userNode = userOverrides and ResolveReagentNode(mID, mQty, {}, 0, userOverrides) or optimalNode
+
+        table.insert(reagentNodes, userNode)
+
+        directCost = directCost + userNode.directTotalPrice
+        groundUpOptimalCost = groundUpOptimalCost + (optimalNode.effectiveTotalPrice or optimalNode.directTotalPrice)
+        effectiveCost = effectiveCost + userNode.effectiveTotalPrice
+
+        if userNode.hasMissing then hasMissingEffective = true end
+        if userNode.directUnitPrice == 0 then hasMissingDirect = true end
+        if userNode.hasStale then hasStale = true end
+    end
+
+    local savings = math.max(0, directCost - effectiveCost)
+    local savingsPct = (directCost > 0) and math.floor((savings / directCost) * 100) or 0
+    local optimalSavings = math.max(0, directCost - groundUpOptimalCost)
+    local optimalSavingsPct = (directCost > 0) and math.floor((optimalSavings / directCost) * 100) or 0
+
+    return {
+        recipe = recipe,
+        outputItemID = recipe.outputItemID,
+        outputName = GetItemName(recipe.outputItemID) or recipe.name,
+        outputQty = outputQty,
+        directCraftCost = directCost,
+        groundUpCost = groundUpOptimalCost,
+        effectiveCost = effectiveCost,
+        savings = savings,
+        savingsPct = savingsPct,
+        optimalSavings = optimalSavings,
+        optimalSavingsPct = optimalSavingsPct,
+        reagentsTree = reagentNodes,
+        hasMissingDirect = hasMissingDirect,
+        hasMissing = hasMissingEffective,
+        hasStale = hasStale,
+    }
+end
+
+function MarketSync.CalculateRecipeProfit(recipeOrOutputItemID, userOverrides, targetMultiplier)
+    local costData = MarketSync.CalculateGroundUpCraftCost(recipeOrOutputItemID, userOverrides, targetMultiplier)
+    if not costData then return nil end
+
+    local outputItemID = costData.outputItemID
+    local outputPrice, outputAge, outputStale = GetPriceInfoByItemID(outputItemID)
+    outputPrice = outputPrice or 0
+
+    local grossRevenue = outputPrice * costData.outputQty
+    local netRevenue = math.floor(NetMainAuctionValue(grossRevenue))
+
+    local directProfit = netRevenue - costData.directCraftCost
+    local groundUpProfit = netRevenue - costData.groundUpCost
+    local effectiveProfit = netRevenue - costData.effectiveCost
+
+    local directMarginPct = (costData.directCraftCost > 0) and math.floor((directProfit / costData.directCraftCost) * 100) or 0
+    local groundUpMarginPct = (costData.groundUpCost > 0) and math.floor((groundUpProfit / costData.groundUpCost) * 100) or 0
+    local effectiveMarginPct = (costData.effectiveCost > 0) and math.floor((effectiveProfit / costData.effectiveCost) * 100) or 0
+
+    local warnings = {}
+    if outputPrice == 0 then
+        table.insert(warnings, "No AH price for output item")
+    elseif outputStale then
+        table.insert(warnings, "Output price is stale (>3 days)")
+    end
+    if costData.hasMissing then
+        table.insert(warnings, "Missing prices for some reagents")
+    elseif costData.hasStale then
+        table.insert(warnings, "Some reagent prices are stale")
+    end
+
+    return {
+        costData = costData,
+        outputItemID = outputItemID,
+        outputPrice = outputPrice,
+        outputAge = outputAge,
+        outputStale = outputStale,
+        grossRevenue = grossRevenue,
+        netRevenue = netRevenue,
+        ahCutPercent = MAIN_AH_CUT_PERCENT,
+        directProfit = directProfit,
+        groundUpProfit = groundUpProfit,
+        effectiveProfit = effectiveProfit,
+        directMarginPct = directMarginPct,
+        groundUpMarginPct = groundUpMarginPct,
+        effectiveMarginPct = effectiveMarginPct,
+        warnings = warnings,
+        hasWarnings = (#warnings > 0),
+    }
+end
+
+function MarketSync.ExportCustomShoppingList(treeData, userOverrides, listName)
+    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
+        return false, "Auctionator API unavailable"
+    end
+    if not treeData or #treeData == 0 then
+        return false, "No reagents in tree to export"
+    end
+
+    local itemsToBuy = {}
+
+    local function CollectBuys(nodes)
+        for _, node in ipairs(nodes or {}) do
+            if node.chooseCraft and node.subMats and #node.subMats > 0 then
+                CollectBuys(node.subMats)
+            else
+                local mID = node.itemID
+                if mID then
+                    local entry = itemsToBuy[mID]
+                    if not entry then
+                        entry = {
+                            itemID = mID,
+                            name = node.name or GetItemName(mID),
+                            qty = 0,
+                            maxPrice = node.directUnitPrice or 0,
+                        }
+                        itemsToBuy[mID] = entry
+                    end
+                    entry.qty = entry.qty + (node.qty or 1)
+                    if node.directUnitPrice and node.directUnitPrice > 0 then
+                        if entry.maxPrice == 0 or node.directUnitPrice < entry.maxPrice then
+                            entry.maxPrice = node.directUnitPrice
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    CollectBuys(treeData)
+
+    local searchStrings = {}
+    for itemID, info in pairs(itemsToBuy) do
+        local name = info.name or GetItemName(itemID)
+        if name then
+            local searchStr = BuildAuctionatorSearchString(name, info.maxPrice, info.qty)
+            if searchStr then
+                table.insert(searchStrings, searchStr)
+            end
+        end
+    end
+
+    if #searchStrings == 0 then
+        return false, "No purchase items resolved for export"
+    end
+
+    local exportName = listName or ("MarketSync Mats " .. date("%m/%d %H:%M"))
+    local okCreate, err = pcall(Auctionator.API.v1.CreateShoppingList, CALLER_ID, exportName, searchStrings)
+    if not okCreate then
+        return false, tostring(err)
+    end
+    return true, #searchStrings
+end
+
+-- Caching vendor prices dynamically on MERCHANT_SHOW
+if CreateFrame then
+    local merchantWatcher = CreateFrame("Frame")
+    if merchantWatcher and merchantWatcher.RegisterEvent then
+        merchantWatcher:RegisterEvent("MERCHANT_SHOW")
+        merchantWatcher:SetScript("OnEvent", function()
+        local numItems = (GetMerchantNumItems and GetMerchantNumItems()) or 0
+        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+        if not realmDB then return end
+        realmDB.VendorPrices = realmDB.VendorPrices or {}
+
+        for i = 1, numItems do
+            local link = GetMerchantItemLink and GetMerchantItemLink(i)
+            local itemID = ParseItemIDFromLink(link)
+            if not itemID and GetMerchantItemID then
+                itemID = GetMerchantItemID(i)
+            end
+            if itemID then
+                local price, stackCount, numAvailable
+                if GetMerchantItemInfo then
+                    _, _, price, stackCount, numAvailable = GetMerchantItemInfo(i)
+                elseif C_MerchantFrame and C_MerchantFrame.GetItemInfo then
+                    local info = C_MerchantFrame.GetItemInfo(i)
+                    if info then
+                        price = info.price
+                        stackCount = info.stackCount
+                        numAvailable = info.numAvailable
+                    end
+                end
+                stackCount = math.max(1, tonumber(stackCount) or 1)
+                if price and price > 0 and (numAvailable == -1 or numAvailable == nil) then
+                    realmDB.VendorPrices[itemID] = math.floor(price / stackCount)
+                end
+            end
+        end
+    end)
+    end
+end
+
+-- ================================================================
+-- TOOLTIP HOOKS (Disenchanting, Milling, Prospecting, Crafting)
 -- ================================================================
 local function OnTooltipSetItem(tooltip, data)
     if not MarketSyncDB then return end
-    if not MarketSyncDB.EnableTooltipAuctionPrice and not MarketSyncDB.EnableTooltipProb then return end
+    if not MarketSyncDB.EnableTooltipAuctionPrice and not MarketSyncDB.EnableTooltipProb and not MarketSyncDB.EnableTooltipCraftCost then return end
     if not tooltip then return end
 
     local name, link
@@ -2030,6 +2574,38 @@ local function OnTooltipSetItem(tooltip, data)
                 if priceInfo.neutralPrice and priceInfo.neutralPrice > 0 and priceInfo.neutralPrice ~= priceInfo.price then
                     local nPriceStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(priceInfo.neutralPrice) or MarketSync.FormatMoney(priceInfo.neutralPrice)
                     tooltip:AddDoubleLine("|cff00ccffNeutral AH:|r", nPriceStr)
+                end
+            end
+        end
+    end
+
+    -- 0.5. Craft Cost & Profit Tooltip (Direct vs Ground-Up)
+    if MarketSyncDB.EnableTooltipCraftCost ~= false and itemID then
+        local craftRecipe = MarketSync.GetRecipeForOutput and MarketSync.GetRecipeForOutput(itemID)
+        if craftRecipe then
+            local profitData = MarketSync.CalculateRecipeProfit and MarketSync.CalculateRecipeProfit(craftRecipe)
+            if profitData and profitData.costData then
+                local cost = profitData.costData
+                tooltip:AddLine(" ")
+                local yieldStr = (cost.outputQty and cost.outputQty > 1) and string.format(" (x%d)", cost.outputQty) or ""
+                tooltip:AddLine("|cffffd700MarketSync Crafting" .. yieldStr .. "|r")
+
+                local costStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(cost.effectiveCost) or MarketSync.FormatMoney(cost.effectiveCost)
+                if cost.savings and cost.savings > 0 then
+                    local saveStr = MarketSync.FormatMoney(cost.savings)
+                    tooltip:AddDoubleLine("Ground-Up Cost:", string.format("%s |cff00ff00(Save %s)|r", costStr, saveStr))
+                    local dirStr = MarketSync.FormatMoney(cost.directCraftCost)
+                    tooltip:AddDoubleLine("|cff888888Direct AH Mats:|r", "|cffaaaaaa" .. dirStr .. "|r")
+                else
+                    tooltip:AddDoubleLine("To Craft:", costStr)
+                end
+
+                if profitData.outputPrice and profitData.outputPrice > 0 then
+                    local pVal = profitData.effectiveProfit
+                    local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                    local pStr = MarketSync.FormatMoney(math.abs(pVal))
+                    local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                    tooltip:AddDoubleLine("Craft Profit:", string.format("%s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.effectiveMarginPct))
                 end
             end
         end
