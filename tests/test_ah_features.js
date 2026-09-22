@@ -282,23 +282,39 @@ test('Scanner parses table itemKey in ITEM_SEARCH_RESULTS_UPDATED and commodity 
     local S = MarketSync.Scanner
     assert(S.IsAvailable() == true, "Scanner should be available when AH is open")
 
-    -- Simulate pending item search
+    -- 1. Automated queue item search with DUAL events (_ADDED then _UPDATED)
     S.Active = true
     S.Pending = { itemID = 4371, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
 
-    -- Fire ITEM_SEARCH_RESULTS_UPDATED with table argument { itemID = 4371 }
-    eventHandler(nil, "ITEM_SEARCH_RESULTS_UPDATED", { itemID = 4371, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 })
-    assert(S.Pending == nil, "Pending should be cleared after ITEM_SEARCH_RESULTS_UPDATED with table arg")
-    assert(#S.RecentResults >= 1, "Recent results should record item search")
+    -- Fire ITEM_SEARCH_RESULTS_ADDED first
+    eventHandler(nil, "ITEM_SEARCH_RESULTS_ADDED", { itemID = 4371, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 })
+    assert(S.Pending == nil, "Pending should be cleared after first event")
+    assert(#S.RecentResults == 1, "Expected exactly 1 result after first event, got: " .. #S.RecentResults)
 
-    -- Simulate pending commodity search
+    -- Fire ITEM_SEARCH_RESULTS_UPDATED immediately after while S.Active is still true
+    eventHandler(nil, "ITEM_SEARCH_RESULTS_UPDATED", { itemID = 4371, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 })
+    assert(#S.RecentResults == 1, "Duplicate event while S.Active must NOT add a second entry, got: " .. #S.RecentResults)
+
+    -- 2. Automated queue commodity search with DUAL events (_ADDED then _UPDATED)
     S.Active = true
     S.Pending = { itemID = 2770, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
 
-    -- Fire COMMODITY_SEARCH_RESULTS_UPDATED with numeric itemID
+    -- Fire COMMODITY_SEARCH_RESULTS_ADDED first
+    eventHandler(nil, "COMMODITY_SEARCH_RESULTS_ADDED", 2770)
+    assert(S.Pending == nil, "Pending should be cleared after first commodity event")
+    assert(#S.RecentResults == 2, "Expected exactly 2 results, got: " .. #S.RecentResults)
+
+    -- Fire COMMODITY_SEARCH_RESULTS_UPDATED immediately after
     eventHandler(nil, "COMMODITY_SEARCH_RESULTS_UPDATED", 2770)
-    assert(S.Pending == nil, "Pending should be cleared after COMMODITY_SEARCH_RESULTS_UPDATED with number arg")
-    assert(#S.RecentResults >= 2, "Recent results should record commodity search")
+    assert(#S.RecentResults == 2, "Duplicate commodity event while S.Active must NOT add a duplicate entry, got: " .. #S.RecentResults)
+
+    -- 3. Manual search (S.Active == false) with DUAL events
+    S.Active = false
+    S.Pending = nil
+    eventHandler(nil, "COMMODITY_SEARCH_RESULTS_ADDED", 13444)
+    assert(#S.RecentResults == 3, "Expected 3 results after manual search, got: " .. #S.RecentResults)
+    eventHandler(nil, "COMMODITY_SEARCH_RESULTS_UPDATED", 13444)
+    assert(#S.RecentResults == 3, "Duplicate manual event within 2s debounce must NOT add duplicate, got: " .. #S.RecentResults)
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

@@ -153,12 +153,24 @@ local function NormalizeItemKey(itemKey)
 end
 MarketSync.NormalizeItemKey = NormalizeItemKey
 
+local lastScanObservations = {}
+
 local function RecordScanObservation(itemKey, unitPrice, available, isCommodity, isFullScan)
     if not itemKey or not unitPrice or unitPrice <= 0 then return end
     local dbKey, itemID, normalizedKey = NormalizeItemKey(itemKey)
     if not dbKey or not itemID then return end
 
     local now = time()
+
+    -- Debounce duplicate event bursts for identical observation within 2 seconds
+    if not isFullScan then
+        local lastObs = lastScanObservations[dbKey]
+        if lastObs and (now - lastObs.time) < 2 and lastObs.price == unitPrice and lastObs.available == (available or 0) then
+            return
+        end
+        lastScanObservations[dbKey] = { time = now, price = unitPrice, available = available or 0 }
+    end
+
     local realmDB = MarketSync.GetRealmDB()
     if not realmDB.PersonalData then realmDB.PersonalData = {} end
     local pData = realmDB.PersonalData
@@ -367,10 +379,13 @@ function S.StartScan(itemsOrKeys, label)
     S.Scheduled = false
     S.Queue = {}
     S.RecentResults = {}
+    if wipe then wipe(lastScanObservations) else lastScanObservations = {} end
 
+    local seen = {}
     for _, item in ipairs(itemsOrKeys or {}) do
         local key = S.ToItemKey(item)
-        if key then
+        if key and key.itemID and not seen[key.itemID] then
+            seen[key.itemID] = true
             table.insert(S.Queue, key)
         end
     end
@@ -634,15 +649,17 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end
 
-        if S.Active and S.Pending then
-            -- Automated queue scan: process pending item and advance queue
-            if not updatedItemID or (S.Pending.itemID and updatedItemID == S.Pending.itemID) then
-                local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(S.Pending, isCommodity)
-                if minPrice and minPrice > 0 then
-                    RecordScanObservation(S.Pending, minPrice, available, resolvedCommodity, false)
+        if S.Active then
+            if S.Pending then
+                -- Automated queue scan: process pending item and advance queue
+                if not updatedItemID or (S.Pending.itemID and updatedItemID == S.Pending.itemID) then
+                    local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(S.Pending, isCommodity)
+                    if minPrice and minPrice > 0 then
+                        RecordScanObservation(S.Pending, minPrice, available, resolvedCommodity, false)
+                    end
+                    S.Pending = nil
+                    S.ScheduleNext()
                 end
-                S.Pending = nil
-                S.ScheduleNext()
             end
             return
         end
