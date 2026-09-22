@@ -1317,6 +1317,24 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(mainFrame.activeTabID == 4, "Tab 4 should be active")
     assert(mainFrame.contentFrames[4]:IsShown(), "Analytics contentFrame should be shown")
 
+    -- Test uniform tab width and anchoring
+    assert(type(mainFrame.RefreshTabVisibility) == "function", "RefreshTabVisibility should be exposed")
+    for i = 1, 7 do
+      assert(mainFrame.tabs[i]:GetWidth() == 104, "Tab " .. i .. " should have uniform width 104, got " .. tostring(mainFrame.tabs[i]:GetWidth()))
+    end
+
+    -- Test dynamic resizing when a tab is hidden
+    MarketSyncDB.PassiveSync = false
+    mainFrame.RefreshTabVisibility()
+    assert(not mainFrame.tabs[2]:IsShown(), "Tab 2 should be hidden when PassiveSync is false")
+    for i = 1, 7 do
+      if i ~= 2 then
+        assert(mainFrame.tabs[i]:GetWidth() == 112, "Tab " .. i .. " should have resized to 112 with 6 tabs, got " .. tostring(mainFrame.tabs[i]:GetWidth()))
+      end
+    end
+    MarketSyncDB.PassiveSync = true
+    mainFrame.RefreshTabVisibility()
+
     -- Test ShowItemHistory delegation to ShowAnalytics
     local analyticsCalledWith = nil
     MarketSync.ShowAnalytics = function(k, l, n, ic, pr)

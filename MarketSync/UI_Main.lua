@@ -357,6 +357,8 @@ local function CreateMainFrame()
                 if tab.SetSelected then
                     tab:SetSelected(true)
                 end
+                local baseLevel = MainFrame.GetFrameLevel and MainFrame:GetFrameLevel() or 1
+                if tab.SetFrameLevel then tab:SetFrameLevel(baseLevel + 6) end
                 if contentFrames[i] then contentFrames[i]:Show() end
             else
                 if PanelTemplates_DeselectTab then
@@ -365,6 +367,8 @@ local function CreateMainFrame()
                 if tab.SetSelected then
                     tab:SetSelected(false)
                 end
+                local baseLevel = MainFrame.GetFrameLevel and MainFrame:GetFrameLevel() or 1
+                if tab.SetFrameLevel then tab:SetFrameLevel(baseLevel + 4) end
                 if contentFrames[i] then contentFrames[i]:Hide() end
             end
         end
@@ -427,55 +431,25 @@ local function CreateMainFrame()
         end
         tab:SetID(id)
         tab:SetText(name)
-        if PanelTemplates_TabResize then
-            PanelTemplates_TabResize(tab, 6, nil, 50)
-        end
+        local baseLevel = MainFrame.GetFrameLevel and MainFrame:GetFrameLevel() or 1
+        if tab.SetFrameLevel then tab:SetFrameLevel(baseLevel + 4) end
         if PanelTemplates_DeselectTab then
             PanelTemplates_DeselectTab(tab)
         end
         return tab
     end
 
-    local lastVisibleTab = nil
     for i, name in ipairs(tabNames) do
         local tab = CreateMainTab(i, name)
-        
-        -- Check if tab should be hidden based on settings
-        local isHidden = false
-        if i == 2 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
-            isHidden = true
-        elseif i == 3 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
-            isHidden = true
-        end
-        
-        if isHidden then
-            tab:Hide()
-        else
-            if not lastVisibleTab then
-                -- First visible tab docks to the frame bottom border (matching native Auction House)
-                tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
-            else
-                -- Subsequent visible tabs overlap previous tab by 12px
-                tab:SetPoint("LEFT", lastVisibleTab, "RIGHT", -12, 0)
-            end
-            lastVisibleTab = tab
-        end
-        
         tab:SetScript("OnClick", function() SelectTab(i) end)
         tabs[i] = tab
     end
     MainFrame.numTabs = #tabs
     MainFrame.tabs = tabs
-    if PanelTemplates_SetNumTabs then
-        PanelTemplates_SetNumTabs(MainFrame, #tabs)
-    end
-    if PanelTemplates_ResizeTabsToFit then
-        PanelTemplates_ResizeTabsToFit(MainFrame, 790)
-    end
 
-    -- Dynamically show/hide tabs and re-anchor visible ones
+    -- Dynamically show/hide tabs, size them uniformly, and anchor visible ones cleanly
     local function RefreshTabVisibility()
-        local lastVisible = nil
+        local visibleTabs = {}
         for i, tab in ipairs(MainFrame.tabs) do
             local shouldHide = false
             if i == 2 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
@@ -484,37 +458,74 @@ local function CreateMainFrame()
                 shouldHide = true
             end
 
-            tab:ClearAllPoints()
             if shouldHide then
                 tab:Hide()
             else
-                tab:Show()
-                if tab.Text then
-                    tab.Text:SetWidth(0)
-                end
-                if PanelTemplates_TabResize then
-                    PanelTemplates_TabResize(tab, 6, nil, 50)
-                end
-                if not lastVisible then
-                    tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
-                else
-                    tab:SetPoint("LEFT", lastVisible, "RIGHT", -12, 0)
-                end
-                lastVisible = tab
+                table.insert(visibleTabs, tab)
             end
         end
-        if PanelTemplates_ResizeTabsToFit then
-            PanelTemplates_ResizeTabsToFit(MainFrame, 790)
+
+        local numVisible = #visibleTabs
+        if numVisible == 0 then return end
+
+        -- Calculate balanced tab width across the 832px window:
+        -- 7 tabs: 104px (span ~714px)
+        -- 6 tabs: 112px (span ~660px)
+        -- <=5 tabs: 120px (span ~590px)
+        local tabWidth = 104
+        if numVisible <= 5 then
+            tabWidth = 120
+        elseif numVisible == 6 then
+            tabWidth = 112
         end
-        -- If the currently selected tab is now hidden, switch to Personal Scan
+
+        local overlap = -2  -- 2px overlap for seamless end-cap docking without clipping text
+
+        MainFrame.tabPadding = 0
+        MainFrame.minTabWidth = tabWidth
+        MainFrame.maxTabWidth = tabWidth
+
+        local lastVisible = nil
+        for idx, tab in ipairs(visibleTabs) do
+            tab:ClearAllPoints()
+            tab:Show()
+
+            tab:SetHeight(32)
+            tab:SetWidth(tabWidth)
+
+            if tab.Text then
+                tab.Text:SetWidth(tabWidth - 16)
+            end
+            if PanelTemplates_TabResize then
+                PanelTemplates_TabResize(tab, 0, tabWidth)
+            end
+
+            if not lastVisible then
+                -- First visible tab docks to the bottom border of MainFrame
+                -- -28 from BOTTOMLEFT aligns the tab top to the bottom border gold trim
+                tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
+            else
+                -- Subsequent tabs anchor by BOTTOMLEFT to previous tab's BOTTOMRIGHT + overlap
+                -- This guarantees ALL tab bottoms and tops remain perfectly aligned at identical Y
+                tab:SetPoint("BOTTOMLEFT", lastVisible, "BOTTOMRIGHT", overlap, 0)
+            end
+            lastVisible = tab
+        end
+
+        -- Ensure current selected tab retains elevated frame level
         if MainFrame.selectedTab then
             local selTab = MainFrame.tabs[MainFrame.selectedTab]
             if selTab and not selTab:IsShown() then
                 SelectTab(1)
+            else
+                SelectTab(MainFrame.selectedTab)
             end
+        else
+            SelectTab(1)
         end
     end
     MainFrame.RefreshTabVisibility = RefreshTabVisibility
+    RefreshTabVisibility()
 
     MainFrame:HookScript("OnShow", function(self)
         if self.RefreshTabVisibility then
@@ -1486,7 +1497,7 @@ local function CreateMainFrame()
     -- Finalize
     -- ================================================================
     MainFrame.contentFrames = contentFrames
-    PanelTemplates_SetNumTabs(MainFrame, #tabs)
+    RefreshTabVisibility()
     SelectTab(1)
 
     MainFrame:Hide()
