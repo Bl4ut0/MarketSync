@@ -526,6 +526,7 @@ test('AuctionHouse.lua registers 4 embedded tabs including Analytics', () => {
         Hide = function(self) self.shown = false end,
         IsShown = function(self) return self.shown end,
         SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        ClearAllPoints = function(self) self.points = {} end,
         SetAllPoints = function(self) end,
         SetSize = function(self, w, h) self.width = w self.height = h end,
         SetWidth = function(self, w) self.width = w end,
@@ -581,10 +582,19 @@ test('AuctionHouse.lua registers 4 embedded tabs including Analytics', () => {
 
     local createdTabs = {}
     local selectedTab = nil
+    local rootFrame = CreateFrame("Frame", "MockLibAHTabRoot")
     local mockLibAHTab = {
+      internalState = { rootFrame = rootFrame, Tabs = {}, usedIDs = {} },
       DoesIDExist = function(self, id) return createdTabs[id] ~= nil end,
       CreateTab = function(self, id, frameRef, text, header)
-        createdTabs[id] = { id = id, frameRef = frameRef, text = text, header = header }
+        local btn = CreateFrame("Button", id)
+        btn.id = id
+        btn.frameRef = frameRef
+        btn.text = text
+        btn.header = header
+        createdTabs[id] = btn
+        self.internalState.usedIDs[id] = btn
+        table.insert(self.internalState.Tabs, btn)
       end,
       GetButton = function(self, id) return createdTabs[id] end,
       SetSelected = function(self, id)
@@ -627,6 +637,20 @@ test('AuctionHouse.lua registers 4 embedded tabs including Analytics', () => {
     assert(lib:DoesIDExist("MarketSyncProcessing"), "MarketSyncProcessing tab should be registered")
     assert(lib:DoesIDExist("MarketSyncAlerts"), "MarketSyncAlerts tab should be registered")
     assert(lib:DoesIDExist("MarketSyncAnalytics"), "MarketSyncAnalytics tab should be registered")
+
+    -- Test AH.RefreshTabVisibility dynamically hiding and showing beta tabs
+    MarketSyncDB = { EnableProcessingTab = false, EnableAlertsTab = false, EnableAnalyticsTab = true }
+    AH.RefreshTabVisibility()
+    assert(not lib:GetButton("MarketSyncProcessing"):IsShown(), "Processing tab should be hidden on AH")
+    assert(not lib:GetButton("MarketSyncAlerts"):IsShown(), "Alerts tab should be hidden on AH")
+    assert(lib:GetButton("MarketSyncScanner"):IsShown(), "Scanner tab should remain shown on AH")
+    assert(lib:GetButton("MarketSyncAnalytics"):IsShown(), "Analytics tab should remain shown on AH")
+
+    MarketSyncDB.EnableProcessingTab = true
+    MarketSyncDB.EnableAlertsTab = true
+    AH.RefreshTabVisibility()
+    assert(lib:GetButton("MarketSyncProcessing"):IsShown(), "Processing tab should be shown when enabled")
+    assert(lib:GetButton("MarketSyncAlerts"):IsShown(), "Alerts tab should be shown when enabled")
 
     -- Test switching to analytics
     AuctionHouseFrame:Show()
@@ -1113,7 +1137,7 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
 
   const mockEnv = `
     MarketSync = MarketSync or {}
-    MarketSyncDB = { LowRamMode = false, PassiveSync = true, EnableNeutralSync = true }
+    MarketSyncDB = { LowRamMode = false, PassiveSync = true, EnableNeutralSync = true, EnableAnalyticsTab = true, EnableProcessingTab = true, EnableAlertsTab = true, EnableProfessionCraftInfo = true }
     UISpecialFrames = {}
     time = function() return 1773780000 end
     GetTime = function() return 1000 end
@@ -1334,6 +1358,21 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     end
     MarketSyncDB.PassiveSync = true
     mainFrame.RefreshTabVisibility()
+
+    -- Test Beta toggles hiding Processing and Alerts
+    MarketSyncDB.EnableProcessingTab = false
+    mainFrame.RefreshTabVisibility()
+    assert(not mainFrame.tabs[5]:IsShown(), "Tab 5 (Processing) should be hidden when EnableProcessingTab is false")
+    MarketSyncDB.EnableProcessingTab = true
+    mainFrame.RefreshTabVisibility()
+    assert(mainFrame.tabs[5]:IsShown(), "Tab 5 (Processing) should be shown when EnableProcessingTab is true")
+
+    MarketSyncDB.EnableAlertsTab = false
+    mainFrame.RefreshTabVisibility()
+    assert(not mainFrame.tabs[6]:IsShown(), "Tab 6 (Alerts) should be hidden when EnableAlertsTab is false")
+    MarketSyncDB.EnableAlertsTab = true
+    mainFrame.RefreshTabVisibility()
+    assert(mainFrame.tabs[6]:IsShown(), "Tab 6 (Alerts) should be shown when EnableAlertsTab is true")
 
     -- Test ShowItemHistory delegation to ShowAnalytics
     local analyticsCalledWith = nil

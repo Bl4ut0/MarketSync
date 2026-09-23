@@ -225,6 +225,9 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.EnableTooltipAuctionPrice == nil then MarketSyncDB.EnableTooltipAuctionPrice = true end
     if MarketSyncDB.EnableProfessionCraftInfo == nil then MarketSyncDB.EnableProfessionCraftInfo = true end
     if MarketSyncDB.EnableTooltipCraftCost == nil then MarketSyncDB.EnableTooltipCraftCost = true end
+    if MarketSyncDB.EnableProcessingTab == nil then MarketSyncDB.EnableProcessingTab = false end
+    if MarketSyncDB.EnableAlertsTab == nil then MarketSyncDB.EnableAlertsTab = false end
+    if MarketSyncDB.EnableAnalyticsTab == nil then MarketSyncDB.EnableAnalyticsTab = true end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end

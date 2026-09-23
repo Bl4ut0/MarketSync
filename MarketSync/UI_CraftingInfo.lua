@@ -4,6 +4,7 @@
 -- =============================================================
 
 MarketSync = MarketSync or {}
+MarketSync.RefreshCraftingInfoUI = function() end
 
 local function FormatMoney(copper)
     if not copper or copper == 0 then return "|cff8888880c|r" end
@@ -575,6 +576,14 @@ local function InitClassicTradeSkillHook()
     infoFrame:SetScript("OnHide", function()
         if treeFrame then treeFrame:Hide() end
     end)
+
+    local prevRefresh = MarketSync.RefreshCraftingInfoUI
+    MarketSync.RefreshCraftingInfoUI = function()
+        if prevRefresh then prevRefresh() end
+        if TradeSkillFrame and TradeSkillFrame:IsShown() then
+            UpdateCraftingInfo()
+        end
+    end
 end
 
 -- ================================================================
@@ -712,6 +721,14 @@ local function InitModernProfessionsHook()
     if schematicForm.RegisterCallback and ProfessionsRecipeSchematicFormMixin and ProfessionsRecipeSchematicFormMixin.Event then
         schematicForm:RegisterCallback(ProfessionsRecipeSchematicFormMixin.Event.AllocationsModified, UpdateModernCraftingInfo)
         schematicForm:RegisterCallback(ProfessionsRecipeSchematicFormMixin.Event.UseBestQualityModified, UpdateModernCraftingInfo)
+    end
+
+    local prevRefresh = MarketSync.RefreshCraftingInfoUI
+    MarketSync.RefreshCraftingInfoUI = function()
+        if prevRefresh then prevRefresh() end
+        if ProfessionsFrame and ProfessionsFrame:IsShown() then
+            UpdateModernCraftingInfo()
+        end
     end
 end
 

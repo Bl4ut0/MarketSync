@@ -4,9 +4,13 @@
 -- ================================================================
 
 MarketSync = MarketSync or {}
-MarketSync.AuctionHouse = {}
+MarketSync.AuctionHouse = MarketSync.AuctionHouse or {}
 
 local AH = MarketSync.AuctionHouse
+
+function AH.RefreshTabVisibility()
+    -- Stub until attached to AuctionHouseFrame
+end
 
 local function GetBuyFrameItem(buyFrame)
     if not buyFrame then return nil, nil, nil end
@@ -298,6 +302,60 @@ function AH.Attach()
         end
     end
 
+    -- Dynamically re-anchor visible LibAHTab tabs cleanly without gaps
+    function AH.RefreshTabVisibility()
+        local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
+        if not libAHTab or not libAHTab.internalState or not libAHTab.internalState.rootFrame then return end
+
+        local offsetX = (WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE) and -14 or 3
+        local tabConfigs = {
+            { id = "MarketSyncScanner", btn = AH.ScannerTab, enabled = true },
+            { id = "MarketSyncProcessing", btn = AH.ProcessingTab, enabled = (MarketSyncDB and MarketSyncDB.EnableProcessingTab == true) },
+            { id = "MarketSyncAlerts", btn = AH.AlertsTab, enabled = (MarketSyncDB and MarketSyncDB.EnableAlertsTab == true) },
+            { id = "MarketSyncAnalytics", btn = AH.AnalyticsTab, enabled = (MarketSyncDB and MarketSyncDB.EnableAnalyticsTab ~= false) },
+        }
+
+        local lastVisible = nil
+        local activeWasHidden = false
+
+        for _, cfg in ipairs(tabConfigs) do
+            local btn = cfg.btn or (libAHTab.GetButton and libAHTab:GetButton(cfg.id))
+            if btn then
+                if cfg.enabled then
+                    if btn.ClearAllPoints then btn:ClearAllPoints() end
+                    if not lastVisible then
+                        btn:SetPoint("TOPLEFT", libAHTab.internalState.rootFrame, "TOPLEFT", offsetX, 0)
+                    else
+                        btn:SetPoint("TOPLEFT", lastVisible, "TOPRIGHT", offsetX, 0)
+                    end
+                    btn:Show()
+                    lastVisible = btn
+                else
+                    if btn.frameRef and btn.frameRef:IsShown() then
+                        activeWasHidden = true
+                        btn.frameRef:Hide()
+                    end
+                    if PanelTemplates_DeselectTab then
+                        PanelTemplates_DeselectTab(btn)
+                    end
+                    btn:Hide()
+                end
+            end
+        end
+
+        if activeWasHidden then
+            if libAHTab:DoesIDExist("MarketSyncScanner") then
+                libAHTab:SetSelected("MarketSyncScanner")
+            elseif frame and frame.Tabs and frame.Tabs[1] then
+                frame.Tabs[1]:Click()
+            end
+        end
+    end
+
+    if AH.RefreshTabVisibility then
+        AH.RefreshTabVisibility()
+    end
+
     -- Attach MarketSync Breakout Sidecar to AuctionHouseFrame
     if MarketSync.CreateAHSidecar then
         AH.Sidecar = MarketSync.CreateAHSidecar(frame)
@@ -342,6 +400,9 @@ function AH.Attach()
 
     frame:HookScript("OnShow", function()
         MarketSync.IsAuctionHouseOpen = true
+        if AH.RefreshTabVisibility then
+            AH.RefreshTabVisibility()
+        end
         if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Hide()
         end

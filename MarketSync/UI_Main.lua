@@ -329,6 +329,14 @@ local function CreateMainFrame()
     end
 
     local function SelectTab(id)
+        if tabs[id] and not tabs[id]:IsShown() then
+            for idx, t in ipairs(tabs) do
+                if t:IsShown() then
+                    id = idx
+                    break
+                end
+            end
+        end
         activeBrowseTab = id
         MainFrame.activeTabID = id
         MainFrame.selectedTab = id
@@ -456,6 +464,12 @@ local function CreateMainFrame()
                 shouldHide = true
             elseif i == 3 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
                 shouldHide = true
+            elseif i == 4 and MarketSyncDB and MarketSyncDB.EnableAnalyticsTab == false then
+                shouldHide = true
+            elseif i == 5 and MarketSyncDB and not MarketSyncDB.EnableProcessingTab then
+                shouldHide = true
+            elseif i == 6 and MarketSyncDB and not MarketSyncDB.EnableAlertsTab then
+                shouldHide = true
             end
 
             if shouldHide then
@@ -525,6 +539,7 @@ local function CreateMainFrame()
         end
     end
     MainFrame.RefreshTabVisibility = RefreshTabVisibility
+    MarketSync.RefreshTabVisibility = RefreshTabVisibility
     RefreshTabVisibility()
 
     MainFrame:HookScript("OnShow", function(self)
@@ -981,6 +996,109 @@ local function CreateMainFrame()
     local chkODP = CreateSubToggle("Personal: Demand", "OnDemandPersonal", chkLowRam)
     local chkODG = CreateSubToggle("Guild: Demand", "OnDemandGuild", chkODP)
     local chkODN = CreateSubToggle("Neutral: Demand", "OnDemandNeutral", chkODG)
+
+    -- ================================================================
+    -- BETA FEATURES SUBSECTION
+    -- ================================================================
+    local betaBox = CreateFrame("Frame", nil, middleMemoryBox, "BackdropTemplate")
+    betaBox:SetPoint("TOPLEFT", middleMemoryBox, "TOPLEFT", 8, -138)
+    betaBox:SetPoint("BOTTOMRIGHT", middleMemoryBox, "BOTTOMRIGHT", -8, 8)
+    betaBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        tile = false, tileSize = 0, edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    betaBox:SetBackdropColor(0.04, 0.04, 0.05, 0.85)
+    betaBox:SetBackdropBorderColor(0.45, 0.35, 0.15, 0.70)
+
+    local betaTopHighlight = betaBox:CreateTexture(nil, "BORDER")
+    betaTopHighlight:SetHeight(1)
+    betaTopHighlight:SetPoint("TOPLEFT", 1, -1)
+    betaTopHighlight:SetPoint("TOPRIGHT", -1, -1)
+    betaTopHighlight:SetColorTexture(0.70, 0.50, 0.15, 0.40)
+
+    local betaHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    betaHeader:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 10, -9)
+    betaHeader:SetText("|cffffaa00Beta Features|r")
+
+    local betaBadge = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    betaBadge:SetPoint("LEFT", betaHeader, "RIGHT", 4, 0)
+    betaBadge:SetText("|cffff6600[BETA]|r")
+
+    local betaSub = betaBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    betaSub:SetPoint("TOPLEFT", betaHeader, "BOTTOMLEFT", 0, -3)
+    betaSub:SetText("Experimental modules:")
+
+    local function CreateBetaToggle(label, key, defaultVal, tooltipText, prevAnchor)
+        local cb = CreateCheckbox(betaBox, prevAnchor or betaBox, prevAnchor and "BOTTOMLEFT" or "TOPLEFT", label, tooltipText)
+        cb.text:SetWidth(130)
+        if not prevAnchor then
+            cb:ClearAllPoints()
+            cb:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 8, -36)
+        end
+        cb:SetScript("OnClick", function(self)
+            local isChecked = self:GetChecked()
+            MarketSyncDB[key] = isChecked
+            print(string.format("|cFF00FF00[MarketSync]|r %s %s", label, isChecked and "Enabled" or "Disabled"))
+            if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then
+                MarketSync.AuctionHouse.RefreshTabVisibility()
+            end
+            if key == "EnableProfessionCraftInfo" and MarketSync.RefreshCraftingInfoUI then
+                MarketSync.RefreshCraftingInfoUI()
+            end
+        end)
+        cb:SetScript("OnShow", function(self)
+            if MarketSyncDB then
+                if defaultVal == false then
+                    self:SetChecked(MarketSyncDB[key] == true)
+                else
+                    self:SetChecked(MarketSyncDB[key] ~= false)
+                end
+            end
+        end)
+        return cb
+    end
+
+    local chkBetaProcessing = CreateBetaToggle(
+        "Enable Processing",
+        "EnableProcessingTab",
+        false,
+        "Show the Processing tab (crafting costs, reagent tree solver, and profitability) on both the portable window and Auction House.",
+        nil
+    )
+
+    local chkBetaAlerts = CreateBetaToggle(
+        "Enable Alerts",
+        "EnableAlertsTab",
+        false,
+        "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both the portable window and Auction House.",
+        chkBetaProcessing
+    )
+
+    local chkBetaAnalytics = CreateBetaToggle(
+        "Enable Analytics",
+        "EnableAnalyticsTab",
+        true,
+        "Show the Analytics tab (price history charts, volume trends, and item stats) on both the portable window and Auction House.",
+        chkBetaAlerts
+    )
+
+    local chkBetaProf = CreateBetaToggle(
+        "TradeSkill Costs",
+        "EnableProfessionCraftInfo",
+        true,
+        "Show crafting costs, profit calculation, and recursive materials tree drawer directly inside the Blizzard TradeSkill window.",
+        chkBetaAnalytics
+    )
+
+    local betaNote = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    betaNote:SetPoint("BOTTOMLEFT", betaBox, "BOTTOMLEFT", 8, 8)
+    betaNote:SetWidth(155)
+    betaNote:SetJustifyH("LEFT")
+    betaNote:SetTextColor(1, 0.4, 0.4)
+    betaNote:SetText("Controls tab & module visibility.")
 
     -- ================================================================
     -- RIGHT: Quick Info + Cache Speed + Manage Users / Smart Rules
