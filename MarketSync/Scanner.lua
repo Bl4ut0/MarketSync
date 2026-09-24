@@ -70,17 +70,15 @@ end
 
 local function StartDebugProgressTicker()
     StopDebugProgressTicker()
-    if MarketSyncDB and MarketSyncDB.DebugMode then
-        MarketSync.Debug("Scanner started: " .. tostring(S.Status or "Starting scan"))
-    end
+    if not (MarketSyncDB and MarketSyncDB.DebugMode) then return end
+    MarketSync.Debug("Scanner started: " .. tostring(S.Status or "Starting scan"))
+    if not (C_Timer and type(C_Timer.NewTicker) == "function") then return end
     S.DebugProgressTicker = C_Timer.NewTicker(2, function()
         if not S.Active then
             StopDebugProgressTicker()
             return
         end
-        if MarketSyncDB and MarketSyncDB.DebugMode then
-            MarketSync.Debug("Scanner progress: " .. tostring(S.Status or "In progress"))
-        end
+        MarketSync.Debug("Scanner progress: " .. tostring(S.Status or "In progress"))
     end)
 end
 
