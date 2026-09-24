@@ -183,61 +183,202 @@ end)
 -- Stage 3 (90s):        Search index cache â€” heavy coroutine, only if enabled
 -- On-Demand:            Opening the Browse UI always triggers cache build
 -- ================================================================
-local auctionatorHooksInstalled = false
+local auctionatorDBUpdateRegistered = false
+local auctionatorFullScanRegistered = false
+local auctionatorSetPriceHookInstalled = false
+local auctionatorFullScanListener = {}
+local auctionatorDBSnapshotPending = false
+local suppressNextScheduledDBSnapshot = false
+local pendingAuctionatorKeys = {}
+local fullScanState = { active = false, scope = nil, keys = nil }
 local function RegisterAuctionatorHooks()
-    if auctionatorHooksInstalled then return end
     if not (Auctionator and Auctionator.Database) then return end
 
-    if type(Auctionator.Database.SetPrice) == "function" and type(hooksecurefunc) == "function" then
-        pcall(hooksecurefunc, Auctionator.Database, "SetPrice", function(_, dbKey)
-            if dbKey and MarketSync.IsAuctionHouseOpen and not MarketSync.IsNeutralAHOpen then
-                MarketSync._ahScanActivity = (MarketSync._ahScanActivity or 0) + 1
+    local function IsNeutralCaptureActive()
+        return MarketSync.IsNeutralAHOpen == true
+            or (MarketSync.IsNeutralAHSession and MarketSync.IsNeutralAHSession())
+    end
+
+    local function SnapshotAuctionatorChanges(authoritative, exactKeys)
+        if IsNeutralCaptureActive() or not MarketSync.SnapshotPersonalScan then return false end
+        local ok, count, todayCount, changedCount = pcall(MarketSync.SnapshotPersonalScan, {
+            evaluateNotifications = true,
+            authoritative = authoritative == true,
+            keys = exactKeys,
+            exactKeys = exactKeys ~= nil,
+        })
+        if not ok then
+            MarketSync.Debug("Auctionator database snapshot failed: " .. tostring(count))
+            return false
+        end
+        if (tonumber(changedCount) or 0) > 0 and MarketSync.InvalidateIndexCache then
+            MarketSync.InvalidateIndexCache()
+        end
+        return true, count, todayCount, changedCount
+    end
+
+    local function ResetFullScanState()
+        fullScanState.active, fullScanState.scope, fullScanState.keys = false, nil, nil
+        MarketSync._auctionatorScanActive = false
+    end
+
+    local function HandleFullScanStart()
+        pendingAuctionatorKeys = {}
+        fullScanState.active = true
+        fullScanState.scope = IsNeutralCaptureActive() and "N" or "M"
+        fullScanState.keys = auctionatorSetPriceHookInstalled and {} or nil
+        MarketSync._auctionatorScanActive = true
+        if fullScanState.scope == "N" and MarketSync.BeginNeutralFullScan then
+            MarketSync.BeginNeutralFullScan()
+        end
+    end
+
+    local function HandleFullScanFailed()
+        local failedScope = fullScanState.scope
+        ResetFullScanState()
+        pendingAuctionatorKeys = {}
+        if failedScope == "N" and MarketSync.FailNeutralFullScan then
+            MarketSync.FailNeutralFullScan()
+        end
+    end
+
+    local function HandleFullScanComplete()
+        local completedScope = fullScanState.scope or (IsNeutralCaptureActive() and "N" or "M")
+        local completedKeys = fullScanState.keys
+        ResetFullScanState()
+        pendingAuctionatorKeys = {}
+
+        if completedScope == "N" then
+            suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
+            if MarketSync.CompleteNeutralFullScan then
+                MarketSync.CompleteNeutralFullScan(completedKeys)
+            end
+            return
+        end
+        MarketSync._ahFullScanCompleted = true
+        -- Without a SetPrice key hook, fail closed. Sweeping Auctionator's whole
+        -- DB can certify prices imported from guild sync or partial searches.
+        if completedKeys == nil then
+            suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
+            MarketSync.Debug("Auctionator full scan completed without exact keys; freshness was not advanced")
+            return
+        end
+
+        local ok, _, todayCount = SnapshotAuctionatorChanges(true, completedKeys)
+        if not ok then return end
+        suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
+        local realmDB = MarketSync.GetRealmDB()
+        local now, today = time(), MarketSync.GetCurrentScanDay()
+        realmDB.PersonalScanTime, realmDB.SwarmTSF = now, now
+        realmDB.CachedScanStats = nil
+        if MarketSync.GetMyLatestScanDay and MarketSync.GetMyLatestScanDay() == today then
+            realmDB.LastCountDay = today
+            realmDB.LastTodayCount = tonumber(todayCount) or 0
+        end
+        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        if C_Timer and C_Timer.After then
+            if MarketSync.BuildSearchIndex then
+                C_Timer.After(1, function()
+                    if MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
+                end)
+            end
+            if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+                C_Timer.After(2, function()
+                    if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end
+                end)
+            end
+        end
+    end
+
+    local function ScheduleDBSnapshot()
+        if auctionatorDBSnapshotPending or not (C_Timer and C_Timer.After) then return end
+        auctionatorDBSnapshotPending = true
+        C_Timer.After(0, function()
+            auctionatorDBSnapshotPending = false
+            if suppressNextScheduledDBSnapshot then
+                suppressNextScheduledDBSnapshot = false
+                return
+            end
+            if fullScanState.active or IsNeutralCaptureActive() then return end
+            local keys = pendingAuctionatorKeys
+            pendingAuctionatorKeys = {}
+            if auctionatorSetPriceHookInstalled and next(keys) then
+                SnapshotAuctionatorChanges(false, keys)
             end
         end)
     end
 
-    if type(Auctionator.Database.ProcessScan) == "function" and type(hooksecurefunc) == "function" then
-        pcall(hooksecurefunc, Auctionator.Database, "ProcessScan", function(_, itemIndexes)
-            if type(itemIndexes) == "table" and next(itemIndexes) and MarketSync.IsAuctionHouseOpen and not MarketSync.IsNeutralAHOpen then
-                MarketSync._ahScanActivity = (MarketSync._ahScanActivity or 0) + 1
-                MarketSync._ahFullScanCompleted = true
-            end
-        end)
-    end
-
-    local eventBus = Auctionator.EventBus
-    local events = Auctionator.FullScan and Auctionator.FullScan.Events
-    if eventBus and type(eventBus.Register) == "function" and events and events.ScanComplete then
-        local listener = {}
-        function listener:ReceiveEvent(eventName)
-            if eventName == events.ScanComplete then
-                MarketSync._ahFullScanCompleted = true
-                if not MarketSync.IsNeutralAHOpen and MarketSync.SnapshotPersonalScan then
-                    local _, todayCount = MarketSync.SnapshotPersonalScan()
-                    local now = time()
-                    local today = MarketSync.GetCurrentScanDay()
-                    local realmDB = MarketSync.GetRealmDB()
-                    realmDB.PersonalScanTime = now
-                    realmDB.SwarmTSF = now
-                    if MarketSync.GetMyLatestScanDay and MarketSync.GetMyLatestScanDay() == today then
-                        realmDB.LastCountDay = today
-                        realmDB.LastTodayCount = todayCount
-                    end
-                    if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-                    if MarketSync.BuildSearchIndex then
-                        C_Timer.After(1, function() if MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end end)
-                    end
-                    if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
-                        C_Timer.After(2, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
+    local scanEventSets = {}
+    local fullScanEvents = Auctionator.FullScan and Auctionator.FullScan.Events
+    local incrementalScanEvents = Auctionator.IncrementalScan and Auctionator.IncrementalScan.Events
+    if fullScanEvents then table.insert(scanEventSets, fullScanEvents) end
+    if incrementalScanEvents then table.insert(scanEventSets, incrementalScanEvents) end
+    function auctionatorFullScanListener:ReceiveEvent(eventName)
+        if not (MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true) then return end
+        if #scanEventSets == 0 then return end
+        local ok, err = pcall(function()
+            for _, events in ipairs(scanEventSets) do
+                if events then
+                    if events.ScanStart and eventName == events.ScanStart then
+                        HandleFullScanStart()
+                        break
+                    elseif events.ScanComplete and eventName == events.ScanComplete then
+                        HandleFullScanComplete()
+                        break
+                    elseif events.ScanFailed and eventName == events.ScanFailed then
+                        HandleFullScanFailed()
+                        break
                     end
                 end
             end
+        end)
+        if not ok then
+            ResetFullScanState()
+            if MarketSync.FailNeutralFullScan then pcall(MarketSync.FailNeutralFullScan) end
+            MarketSync.Debug("Auctionator scan integration failed: " .. tostring(err))
         end
-        pcall(eventBus.Register, eventBus, listener, { events.ScanComplete })
     end
 
-    auctionatorHooksInstalled = true
+    if not auctionatorSetPriceHookInstalled and type(Auctionator.Database.SetPrice) == "function"
+        and type(hooksecurefunc) == "function" then
+        local ok, err = pcall(hooksecurefunc, Auctionator.Database, "SetPrice", function(_, dbKey)
+            if not (MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true) then return end
+            if dbKey == nil then return end
+            MarketSync._ahScanActivity = (MarketSync._ahScanActivity or 0) + 1
+            if fullScanState.active then
+                if fullScanState.keys then fullScanState.keys[dbKey] = true end
+            elseif not IsNeutralCaptureActive() then
+                pendingAuctionatorKeys[dbKey] = true
+                ScheduleDBSnapshot()
+            end
+        end)
+        auctionatorSetPriceHookInstalled = ok == true
+        if not ok then MarketSync.Debug("Auctionator SetPrice hook unavailable: " .. tostring(err)) end
+    end
+
+    local api = Auctionator.API and Auctionator.API.v1
+    if not auctionatorDBUpdateRegistered and api and type(api.RegisterForDBUpdate) == "function" then
+        local ok = pcall(api.RegisterForDBUpdate, ADDON_NAME, ScheduleDBSnapshot)
+        auctionatorDBUpdateRegistered = ok == true
+    end
+
+    if not auctionatorFullScanRegistered and Auctionator.EventBus
+        and type(Auctionator.EventBus.Register) == "function" then
+        local scanEvents = {}
+        for _, events in ipairs(scanEventSets) do
+            if events then
+                if events.ScanStart then table.insert(scanEvents, events.ScanStart) end
+                if events.ScanComplete then table.insert(scanEvents, events.ScanComplete) end
+                if events.ScanFailed then table.insert(scanEvents, events.ScanFailed) end
+            end
+        end
+        if #scanEvents == 0 then return end
+        local ok, err = pcall(Auctionator.EventBus.Register, Auctionator.EventBus, auctionatorFullScanListener, scanEvents)
+        auctionatorFullScanRegistered = ok == true
+        if not ok then MarketSync.Debug("Auctionator scan event listener unavailable: " .. tostring(err)) end
+    end
 end
+MarketSync.RegisterAuctionatorHooks = RegisterAuctionatorHooks
 
 local function SafeRegisterEvent(frame, eventName)
     if frame and eventName then
@@ -544,12 +685,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         MarketSync.IsAuctionHouseOpen = true
         MarketSync.IsNeutralAHOpen = false
 
-        -- Snapshot current live store size and "today" count so we can detect a real scan on close
+        -- The legacy/native scanner path uses these counts as a fallback. Auctionator
+        -- integration uses exact scan events and should not sweep its whole DB on AH open.
         MarketSync._ahOpenItemCount = 0
         MarketSync._ahOpenTodayCount = 0
         local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
             or (Auctionator and Auctionator.Database and Auctionator.Database.db)
-        if liveStore then
+        local auctionatorIntegration = MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true
+            and Auctionator and Auctionator.Database
+        if liveStore and not auctionatorIntegration then
             local today = MarketSync.GetCurrentScanDay()
             for _, data in pairs(liveStore) do
                 MarketSync._ahOpenItemCount = MarketSync._ahOpenItemCount + 1
@@ -590,6 +734,16 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
 
         if wasNeutralSession then
+            return
+        end
+        if MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true and Auctionator and Auctionator.Database then
+            -- Auctionator's exact DB-update/full-scan hooks already imported data.
+            -- Closing the AH is not evidence that a complete personal scan occurred.
+            MarketSync.GetRealmDB().CachedScanStats = nil
+            MarketSync._ahOpenItemCount = nil
+            MarketSync._ahOpenTodayCount = nil
+            MarketSync._ahFullScanCompleted = nil
+            MarketSync._ahScanActivity = nil
             return
         end
         if MarketSyncDB then

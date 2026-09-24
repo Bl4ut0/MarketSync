@@ -114,14 +114,37 @@ function AuctionatorProvider.ExportShoppingList(listName, items)
 end
 
 function AuctionatorProvider.IsScanActive()
-    return MarketSync.IsAuctionHouseOpen == true and MarketSync._ahScanActivity ~= nil and MarketSync._ahScanActivity > 0
+    return MarketSync._auctionatorScanActive == true
 end
 
 function AuctionatorProvider.StartScan()
-    return false
+    if not (Auctionator and Auctionator.State) then return false end
+    local frame = Auctionator.State.FullScanFrameRef
+    local config = Auctionator.Config
+    local options = config and config.Options
+    local replicateOption = options and options.REPLICATE_SCAN
+    if replicateOption and config.Get and not config.Get(replicateOption) then
+        frame = Auctionator.State.IncrementalScanFrameRef or frame
+    end
+    if not frame or type(frame.InitiateScan) ~= "function" then
+        return false, "Open the Auction House and load Auctionator's scan controls first"
+    end
+    if type(frame.CanInitiate) == "function" and not frame:CanInitiate() then
+        return false, "Auctionator's scan is already running or still on cooldown"
+    end
+    if AuctionatorProvider.IsScanActive() then return false, "Auctionator scan is already running" end
+    local ok, err = pcall(frame.InitiateScan, frame)
+    if not ok then return false, tostring(err) end
+    return true
 end
 
 function AuctionatorProvider.StopScan()
+    local state = Auctionator and Auctionator.State
+    local frame = state and (state.FullScanFrameRef or state.IncrementalScanFrameRef)
+    if frame and type(frame.CancelScan) == "function" then
+        local ok = pcall(frame.CancelScan, frame)
+        return ok
+    end
     return false
 end
 

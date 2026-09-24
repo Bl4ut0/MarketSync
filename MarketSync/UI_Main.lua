@@ -1045,6 +1045,12 @@ local function CreateMainFrame()
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then
                 MarketSync.AuctionHouse.RefreshTabVisibility()
             end
+            if key == "UseAuctionatorScanner" and MarketSync.Provider then
+                MarketSync.Provider.Select()
+                if isChecked and MarketSync.RegisterAuctionatorHooks then
+                    MarketSync.RegisterAuctionatorHooks()
+                end
+            end
             if key == "EnableProfessionCraftInfo" and MarketSync.RefreshCraftingInfoUI then
                 MarketSync.RefreshCraftingInfoUI()
             end
@@ -1085,20 +1091,21 @@ local function CreateMainFrame()
         chkBetaAlerts
     )
 
+    local chkAuctionatorScan = CreateBetaToggle(
+        "Use Auctionator scanning",
+        "UseAuctionatorScanner",
+        Auctionator ~= nil and Auctionator.Database ~= nil,
+        "Let Auctionator perform Auction House scans and keep its price database. MarketSync imports completed Auctionator full scans, protects neutral-AH prices, and hides its duplicate Scanner tab. Disable this to use MarketSync's native scanner instead.",
+        chkBetaAnalytics
+    )
+
     local chkBetaProf = CreateBetaToggle(
         "TradeSkill Costs",
         "EnableProfessionCraftInfo",
         true,
         "Show crafting costs, profit calculation, and recursive materials tree drawer directly inside the Blizzard TradeSkill window.",
-        chkBetaAnalytics
+        chkAuctionatorScan
     )
-
-    local betaNote = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    betaNote:SetPoint("BOTTOMLEFT", betaBox, "BOTTOMLEFT", 8, 8)
-    betaNote:SetWidth(155)
-    betaNote:SetJustifyH("LEFT")
-    betaNote:SetTextColor(1, 0.4, 0.4)
-    betaNote:SetText("Controls tab & module visibility.")
 
     -- ================================================================
     -- RIGHT: Quick Info + Cache Speed + Manage Users / Smart Rules

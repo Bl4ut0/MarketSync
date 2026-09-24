@@ -49,6 +49,15 @@ function Provider.Select(preferred)
         return Provider.Active
     end
 
+    -- When enabled, Auctionator owns scanning and its SavedVariables database.
+    -- Prefer it explicitly even on Forever, where MarketSync also ships a native scanner.
+    if MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true
+        and Auctionator and Auctionator.Database and Provider.Registry["auctionator"] then
+        Provider.Active = Provider.Registry["auctionator"]
+        Provider.ActiveName = "auctionator"
+        return Provider.Active
+    end
+
     -- 1. Check for Forever native scanner or modern C_AuctionHouse
     if MarketSync.Scanner or MarketSyncForeverScanner or (C_AuctionHouse and (type(C_AuctionHouse.SendSearchQuery) == "function" or type(C_AuctionHouse.SendBrowseQuery) == "function")) then
         if Provider.Registry["forever"] then

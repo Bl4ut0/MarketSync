@@ -228,6 +228,9 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.EnableProcessingTab == nil then MarketSyncDB.EnableProcessingTab = false end
     if MarketSyncDB.EnableAlertsTab == nil then MarketSyncDB.EnableAlertsTab = false end
     if MarketSyncDB.EnableAnalyticsTab == nil then MarketSyncDB.EnableAnalyticsTab = true end
+    if MarketSyncDB.UseAuctionatorScanner == nil then
+        MarketSyncDB.UseAuctionatorScanner = Auctionator ~= nil and Auctionator.Database ~= nil
+    end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end

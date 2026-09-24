@@ -308,20 +308,24 @@ function AH.Attach()
         if not libAHTab or not libAHTab.internalState or not libAHTab.internalState.rootFrame then return end
 
         local offsetX = (WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE) and -14 or 3
+        local useAuctionatorScan = MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true
+            and Auctionator and Auctionator.Database
         local tabConfigs = {
-            { id = "MarketSyncScanner", btn = AH.ScannerTab, enabled = true },
+            { id = "MarketSyncScanner", btn = AH.ScannerTab, enabled = not useAuctionatorScan },
             { id = "MarketSyncProcessing", btn = AH.ProcessingTab, enabled = (MarketSyncDB and MarketSyncDB.EnableProcessingTab == true) },
             { id = "MarketSyncAlerts", btn = AH.AlertsTab, enabled = (MarketSyncDB and MarketSyncDB.EnableAlertsTab == true) },
             { id = "MarketSyncAnalytics", btn = AH.AnalyticsTab, enabled = (MarketSyncDB and MarketSyncDB.EnableAnalyticsTab ~= false) },
         }
 
         local lastVisible = nil
+        local firstVisibleID = nil
         local activeWasHidden = false
 
         for _, cfg in ipairs(tabConfigs) do
             local btn = cfg.btn or (libAHTab.GetButton and libAHTab:GetButton(cfg.id))
             if btn then
                 if cfg.enabled then
+                    firstVisibleID = firstVisibleID or cfg.id
                     if btn.ClearAllPoints then btn:ClearAllPoints() end
                     if not lastVisible then
                         btn:SetPoint("TOPLEFT", libAHTab.internalState.rootFrame, "TOPLEFT", offsetX, 0)
@@ -344,8 +348,8 @@ function AH.Attach()
         end
 
         if activeWasHidden then
-            if libAHTab:DoesIDExist("MarketSyncScanner") then
-                libAHTab:SetSelected("MarketSyncScanner")
+            if firstVisibleID and libAHTab:DoesIDExist(firstVisibleID) then
+                libAHTab:SetSelected(firstVisibleID)
             elseif frame and frame.Tabs and frame.Tabs[1] then
                 frame.Tabs[1]:Click()
             end
