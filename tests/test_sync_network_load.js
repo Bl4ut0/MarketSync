@@ -317,6 +317,31 @@ test('Alert Engine: Hard hourly cooldown suppresses duplicate price alerts, trig
   }
 });
 
+test('Session alert mute suppresses scan alerts without changing saved requests', () => {
+  const L = createLuaEnv();
+  const notifLua = fs.readFileSync(path.join(marketSyncDir, 'Notifications.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(notifLua)) !== 0) {
+    throw new Error('Failed to load Notifications.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+  const script = `
+    local realmDB = MarketSync.GetRealmDB()
+    MarketSync.UpsertNotificationRequest({
+      matchType = "itemID", matchValue = 13444, thresholdCopper = 1000000,
+      scope = "all", enabled = true,
+    })
+    assert(MarketSync.ToggleNotificationMute() == true)
+    assert(MarketSync.EvaluateNotificationsForRecord(13444, 800000, "main", "LocalScan", "Potion", 13444) == 0)
+    assert(#realmDB.NotificationLog == 0)
+    assert(MarketSyncDB.NotificationsMuted == nil, "Mute must be session-only")
+    assert(MarketSync.ToggleNotificationMute() == false)
+    assert(MarketSync.EvaluateNotificationsForRecord(13444, 800000, "main", "LocalScan", "Potion", 13444) == 1)
+    assert(#realmDB.NotificationLog == 1)
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
+    throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 // ---------------------------------------------------------------------
 // TEST 3: Title Bar Sync Status & Interactive Toggle
 // ---------------------------------------------------------------------
@@ -370,7 +395,20 @@ test('UI_Main: Title Bar Sync Status renders clean dot indicators and updates sy
 // TEST 4: Full Sync Data Verification (Wire Ceiling, Serialization, Scopes)
 // ---------------------------------------------------------------------
 test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutral AH scope isolation', () => {
-  const L = createLuaEnv();
+  const L = createLuaEnv(`
+    outboundFrames = {}
+    transmitTick = nil
+    local currentTxTime = 1000
+    AdvanceTxClock = function() currentTxTime = currentTxTime + 1 end
+    GetTime = function() return currentTxTime end
+    C_Timer.NewTicker = function(interval, callback)
+      if not transmitTick then transmitTick = callback end
+      return { Cancel = function() end }
+    end
+    C_ChatInfo.SendAddonMessage = function(prefix, payload)
+      outboundFrames[#outboundFrames + 1] = payload
+    end
+  `);
   const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
   if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
     throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
@@ -402,6 +440,16 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
         }
       }
     end
+    realmDB.PersonalData["p:4471:12"] = {
+      m = 1000, d = scanDay, latestBucket = (scanDay * 48) + 20,
+      h = { [tostring(scanDay)] = "20:rs:2" },
+      vh = { [tostring(scanDay)] = "20:rs:2" },
+    }
+    realmDB.PersonalData["p:4471:13"] = {
+      m = 2000, d = scanDay, latestBucket = (scanDay * 48) + 20,
+      h = { [tostring(scanDay)] = "20:1jk:3" },
+      vh = { [tostring(scanDay)] = "20:1jk:3" },
+    }
 
     -- Populate Neutral AH data
     realmDB.NeutralData = {}
@@ -433,6 +481,7 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
     MarketSync.CanSync = function() return true end
     MarketSync.CanParticipateInData = function(s) return true end
     MarketSync.GetMyLatestBucket = function() return (scanDay * 48) + 20 end
+    MarketSync.GetCurrentScanDay = function() return scanDay end
     realmDB.SwarmTSF = 1773780000
 
     local ok, started = pcall(MarketSync.StartDirectedBroadcast, "M", (scanDay * 48), (scanDay * 48) + 20, 1773780000, "LocalPlayer", "PeerPlayer")
@@ -444,6 +493,23 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
     local okN, startedN = pcall(MarketSync.StartDirectedBroadcast, "N", scanDay - 1, scanDay, 1773780000, "LocalPlayer", "PeerPlayer")
     -- Should cleanly reject concurrent start while M is active (preventing cross-scope collision)
     assert(startedN == false, "Cross-scope broadcast must not collide with active send")
+
+    for i = 1, 300 do AdvanceTxClock(); transmitTick() end
+    local sentBoar, sentEagle = false, false
+    for _, frame in ipairs(outboundFrames) do
+      if frame:find("sp:4471:12_", 1, true) then sentBoar = true end
+      if frame:find("sp:4471:13_", 1, true) then sentEagle = true end
+    end
+    assert(sentBoar and sentEagle,
+      "Guild DATA frames must preserve both suffix-specific verified histories")
+
+    MarketSync._Protocol2CommitInProgress = true
+    MarketSync.UpdateLocalDBByKey("p:4471:14", scanDay, "20:2s:1", "PeerPlayer")
+    MarketSync._Protocol2CommitInProgress = false
+    assert(realmDB.PersonalData["p:4471:14"] and realmDB.PersonalData["p:4471:14"].m == 100,
+      "Received variant must be stored under its exact suffix key")
+    assert(realmDB.PersonalData["4471"] == nil and realmDB.PersonalData["p:4471:12"].m == 1000,
+      "Receiving one suffix must not change the base item or another suffix")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
     throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

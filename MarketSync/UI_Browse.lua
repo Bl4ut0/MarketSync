@@ -163,10 +163,10 @@ local RARITY_HEX = {
 local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
     local name, link, rarity, ilvl, minLevel, icon, classID, subClassID
     local suffixText
+    local suffixID = type(dbKey) == "string" and tonumber(dbKey:match("^p:%d+:(%-?%d+)$")) or nil
     if type(dbKey) == "string" then
         suffixText = dbKey:match("^gr:%d+:(.+)$")
             or dbKey:match("^g:%d+:(.+)$")
-            or dbKey:match("^p:%d+:(.+)$")
             or dbKey:match("/([%w%s%-%'\"]+)$")
     end
 
@@ -215,6 +215,20 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
 
     if not name then return nil end
 
+    local itemLinkString = "item:" .. itemID
+    if suffixID and suffixID ~= 0 then
+        itemLinkString = string.format("item:%d:0:0:0:0:0:%d:0", itemID, suffixID)
+        local variantName, variantLink, variantRarity, variantIlvl = MarketSync.GetItemInfo(itemLinkString)
+        if variantName then
+            name = variantName
+            link = variantLink or link
+            rarity = variantRarity or rarity
+            ilvl = variantIlvl or ilvl
+        else
+            suffixText = "Variant " .. tostring(suffixID)
+        end
+    end
+
     -- Keep random-enchant suffixes searchable/visible in Personal+Guild browse results.
     local displayName = name
     if suffixText and suffixText ~= "" then
@@ -226,7 +240,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
     end
 
     local hex = RARITY_HEX[rarity] or RARITY_HEX[1]
-    link = "|c" .. hex .. "|Hitem:" .. itemID .. "|h[" .. displayName .. "]|h|r"
+    link = "|c" .. hex .. "|H" .. itemLinkString .. "|h[" .. displayName .. "]|h|r"
 
     local price = 0
     local dbDay = MarketSync.GetCurrentScanDay()

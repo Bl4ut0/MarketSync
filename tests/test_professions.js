@@ -167,8 +167,8 @@ test('falls back gracefully to legacy GetTradeSkillInfo API', () => {
   `);
 });
 
-// 4. Secondary Profession Detection & Health Consolidation Test
-test('consolidates bandages and health potions under First Aid (Health)', () => {
+// 4. Secondary Profession Detection without inventing learned recipes
+test('lists First Aid but does not invent unscanned recipes', () => {
   const L = createLuaState(`
     -- Player has primary Alchemy and secondary First Aid (6th return)
     GetProfessions = function() return 1, nil, nil, nil, nil, 2 end
@@ -192,17 +192,7 @@ test('consolidates bandages and health potions under First Aid (Health)', () => 
 
     -- Query recipes for First Aid (Health)
     local crafts = MarketSync.FindProfitableCrafts("First Aid (Health)", 0)
-    assert(#crafts > 0, "Expected profitable crafts for First Aid (Health)")
-
-    local foundBandage = false
-    local foundPotion = false
-    for _, craft in ipairs(crafts) do
-      if craft.outputItemID == 1251 then foundBandage = true end
-      if craft.outputItemID == 118 then foundPotion = true end
-    end
-
-    assert(foundBandage == true, "Expected Linen Bandage in First Aid (Health) crafts")
-    assert(foundPotion == true, "Expected Minor Healing Potion in First Aid (Health) crafts")
+    assert(#crafts == 0, "Unscanned static recipes must not be shown as learned")
   `);
 });
 
@@ -243,6 +233,77 @@ test('dynamically aggregates scanned Alchemy health potions into First Aid (Heal
       end
     end
     assert(foundSuperHealing == true, "Expected Super Healing Potion from Alchemy scan to be present in First Aid (Health)")
+    local allCrafts = MarketSync.FindProfitableCrafts("ALL", 0)
+    assert(#allCrafts == 1, "ALL should deduplicate a recipe shared by profession views")
+  `);
+});
+
+test('known crafts remain visible when auction prices are missing', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function() return nil end
+    C_TradeSkillUI = {
+      GetAllRecipeIDs = function() return { 101 } end,
+      GetBaseProfessionInfo = function() return { professionName = "Alchemy" } end,
+      GetRecipeInfo = function() return { name = "Minor Healing Potion", learned = true, disabled = false } end,
+      GetRecipeItemLink = function() return "|Hitem:118|h[Minor Healing Potion]|h" end,
+      GetRecipeSchematic = function()
+        return { quantityMin = 1, quantityMax = 1, reagentSlotSchematics = {
+          { quantityRequired = 1, reagents = { { itemID = 2447 } } },
+        } }
+      end,
+    }
+  `);
+  execLua(L, `
+    MarketSync.RefreshKnownCraftingRecipes()
+    local rows = MarketSync.FindProfitableCrafts("ALL", 0)
+    assert(#rows == 1, "Learned recipe should remain visible")
+    assert(rows[1].hasMissingPrice == true and rows[1].margin == nil,
+      "Unknown pricing must not be shown as zero profit")
+  `);
+});
+
+test('disenchant range uses priced outcomes from the same probability row as EV', () => {
+  const L = createLuaState();
+  execLua(L, `
+    local ev, stale, missing, gross, partial, drops, low, high =
+      MarketSync.EstimateDisenchantEV(2, 16, 4, 999)
+    assert(#drops == 3, "Expected dust, essence, and shard")
+    assert(missing == 0 and partial == false, "All outputs should be priced")
+    assert(math.abs(gross - 2225) < 0.01, "Expected gross EV from probability-weighted quantities")
+    assert(ev == 2113, "Expected 5% AH-cut net EV")
+    assert(low == 950 and high == 2850, "Expected min/max outcome after AH cut")
+  `);
+});
+
+test('every bundled disenchant bracket has a complete probability distribution', () => {
+  const L = createLuaState();
+  execLua(L, `
+    for _, classID in ipairs({2, 4}) do
+      for quality = 2, 4 do
+        for ilvl = 1, 164 do
+          local drops = MarketSync.GetDisenchantDropList(quality, ilvl, classID)
+          if #drops > 0 then
+            local total = 0
+            for _, drop in ipairs(drops) do total = total + drop.chance end
+            assert(math.abs(total - 1) < 0.025,
+              "Incomplete odds for class " .. classID .. " quality " .. quality .. " level " .. ilvl .. ": " .. total)
+          end
+        end
+      end
+    end
+  `);
+});
+
+test('Forever does not infer TBC materials for unsupported green item levels', () => {
+  const L = createLuaState(`
+    MarketSync.Provider = { GetActiveName = function() return "forever" end }
+    Auctionator = { Constants = { DisenchantingProbability = {
+      [4] = { [2] = { { 66, 99, 100, 1, 22445 } } }
+    } } }
+  `);
+  execLua(L, `
+    assert(#MarketSync.GetDisenchantDropList(2, 16, 4) == 3, "Classic bracket should remain supported")
+    assert(#MarketSync.GetDisenchantDropList(2, 80, 4) == 0, "TBC dust is not verified for Forever")
   `);
 });
 
@@ -439,4 +500,3 @@ test('handles cyclic dependencies gracefully without infinite recursion', () => 
 });
 
 console.log(`\nAll ${passed} profession tests passed successfully!`);
-

@@ -503,6 +503,66 @@ MarketSync.RETENTION_HOT_DAYS  = 7    -- Full 30-min resolution (synced)
 MarketSync.RETENTION_WARM_DAYS = 30   -- Daily summaries (local)
 MarketSync.RETENTION_COLD_DAYS = 180  -- Weekly summaries (local, 6 months)
 
+-- Each price key (including p:itemID:suffix) has at most one observation per
+-- half-hour bucket. Replacing a repeat scan prevents unbounded hot histories.
+function MarketSync.UpsertScanBucket(histStr, bucketOffset, price, quantity)
+    local offset = tonumber(bucketOffset)
+    if not offset or offset < 0 or offset >= 48 then return histStr end
+    local point = string.format("%d:%s:%s", offset,
+        MarketSync.ToBase36(price), MarketSync.ToBase36(quantity))
+    if not histStr or histStr == "" or MarketSync.IsCompactRecord(histStr) then return point end
+
+    local lastOffset = tonumber(histStr:match("(%d+):[%w%-]+:[%w%-]+$"))
+    if lastOffset == offset then
+        local beforeLast = histStr:match("^(.*),[^,]+$")
+        if not beforeLast then return point end
+        if not beforeLast:match("^" .. offset .. ":")
+            and not beforeLast:find("," .. offset .. ":", 1, true) then
+            return beforeLast .. "," .. point
+        end
+    end
+    if lastOffset and lastOffset < offset then
+        local token = "," .. offset .. ":"
+        if not histStr:match("^" .. offset .. ":") and not histStr:find(token, 1, true) then
+            return histStr .. "," .. point
+        end
+    end
+
+    local byOffset = {}
+    for oldOffset, oldPrice, oldQuantity in histStr:gmatch("(%d+):([%w%-]+):([%w%-]+)") do
+        local number = tonumber(oldOffset)
+        if number and number >= 0 and number < 48 then
+            byOffset[number] = oldOffset .. ":" .. oldPrice .. ":" .. oldQuantity
+        end
+    end
+    byOffset[offset] = point
+    local ordered = {}
+    for number = 0, 47 do
+        if byOffset[number] then ordered[#ordered + 1] = byOffset[number] end
+    end
+    return table.concat(ordered, ",")
+end
+
+-- Repair histories written before bucket upserts. Last observation wins.
+function MarketSync.DeduplicateScanBuckets(histStr)
+    if type(histStr) ~= "string" or histStr == "" or MarketSync.IsCompactRecord(histStr) then return histStr end
+    local byOffset, count, valid = {}, 0, 0
+    for offset, price, quantity in histStr:gmatch("(%d+):([%w%-]+):([%w%-]+)") do
+        count = count + 1
+        local number = tonumber(offset)
+        if number and number >= 0 and number < 48 then
+            if not byOffset[number] then valid = valid + 1 end
+            byOffset[number] = offset .. ":" .. price .. ":" .. quantity
+        end
+    end
+    if count == valid then return histStr end
+    local ordered = {}
+    for number = 0, 47 do
+        if byOffset[number] then ordered[#ordered + 1] = byOffset[number] end
+    end
+    return table.concat(ordered, ",")
+end
+
 function MarketSync.IsCompactRecord(str)
     if not str or type(str) ~= "string" or #str < 2 then return false end
     local prefix = str:sub(1, 2)
@@ -693,6 +753,20 @@ function MarketSync.ParseItemIDFromDBKey(dbKey)
     if type(dbKey) == "number" then return dbKey end
     if type(dbKey) ~= "string" then return nil end
 
+    local variantID, suffixID = dbKey:match("^p:(%d+):(%-?%d+)$")
+    if variantID then
+        return tonumber(variantID), tonumber(suffixID)
+    end
+
+    local itemString = dbKey:match("|H(item:[^|]+)|h") or dbKey:match("^(item:%d+[^%s|]*)")
+    if itemString then
+        local fields = {}
+        for field in itemString:gmatch("([^:]+)") do
+            fields[#fields + 1] = field
+        end
+        return tonumber(fields[2]), tonumber(fields[8])
+    end
+
     local idStr = dbKey:match("^item:(%d+)")
         or dbKey:match("^gr:(%d+)")
         or dbKey:match("^g:(%d+)")
@@ -713,14 +787,18 @@ function MarketSync.GetAuctionPrice(itemLink)
         local price = MarketSync.Provider.GetPrice(itemLink)
         if price ~= nil then return price end
     end
-    if Auctionator and Auctionator.API and Auctionator.API.v1 then
+    if Auctionator and Auctionator.API and Auctionator.API.v1
+        and not (type(itemLink) == "string" and itemLink:match("^p:%d+:%-?%d+$")) then
         local aPrice = Auctionator.API.v1.GetAuctionPriceByItemLink(ADDON_NAME, itemLink)
         if aPrice ~= nil then return aPrice end
     end
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
     if realmDB and realmDB.PersonalData and itemLink then
-        local id = tonumber(itemLink) or (type(itemLink) == "string" and tonumber(itemLink:match("item:(%d+)")))
-        local dbKey = id and tostring(id) or tostring(itemLink)
+        local id, suffix = MarketSync.ParseItemIDFromDBKey(itemLink)
+        local dbKey = (id and suffix and suffix ~= 0) and string.format("p:%d:%d", id, suffix)
+            or (id and (type(itemLink) == "number" or tostring(itemLink):match("^%d+$")
+                or tostring(itemLink):match("item:%d+")) and tostring(id))
+            or tostring(itemLink)
         local entry = realmDB.PersonalData[dbKey]
         if entry and entry.m and entry.m > 0 then
             return entry.m
@@ -751,10 +829,9 @@ end
 MarketSync.SCAN_DAY_0 = 1577836800 -- Jan 1, 2020 UTC
 
 function MarketSync.GetCurrentScanDay()
-    if Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 then
-        return math.floor((time() - Auctionator.Constants.SCAN_DAY_0) / 86400)
-    end
-    return math.floor(time() / 86400)
+    -- Keep the day and 30-minute bucket on the same provider epoch. Forever
+    -- uses Unix buckets even when Auctionator is installed as an optional addon.
+    return math.floor(MarketSync.GetCurrentBucket() / 48)
 end
 
 function MarketSync.ScanDayToTimestamp(scanDay)
@@ -1027,7 +1104,8 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
 
     -- 1. Check PersonalData
     local pData = realmDB.PersonalData
-    local pEntry = pData and ((suffixKey and pData[suffixKey]) or pData[itemKey])
+    local priceKey = suffixKey or itemKey
+    local pEntry = pData and pData[priceKey]
     if pEntry and pEntry.m and pEntry.m > 0 then
         price = pEntry.m
         local entryDay = tonumber(pEntry.d) or currentDay
@@ -1059,7 +1137,7 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
     end
 
     -- Check ItemMetadata for more accurate guild contributor and timestamp
-    local meta = realmDB.ItemMetadata and ((suffixKey and realmDB.ItemMetadata[suffixKey]) or realmDB.ItemMetadata[itemKey])
+    local meta = realmDB.ItemMetadata and realmDB.ItemMetadata[priceKey]
     if meta then
         local dayStr = tostring(pEntry and pEntry.d or currentDay)
         if meta.days and meta.days[dayStr] then
@@ -1074,7 +1152,7 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
     -- 3. Check Neutral AH Data
     local neutralPrice = nil
     local nData = realmDB.NeutralData
-    local nEntry = nData and ((suffixKey and nData[suffixKey]) or nData[itemKey])
+    local nEntry = nData and nData[priceKey]
     if nEntry and nEntry.m and nEntry.m > 0 then
         neutralPrice = nEntry.m
     end

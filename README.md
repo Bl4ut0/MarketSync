@@ -1,5 +1,20 @@
 # MarketSync Forever native scanner prototype
 
+## Current MarketSync Forever processing work
+
+The `MarketSync` addon is being completed for Forever first; older-client behavior remains in the codebase but is not the current feature target. Its Processing tab now offers an `ALL` profession view. Craft profitability uses only recipes captured from the current character's profession window, so open each profession window once (or resync it) before expecting its recipes to appear. Recipes or materials without complete auction pricing do not receive a profit estimate.
+
+Disenchant processing uses item quality, item level, and weapon/armor class from the scanned item metadata. For every supported probability row it shows possible outputs, low/expected/high net material value, and low/expected/high profit after buying the item. The expected value is the sum of each outcome's probability times quantity times material price, with a 5% main-auction sale cut. The low and high figures are possible single-disenchant outcomes, **not confidence bounds**. The row is marked partial and no range is shown when a possible output has no price. The bundled legacy odds have not been independently validated for Forever custom gear; unsupported higher-level green items must not inherit TBC material odds. A fresh scan is needed to populate metadata for items scanned before this update.
+
+Full Auction House scans keep random-suffix variants (such as “of the Boar”) as separate price records instead of folding them into the base item. Variant keys are preserved in guild transfers, so each suffix can be browsed and priced independently. This higher-fidelity history uses more SavedVariables space and increases the amount of data available to sync.
+Earlier scans that stored only a base item ID cannot be split into suffix variants retroactively; run a new full scan to populate those prices.
+
+Retention applies to each variant key independently: recent history keeps one observation per 30-minute bucket for seven days and is eligible for guild sync; days 8–30 become local daily summaries; days 31–180 become local weekly summaries. Repeated scans in the same bucket replace that variant's previous point, and fully expired variant records are removed without affecting other suffixes or the base item. Analytics reads the same exact variant key through all three history tiers. Retention runs after login and daily during a long session.
+
+Alerts remain item-specific auction-price thresholds. Shift-Left-Click the MarketSync minimap button to mute all alert delivery for the current session; the first use asks for confirmation, and the same shortcut restores alerts. Mute state is not saved across logout or reload. Existing threshold requests are left intact while muted.
+
+The remainder of this README documents the earlier standalone `MarketSyncForeverScanner` prototype and should be read as historical implementation context, not as the current MarketSync feature list.
+
 **Built for an initial test of Forever beta 1.60.1 (69893).** This separate addon records native auction searches, refreshes a small watch list, and provides a draggable saved-price window. It requires neither Auctionator nor the existing MarketSync addon. The original MarketSync worktree and installed addons are unchanged.
 
 **0.3.0 embeds a MarketSync control panel directly beside Blizzard's auction-house tabs.** It uses Blizzard's `SetDisplayMode` and `AuctionHouseFrameTabTemplate` while sharing a unified browser (`Browser.lua`) with the portable portrait window. The source track contains an [implementation guide](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/IMPLEMENTATION_GUIDE.md) and a [restart checklist/pasteable handoff](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/RESUME.md). Those development guides are stored with the source, outside the client ZIP.

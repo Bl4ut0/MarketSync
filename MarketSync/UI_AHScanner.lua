@@ -763,13 +763,16 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row:SetScript("OnClick", function(self, mouseButton)
                     if mouseButton == "RightButton" then
                         if MarketSync.ShowAnalytics and data.itemID then
-                            local dbKey = tostring(data.itemID)
-                            local link = select(2, SafeGetItemInfo(data.itemID)) or data.name
+                            local dbKey = data.dbKey or (data.itemKey and MarketSync.NormalizeItemKey
+                                and select(1, MarketSync.NormalizeItemKey(data.itemKey))) or tostring(data.itemID)
+                            local link = data.itemKey and data.itemKey.itemLink
+                                or select(2, SafeGetItemInfo(data.itemID)) or data.name
                             MarketSync.ShowAnalytics(dbKey, link, data.name, data.icon, data.unitPrice)
                         end
                     else
                         if MarketSync.SearchInAuctionHouse and data.itemID then
-                            MarketSync.SearchInAuctionHouse(data.itemID)
+                            local link = data.itemKey and data.itemKey.itemLink
+                            MarketSync.SearchInAuctionHouse(link or data.itemID)
                         end
                     end
                 end)
@@ -801,6 +804,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     end
 
     -- Cooldown & Scanner Update Loop
+    local displayedResultsRevision
     local function UpdateScannerState()
         local scanner = MarketSync.Scanner
         if not scanner then return end
@@ -848,7 +852,10 @@ function MarketSync.CreateAHScannerPanel(parent)
             progressLabel:SetText(scanner.Status or "Ready")
         end
 
-        UpdateResultsTable()
+        if displayedResultsRevision ~= scanner.ResultsRevision then
+            displayedResultsRevision = scanner.ResultsRevision
+            UpdateResultsTable()
+        end
     end
 
     if MarketSync.Scanner then

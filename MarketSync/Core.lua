@@ -6,6 +6,21 @@
 local ADDON_NAME = MarketSync.ADDON_NAME
 local category  -- Forward declaration for minimap/options access
 
+StaticPopupDialogs = StaticPopupDialogs or {}
+StaticPopupDialogs["MARKETSYNC_CONFIRM_SESSION_MUTE"] = {
+    text = "Mute all MarketSync alerts for this session? You can turn them back on with Shift-Left-Click on the minimap button. This confirmation appears only once.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function()
+        MarketSyncDB.NotificationMuteConfirmed = true
+        if MarketSync.ToggleNotificationMute then MarketSync.ToggleNotificationMute() end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 -- ================================================================
 -- MINIMAP BUTTON
 -- ================================================================
@@ -20,7 +35,14 @@ local function CreateMinimapButton()
         text = "MarketSync",
         icon = "Interface\\Icons\\INV_Misc_Coin_02",
         OnClick = function(self, button)
-            if button == "RightButton" then
+            if button == "LeftButton" and IsShiftKeyDown and IsShiftKeyDown() then
+                if not MarketSyncDB.NotificationMuteConfirmed then
+                    StaticPopup_Show("MARKETSYNC_CONFIRM_SESSION_MUTE")
+                elseif MarketSync.ToggleNotificationMute then
+                    MarketSync.ToggleNotificationMute()
+                end
+                return
+            elseif button == "RightButton" then
                 if MarketSync_ToggleUI then
                     MarketSync_ToggleUI()
                     -- Switch to Settings tab (Tab 7)
@@ -56,6 +78,10 @@ local function CreateMinimapButton()
             tooltip:AddLine("|cFF00FF00Left-Click|r to Open Window")
             tooltip:AddLine("|cFF00FF00Middle-Click|r for Notifications")
             tooltip:AddLine("|cFF00FF00Right-Click|r for Settings")
+            tooltip:AddLine("|cFF00FF00Shift-Left-Click|r to toggle alerts for this session")
+            if MarketSync.NotificationsMuted then
+                tooltip:AddLine("|cffffaa00Alerts muted until logout|r")
+            end
         end,
     })
 
@@ -85,6 +111,7 @@ local function CreateMinimapButton()
         flashGroup:SetLooping("REPEAT")
 
         function MarketSync.StartMinimapFlash()
+            if MarketSync.NotificationsMuted then return end
             if not flash:IsShown() then
                 flash:Show()
                 flashGroup:Play()
@@ -245,6 +272,7 @@ function MarketSync.DownsampleRetention(onComplete)
     local compactedWeeklyCount = 0
     local purgedCount = 0
     local vhPrunedCount = 0
+    local purgedVariantCount = 0
 
     if MarketSyncDB and MarketSyncDB.DebugMode then
         print(string.format("|cFF00FF00[MarketSync]|r Downsampling retention (Hot: %dd, Warm: %dd, Cold: %dd)",
@@ -301,6 +329,8 @@ function MarketSync.DownsampleRetention(onComplete)
                                         compactedDailyCount = compactedDailyCount + 1
                                     end
                                 end
+                            elseif MarketSync.DeduplicateScanBuckets then
+                                data.h[dayKey] = MarketSync.DeduplicateScanBuckets(histStr)
                             end
                         end
                     end
@@ -324,11 +354,13 @@ function MarketSync.DownsampleRetention(onComplete)
 
                 -- Prune vh (verified history) leak: only keep hot tier for outbound sync
                 if type(data.vh) == "table" then
-                    for vhDayKey, _ in pairs(data.vh) do
+                    for vhDayKey, vhHistory in pairs(data.vh) do
                         local vhDayNum = tonumber(vhDayKey)
                         if not vhDayNum or vhDayNum < hotCutoff or (type(vhDayKey) == "string" and vhDayKey:sub(1, 2) == "W_") then
                             data.vh[vhDayKey] = nil
                             vhPrunedCount = vhPrunedCount + 1
+                        elseif MarketSync.DeduplicateScanBuckets then
+                            data.vh[vhDayKey] = MarketSync.DeduplicateScanBuckets(vhHistory)
                         end
                     end
                     if not next(data.vh) then
@@ -337,14 +369,27 @@ function MarketSync.DownsampleRetention(onComplete)
                 end
             end
 
+            -- Retention applies to the complete price key. Once all three
+            -- history tiers expire, remove only that exact item variant.
+            if type(data) == "table"
+                and (not data.h or (type(data.h) == "table" and not next(data.h)))
+                and (not data.vh or (type(data.vh) == "table" and not next(data.vh)))
+                and (tonumber(data.d) or 0) < coldCutoff then
+                realmDB.PersonalData[dbKey] = nil
+                purgedVariantCount = purgedVariantCount + 1
+            end
+
             i = i + 1
             if i % 500 == 0 then coroutine.yield() end
         end
 
-        if MarketSyncDB and MarketSyncDB.DebugMode and (compactedDailyCount > 0 or compactedWeeklyCount > 0 or purgedCount > 0 or vhPrunedCount > 0) then
+        if purgedVariantCount > 0 and MarketSync.InvalidateIndexCache then
+            MarketSync.InvalidateIndexCache()
+        end
+        if MarketSyncDB and MarketSyncDB.DebugMode and (compactedDailyCount > 0 or compactedWeeklyCount > 0 or purgedCount > 0 or vhPrunedCount > 0 or purgedVariantCount > 0) then
             print(string.format(
-                "|cFF00FF00[MarketSync]|r Retention Downsampler: %d daily, %d weekly, %d purged, %d vh pruned",
-                compactedDailyCount, compactedWeeklyCount, purgedCount, vhPrunedCount))
+                "|cFF00FF00[MarketSync]|r Retention Downsampler: %d daily, %d weekly, %d old records, %d vh, %d expired variants",
+                compactedDailyCount, compactedWeeklyCount, purgedCount, vhPrunedCount, purgedVariantCount))
         end
         if onComplete then
             onComplete(compactedDailyCount, compactedWeeklyCount, purgedCount, vhPrunedCount)
@@ -469,6 +514,12 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 MarketSync.DownsampleRetention()
             end
         end)
+        if C_Timer.NewTicker then
+            C_Timer.NewTicker(86400, function()
+                if MarketSync.DownsampleRetention then MarketSync.DownsampleRetention() end
+                if MarketSync.PruneMetadata then MarketSync.PruneMetadata() end
+            end)
+        end
 
         -- Register for AH events so we can invalidate the scan cache dynamically
         SafeRegisterEvent(self, "AUCTION_HOUSE_CLOSED")

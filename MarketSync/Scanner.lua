@@ -14,7 +14,9 @@ MarketSync.Scanner = {
     Pending = nil,
     Progress = { current = 0, total = 0 },
     RecentResults = {},
+    ResultsRevision = 0,
     Callbacks = {},
+    ReplicateProcessing = false,
 }
 
 local S = MarketSync.Scanner
@@ -31,7 +33,9 @@ local function GetReplicateFuncs()
         or (type(_G.GetNumReplicateItems) == "function" and _G.GetNumReplicateItems)
     local getInfo = (api and type(api.GetReplicateItemInfo) == "function" and api.GetReplicateItemInfo)
         or (type(_G.GetReplicateItemInfo) == "function" and _G.GetReplicateItemInfo)
-    return repl, getNum, getInfo
+    local getLink = (api and type(api.GetReplicateItemLink) == "function" and api.GetReplicateItemLink)
+        or (type(_G.GetReplicateItemLink) == "function" and _G.GetReplicateItemLink)
+    return repl, getNum, getInfo, getLink
 end
 
 local function SafeCall(name, ...)
@@ -57,6 +61,29 @@ function S.Notify()
     end
 end
 
+local function StopDebugProgressTicker()
+    if S.DebugProgressTicker then
+        S.DebugProgressTicker:Cancel()
+        S.DebugProgressTicker = nil
+    end
+end
+
+local function StartDebugProgressTicker()
+    StopDebugProgressTicker()
+    if MarketSyncDB and MarketSyncDB.DebugMode then
+        MarketSync.Debug("Scanner started: " .. tostring(S.Status or "Starting scan"))
+    end
+    S.DebugProgressTicker = C_Timer.NewTicker(2, function()
+        if not S.Active then
+            StopDebugProgressTicker()
+            return
+        end
+        if MarketSyncDB and MarketSyncDB.DebugMode then
+            MarketSync.Debug("Scanner progress: " .. tostring(S.Status or "In progress"))
+        end
+    end)
+end
+
 function S.IsAvailable()
     local frameOpen = MarketSync.IsAuctionHouseOpen == true
         or (_G.AuctionHouseFrame and _G.AuctionHouseFrame:IsShown())
@@ -75,13 +102,46 @@ function S.CopyKey(key)
     }
 end
 
+local function NotifyScanProgress()
+    local now = (type(GetTime) == "function" and GetTime()) or time()
+    if not S.LastProgressNotifyAt or now - S.LastProgressNotifyAt >= 0.25 then
+        S.LastProgressNotifyAt = now
+        S.Notify()
+    end
+end
+
+local function GetItemSuffixFromLink(itemLink)
+    if type(itemLink) ~= "string" then return 0 end
+    local itemString = itemLink:match("|H(item:[^|]+)|h") or itemLink:match("(item:%d+[^%s|]*)")
+    if not itemString then return 0 end
+
+    local fields = {}
+    for field in itemString:gmatch("([^:]+)") do
+        fields[#fields + 1] = field
+    end
+    -- Item links use: item:id:enchant:gem1:gem2:gem3:gem4:suffix:unique:...
+    return tonumber(fields[8]) or 0
+end
+
+local function GetVariantItemLink(itemID, itemSuffix)
+    if not itemID then return nil end
+    if not itemSuffix or itemSuffix == 0 then return "item:" .. tostring(itemID) end
+    return string.format("item:%d:0:0:0:0:0:%d:0", itemID, itemSuffix)
+end
+
 function S.ToItemKey(keyOrID)
     if type(keyOrID) == "table" and keyOrID.itemID then
         return S.CopyKey(keyOrID)
     end
     local id = tonumber(keyOrID)
+    local itemSuffix = type(keyOrID) == "string" and GetItemSuffixFromLink(keyOrID) or 0
     if not id and type(keyOrID) == "string" then
-        id = tonumber(keyOrID:match("item:(%d+)") or keyOrID:match("^(%d+)$"))
+        if MarketSync.ParseItemIDFromDBKey then
+            local parsedID, parsedSuffix = MarketSync.ParseItemIDFromDBKey(keyOrID)
+            id = parsedID
+            itemSuffix = tonumber(parsedSuffix) or itemSuffix
+        end
+        id = id or tonumber(keyOrID:match("item:(%d+)") or keyOrID:match("^(%d+)$"))
         if not id then
             local cleanName = keyOrID:match("%[(.-)%]") or keyOrID
             cleanName = cleanName:match("^%s*(.-)%s*$")
@@ -99,13 +159,13 @@ function S.ToItemKey(keyOrID)
     if id and id > 0 then
         local api = GetAHAPI()
         if api and type(api.MakeItemKey) == "function" then
-            local ok, k = pcall(api.MakeItemKey, id, 0, 0, 0)
+            local ok, k = pcall(api.MakeItemKey, id, 0, itemSuffix, 0)
             if ok and k then return k end
         end
         return {
             itemID = id,
             itemLevel = 0,
-            itemSuffix = 0,
+            itemSuffix = itemSuffix,
             battlePetSpeciesID = 0,
         }
     end
@@ -121,9 +181,12 @@ end
 function S.Cancel(reason)
     S.Generation = S.Generation + 1
     S.Active = false
+    StopDebugProgressTicker()
     S.Pending = nil
     S.Queue = {}
     S.Scheduled = false
+    S.ReplicateProcessing = false
+    S.FullScanMetadataAttempted = nil
     S.Status = reason or "Scan cancelled"
     S.Notify()
 end
@@ -137,14 +200,11 @@ local function NormalizeItemKey(itemKey)
     elseif type(itemKey) == "number" then
         itemID = itemKey
     elseif type(itemKey) == "string" then
-        local prefix, id, suff = itemKey:match("^(%a+):(%d+):?(%d*)$")
-        if id then
-            itemID = tonumber(id)
-            itemSuffix = tonumber(suff) or 0
-        else
-            local linkID = itemKey:match("item:(%d+)")
-            itemID = linkID and tonumber(linkID) or tonumber(itemKey)
+        if MarketSync.ParseItemIDFromDBKey then
+            itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(itemKey)
         end
+        itemID = itemID or tonumber(itemKey)
+        itemSuffix = tonumber(itemSuffix) or 0
     end
     if not itemID or itemID <= 0 then return nil, nil, nil end
     local dbKey = (itemSuffix and itemSuffix ~= 0) and string.format("p:%d:%d", itemID, itemSuffix) or tostring(itemID)
@@ -155,10 +215,13 @@ MarketSync.NormalizeItemKey = NormalizeItemKey
 
 local lastScanObservations = {}
 
-local function RecordScanObservation(itemKey, unitPrice, available, isCommodity, isFullScan)
+local function RecordScanObservation(itemKey, unitPrice, available, isCommodity, isFullScan, deferNotify)
     if not itemKey or not unitPrice or unitPrice <= 0 then return end
     local dbKey, itemID, normalizedKey = NormalizeItemKey(itemKey)
     if not dbKey or not itemID then return end
+    normalizedKey.itemLink = (type(itemKey) == "table" and itemKey.itemLink)
+        or GetVariantItemLink(itemID, normalizedKey.itemSuffix)
+    normalizedKey.dbKey = dbKey
 
     local now = time()
 
@@ -190,16 +253,8 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     if not entry.h then entry.h = {} end
     if not entry.vh then entry.vh = {} end
 
-    -- Base-36 encoded time-series string
-    local b36Price = MarketSync.ToBase36(unitPrice)
-    local b36Qty = MarketSync.ToBase36(math.max(1, available or 1))
-    local point = bucketOffset .. ":" .. b36Price .. ":" .. b36Qty
-
-    if not entry.h[dayStr] or entry.h[dayStr] == "" then
-        entry.h[dayStr] = point
-    else
-        entry.h[dayStr] = entry.h[dayStr] .. "," .. point
-    end
+    entry.h[dayStr] = MarketSync.UpsertScanBucket(entry.h[dayStr], bucketOffset,
+        unitPrice, math.max(1, available or 1))
     entry.vh[dayStr] = entry.h[dayStr]
 
     realmDB.PersonalScanTime = now
@@ -211,35 +266,91 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     end
     realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
 
-    -- Item info lookup
-    local name, link, quality, _, _, _, _, _, _, icon = nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
-    if C_Item and C_Item.GetItemInfo then
-        name, link, quality, _, _, _, _, _, _, icon = C_Item.GetItemInfo(itemID)
-    elseif GetItemInfo then
-        name, link, quality, _, _, _, _, _, _, icon = GetItemInfo(itemID)
+    -- Metadata is stable per item ID. A full replicate can contain many variants
+    -- of the same item, so resolve it at most once and reuse the persistent cache.
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    local cached = cache and cache[itemID]
+    local name, link, quality, ilvl, minLevel, icon, classID, subClassID
+    if cached then
+        name, quality, ilvl, minLevel = cached.n, cached.r, cached.i, cached.m
+        icon, classID, subClassID = cached.ic, cached.c, cached.s
     end
-    if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
-        name = MarketSyncDB.ItemInfoCache[itemID].n
-        icon = MarketSyncDB.ItemInfoCache[itemID].ic
-        quality = MarketSyncDB.ItemInfoCache[itemID].r
+    local completeMetadata = name and quality ~= nil and ilvl ~= nil and classID ~= nil and icon ~= nil
+    local attempted = isFullScan and S.FullScanMetadataAttempted
+    local metadataFetched = false
+    if not completeMetadata and not (attempted and attempted[itemID]) then
+        if attempted then attempted[itemID] = true end
+        metadataFetched = true
+        local resolvedName, resolvedLink, resolvedQuality, resolvedIlvl, resolvedMinLevel,
+            _, _, _, _, resolvedIcon, _, resolvedClassID, resolvedSubClassID
+        if MarketSync.GetItemInfo then
+            resolvedName, resolvedLink, resolvedQuality, resolvedIlvl, resolvedMinLevel,
+                _, _, _, _, resolvedIcon, _, resolvedClassID, resolvedSubClassID = MarketSync.GetItemInfo(itemID)
+        elseif C_Item and C_Item.GetItemInfo then
+            resolvedName, resolvedLink, resolvedQuality, resolvedIlvl, resolvedMinLevel,
+                _, _, _, _, resolvedIcon, _, resolvedClassID, resolvedSubClassID = C_Item.GetItemInfo(itemID)
+        elseif GetItemInfo then
+            resolvedName, resolvedLink, resolvedQuality, resolvedIlvl, resolvedMinLevel,
+                _, _, _, _, resolvedIcon, _, resolvedClassID, resolvedSubClassID = GetItemInfo(itemID)
+        end
+        name, link = resolvedName or name, resolvedLink
+        quality, ilvl, minLevel = resolvedQuality or quality, resolvedIlvl or ilvl, resolvedMinLevel or minLevel
+        icon, classID, subClassID = resolvedIcon or icon, resolvedClassID or classID, resolvedSubClassID or subClassID
+    end
+    if metadataFetched and name and MarketSyncDB then
+        MarketSyncDB.ItemInfoCache = cache or {}
+        cached = cached or {}
+        cached.n = name
+        cached.r = quality or cached.r
+        cached.i = ilvl or cached.i
+        cached.m = minLevel or cached.m
+        cached.ic = icon or cached.ic
+        cached.c = classID or cached.c
+        cached.s = subClassID or cached.s
+        MarketSyncDB.ItemInfoCache[itemID] = cached
+    end
+    local displayName = name
+    if normalizedKey.itemSuffix ~= 0 then
+        local variantName = type(normalizedKey.itemLink) == "string"
+            and normalizedKey.itemLink:match("%[(.-)%]") or nil
+        local variantLink = normalizedKey.itemLink
+        if not variantName and not isFullScan then
+            if MarketSync.GetItemInfo then
+                variantName, variantLink = MarketSync.GetItemInfo(normalizedKey.itemLink)
+            elseif C_Item and C_Item.GetItemInfo then
+                variantName, variantLink = C_Item.GetItemInfo(normalizedKey.itemLink)
+            elseif GetItemInfo then
+                variantName, variantLink = GetItemInfo(normalizedKey.itemLink)
+            end
+        end
+        displayName = variantName or name
+        link = variantLink or normalizedKey.itemLink or link
     end
 
-    -- Record in data logs (HistoryLog)
-    if not realmDB.HistoryLog then realmDB.HistoryLog = {} end
-    local itemLink = link or (type(itemKey) == "string" and itemKey:match("|Hitem:")) or ("item:" .. itemID)
-    table.insert(realmDB.HistoryLog, 1, {
-        link = itemLink,
-        price = unitPrice,
-        sender = "Self",
-        time = now,
-    })
-    if #realmDB.HistoryLog > 100 then table.remove(realmDB.HistoryLog) end
+    -- A full AH replicate can contain thousands of variants but HistoryLog only
+    -- retains 100 entries. Keep that activity log for targeted scans; the full
+    -- scan's durable per-item record is PersonalData above.
+    if not isFullScan then
+        if not realmDB.HistoryLog then realmDB.HistoryLog = {} end
+        local itemLink = (normalizedKey.itemSuffix ~= 0 and normalizedKey.itemLink)
+            or link
+            or (type(itemKey) == "string" and itemKey:match("|Hitem:"))
+            or ("item:" .. itemID)
+        table.insert(realmDB.HistoryLog, 1, {
+            link = itemLink,
+            price = unitPrice,
+            sender = "Self",
+            time = now,
+        })
+        if #realmDB.HistoryLog > 100 then table.remove(realmDB.HistoryLog) end
+    end
 
     -- Record in live Scanner feed
     table.insert(S.RecentResults, 1, {
         itemID = itemID,
         itemKey = normalizedKey,
-        name = name or ("Item #" .. itemID),
+        dbKey = dbKey,
+        name = displayName or ("Item #" .. itemID),
         icon = icon or 134400,
         quality = quality or 1,
         unitPrice = unitPrice,
@@ -248,6 +359,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         isCommodity = isCommodity or false,
     })
     if #S.RecentResults > 50 then table.remove(S.RecentResults) end
+    S.ResultsRevision = (S.ResultsRevision or 0) + 1
 
     -- Evaluate notifications
     if MarketSync.EvaluateNotificationsForRecord then
@@ -255,7 +367,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     end
 
     -- Notify subscribers (UI_AHSidecar shopping lists, UI_AHScanner, etc.)
-    S.Notify()
+    if not deferNotify then S.Notify() end
 
     -- Debounced sync advertisement on partial/individual scans
     if not isFullScan and MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
@@ -324,12 +436,14 @@ function S.ScheduleNext()
 
         if #S.Queue == 0 then
             S.Active = false
+            StopDebugProgressTicker()
             S.Pending = nil
             S.Status = "Scan Complete"
             if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
             if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
                 C_Timer.After(2, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
             end
+            MarketSync.Debug("Scanner complete: " .. S.Status)
             S.Notify()
             return
         end
@@ -376,9 +490,12 @@ function S.StartScan(itemsOrKeys, label)
 
     S.Generation = S.Generation + 1
     S.Active = true
+    S.ReplicateProcessing = false
+    S.FullScanMetadataAttempted = {}
     S.Scheduled = false
     S.Queue = {}
     S.RecentResults = {}
+    S.ResultsRevision = (S.ResultsRevision or 0) + 1
     if wipe then wipe(lastScanObservations) else lastScanObservations = {} end
 
     local seen = {}
@@ -401,6 +518,7 @@ function S.StartScan(itemsOrKeys, label)
     S.Progress.current = 0
     S.Status = label or string.format("Starting scan of %d items...", S.Progress.total)
     S.NextRequestAt = GetTime()
+    StartDebugProgressTicker()
     S.ScheduleNext()
     S.Notify()
     return true
@@ -495,8 +613,10 @@ function S.StartFullScan()
     end
 
     local replFunc, getNumFunc, getInfoFunc = GetReplicateFuncs()
-    if not replFunc then
+    if not replFunc or not getNumFunc or not getInfoFunc then
         S.Status = "Full scan (ReplicateItems) not supported on this client"
+        S.Progress.current = 0
+        S.Progress.total = 0
         S.Notify()
         print("|cFFFF4444[MarketSync]|r Full AH scan (ReplicateItems) not supported on this client. Use Scan Watched or Scan Lists instead.")
         return false
@@ -504,22 +624,46 @@ function S.StartFullScan()
 
     S.Generation = S.Generation + 1
     S.Active = true
+    S.ReplicateProcessing = false
+    S.FullScanMetadataAttempted = {}
     S.Pending = nil
     S.Queue = {}
     S.RecentResults = {}
-    S.Progress.total = 100
+    S.ResultsRevision = (S.ResultsRevision or 0) + 1
+    S.LastProgressNotifyAt = nil
+    -- No percentage is meaningful until the server returns the snapshot size.
+    S.Progress.total = 0
     S.Progress.current = 0
     S.Status = "Requesting full AH snapshot from server..."
+    StartDebugProgressTicker()
     S.Notify()
 
-    local ok = pcall(replFunc)
-    if not ok then
+    local ok, requestResult = pcall(replFunc)
+    if not ok or requestResult == false then
         S.Active = false
+        StopDebugProgressTicker()
         S.Status = "ReplicateItems request failed"
+        S.Progress.current = 0
+        S.Progress.total = 0
         S.Notify()
         print("|cFFFF4444[MarketSync]|r ReplicateItems request failed.")
         return false
     end
+
+    -- Some clients accept ReplicateItems without returning data or firing the
+    -- result event. Avoid leaving the scanner stuck in an active 0% state.
+    local requestGeneration = S.Generation
+    C_Timer.After(30, function()
+        if S.Active and S.Generation == requestGeneration and not S.ReplicateProcessing then
+            S.Active = false
+            StopDebugProgressTicker()
+            S.FullScanMetadataAttempted = nil
+            S.Status = "Full scan timed out waiting for the auction snapshot"
+            S.Progress.current = 0
+            S.Progress.total = 0
+            S.Notify()
+        end
+    end)
 
     return true
 end
@@ -545,12 +689,16 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     end
 
     if event == "REPLICATE_ITEM_LIST_UPDATE" then
-        local replFunc, getNumFunc, getInfoFunc = GetReplicateFuncs()
-        if not S.Active or not getNumFunc or not getInfoFunc then return end
+        local replFunc, getNumFunc, getInfoFunc, getLinkFunc = GetReplicateFuncs()
+        if not S.Active or S.ReplicateProcessing or not getNumFunc or not getInfoFunc then return end
+        S.ReplicateProcessing = true
         local totalItems = getNumFunc() or 0
         if totalItems == 0 then
             S.Status = "Replicate returned 0 items"
             S.Active = false
+            S.ReplicateProcessing = false
+            StopDebugProgressTicker()
+            S.FullScanMetadataAttempted = nil
             S.Notify()
             return
         end
@@ -560,38 +708,116 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         S.Progress.current = 0
         S.Notify()
 
-        local SLICE_SIZE = 1000
+        -- Pace replicate reads across frames. Auctionator uses 250-row batches;
+        -- keep that ceiling here so a large snapshot cannot monopolize one frame.
+        local READ_BATCH_SIZE = 250
+        -- Persist fewer rows per tick than Auctionator's simple price DB writes:
+        -- MarketSync also updates history, recent results, and alert state.
+        local WRITE_BATCH_SIZE = 150
         local currentIndex = 0
         local aggregated = {}
+        local aggregateKeys = {}
+        local scanGeneration = S.Generation
 
-        local sliceFrame = CreateFrame("Frame")
-        sliceFrame:SetScript("OnUpdate", function(sf)
-            if not S.Active then
-                sf:SetScript("OnUpdate", nil)
+        local function FinishFullScan()
+            MarketSyncDB.LastFullScanAt = time()
+            local realmDB = MarketSync.GetRealmDB()
+            if realmDB then
+                realmDB.FullScanTime = time()
+                realmDB.PersonalScanTime = time()
+                realmDB.SwarmTSF = time()
+            end
+            S.Active = false
+            S.ReplicateProcessing = false
+            StopDebugProgressTicker()
+            S.FullScanMetadataAttempted = nil
+            S.Status = string.format("Full Scan Complete: %d item variants recorded", S.FullScanRecordedCount or 0)
+            S.FullScanRecordedCount = nil
+            if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+            if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+                C_Timer.After(1, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
+            end
+            MarketSync.Debug("Scanner complete: " .. S.Status)
+            S.Notify()
+        end
+
+        local function ProcessRecordBatch()
+            if not S.Active or S.Generation ~= scanGeneration then return end
+
+            local stopIndex = math.min(#aggregateKeys, currentIndex + WRITE_BATCH_SIZE)
+            for keyIndex = currentIndex + 1, stopIndex do
+                local info = aggregated[aggregateKeys[keyIndex]]
+                if info then
+                    RecordScanObservation(info.itemKey, info.unitPrice, info.available, false, true, true)
+                    S.FullScanRecordedCount = (S.FullScanRecordedCount or 0) + 1
+                end
+            end
+            currentIndex = stopIndex
+
+            if currentIndex >= #aggregateKeys then
+                FinishFullScan()
                 return
             end
 
-            local stopIndex = math.min(totalItems, currentIndex + SLICE_SIZE)
+            S.Status = string.format("Saving scan results (%d / %d variants)...", currentIndex, #aggregateKeys)
+            NotifyScanProgress()
+            C_Timer.After(0.01, ProcessRecordBatch)
+        end
+
+        local function ProcessReadBatch()
+            if not S.Active or S.Generation ~= scanGeneration then return end
+
+            local stopIndex = math.min(totalItems, currentIndex + READ_BATCH_SIZE)
             for idx = currentIndex + 1, stopIndex do
                 local name, texture, count, qualityID, canUse, level, levelColHeader, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, bidderFullName, owner, ownerFullName, saleStatus, itemID = getInfoFunc(idx - 1)
+                local itemSuffix = 0
+                local itemLink
                 if not itemID and type(name) == "table" and name.itemID then
                     local info = name
                     itemID = info.itemID
                     count = info.quantity or 1
                     buyoutPrice = info.buyoutAmount or 0
+                    itemSuffix = tonumber(info.itemSuffix) or 0
+                elseif type(name) == "table" then
+                    itemSuffix = tonumber(name.itemSuffix) or 0
+                end
+
+                if getLinkFunc then
+                    local linkOK, replicateLink = pcall(getLinkFunc, idx - 1)
+                    if linkOK then
+                        itemLink = replicateLink
+                        local linkSuffix = GetItemSuffixFromLink(itemLink)
+                        if linkSuffix ~= 0 then itemSuffix = linkSuffix end
+                    end
                 end
 
                 if itemID and itemID > 0 and count and count > 0 and buyoutPrice and buyoutPrice > 0 then
                     local unitPrice = math.floor(buyoutPrice / count)
                     if unitPrice > 0 then
-                        if not aggregated[itemID] or unitPrice < aggregated[itemID].unitPrice then
-                            aggregated[itemID] = {
+                        local dbKey = itemSuffix ~= 0
+                            and string.format("p:%d:%d", itemID, itemSuffix)
+                            or tostring(itemID)
+                        local existing = aggregated[dbKey]
+                        if not existing then
+                            aggregateKeys[#aggregateKeys + 1] = dbKey
+                            aggregated[dbKey] = {
                                 itemID = itemID,
+                                itemKey = {
+                                    itemID = itemID,
+                                    itemLevel = 0,
+                                    itemSuffix = itemSuffix,
+                                    battlePetSpeciesID = 0,
+                                    itemLink = itemLink or GetVariantItemLink(itemID, itemSuffix),
+                                },
                                 unitPrice = unitPrice,
-                                available = (aggregated[itemID] and aggregated[itemID].available or 0) + count,
+                                available = count,
                             }
                         else
-                            aggregated[itemID].available = (aggregated[itemID].available or 0) + count
+                            existing.available = existing.available + count
+                            if unitPrice < existing.unitPrice then
+                                existing.unitPrice = unitPrice
+                                existing.itemKey.itemLink = itemLink or existing.itemKey.itemLink
+                            end
                         end
                     end
                 end
@@ -600,34 +826,21 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             currentIndex = stopIndex
             S.Progress.current = currentIndex
             S.Status = string.format("Processing auctions (%d / %d)...", currentIndex, totalItems)
-            S.Notify()
+            NotifyScanProgress()
 
             if currentIndex >= totalItems then
-                sf:SetScript("OnUpdate", nil)
-                local countRecorded = 0
-                for itemID, info in pairs(aggregated) do
-                    local key = { itemID = itemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
-                    RecordScanObservation(key, info.unitPrice, info.available, false, true)
-                    countRecorded = countRecorded + 1
-                end
-
-                MarketSyncDB.LastFullScanAt = time()
-                local realmDB = MarketSync.GetRealmDB()
-                if realmDB then
-                    realmDB.FullScanTime = time()
-                    realmDB.PersonalScanTime = time()
-                    realmDB.SwarmTSF = time()
-                end
-
-                S.Active = false
-                S.Status = string.format("Full Scan Complete: %d items recorded", countRecorded)
-                if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-                if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
-                    C_Timer.After(1, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
-                end
-                S.Notify()
+                currentIndex = 0
+                S.FullScanRecordedCount = 0
+                S.Status = string.format("Saving scan results (0 / %d variants)...", #aggregateKeys)
+                NotifyScanProgress()
+                ProcessRecordBatch()
+            else
+                C_Timer.After(0.01, ProcessReadBatch)
             end
-        end)
+        end
+
+        currentIndex = 0
+        ProcessReadBatch()
         return
     end
 

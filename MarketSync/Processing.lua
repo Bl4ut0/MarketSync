@@ -297,6 +297,21 @@ local function GetDisenchantRows(classID, quality)
     local fallbackClass = TBC_DISENCHANT_FALLBACK[tonumber(classID)]
     local fallbackRows = fallbackClass and fallbackClass[tonumber(quality)] or nil
 
+    local isForever = MarketSync.Provider and MarketSync.Provider.GetActiveName
+        and MarketSync.Provider.GetActiveName() == "forever"
+    if isForever or CLIENT_EXPANSION_LEVEL == 0 then
+        -- Forever is Classic-based. Never silently price its gear as TBC dust,
+        -- essence, or shards merely because a generic Auctionator table exists.
+        local classicRows = {}
+        local lastKnownLevel = tonumber(quality) == 4 and 80 or 65
+        for _, row in ipairs(fallbackRows or {}) do
+            if (tonumber(row[2]) or math.huge) <= lastKnownLevel then
+                classicRows[#classicRows + 1] = row
+            end
+        end
+        return classicRows, false
+    end
+
     -- Auctionator v329 ships one cross-expansion table. On TBC its 121+
     -- uncommon/rare rows point at Wrath materials, so use the sanitized TBC
     -- fallback whose final Arcane/Planar/Prismatic bracket extends to 164.
@@ -342,7 +357,9 @@ local function GetDisenchantDropList(quality, itemLevel, classID)
     local class = tonumber(classID)
     if not ilvl or not q or not class then return {} end
     ilvl = math.floor(ilvl)
-    local cacheKey = tostring(class) .. ":" .. tostring(q) .. ":" .. tostring(ilvl)
+    local providerName = MarketSync.Provider and MarketSync.Provider.GetActiveName
+        and MarketSync.Provider.GetActiveName() or "none"
+    local cacheKey = tostring(providerName) .. ":" .. tostring(class) .. ":" .. tostring(q) .. ":" .. tostring(ilvl)
     if DISENCHANT_DROP_CACHE[cacheKey] then
         return DISENCHANT_DROP_CACHE[cacheKey]
     end
@@ -1081,6 +1098,14 @@ local function IsHealthConsumableRecipe(recipe)
     return false
 end
 
+local function CraftRecipeKey(recipe)
+    local parts = { tostring(recipe.outputItemID), tostring(recipe.outputQty or 1) }
+    for _, mat in ipairs(recipe.mats or {}) do
+        parts[#parts + 1] = tostring(mat.itemID) .. "x" .. tostring(mat.qty or 1)
+    end
+    return table.concat(parts, ":")
+end
+
 local function GetRecipesForProfession(professionName)
     local prof = professionName and tostring(professionName) or nil
     if not prof or prof == "" then return {} end
@@ -1094,7 +1119,7 @@ local function GetRecipesForProfession(professionName)
         if type(r) ~= "table" or not r.outputItemID or not r.mats or #r.mats == 0 then
             return
         end
-        local key = tostring(r.outputItemID)
+        local key = CraftRecipeKey(r)
         if not seen[key] then
             seen[key] = true
             out[#out + 1] = r
@@ -1121,12 +1146,6 @@ local function GetRecipesForProfession(professionName)
             end
         end
 
-        -- 3. Built-in recipes for First Aid bandages & Health Potions (guarantees complete health craft coverage)
-        local builtin = (MarketSync.CraftingData and (MarketSync.CraftingData["First Aid (Health)"] or MarketSync.CraftingData["First Aid"])) or {}
-        for _, r in ipairs(builtin) do
-            AddRecipe(r)
-        end
-
         return out
     end
 
@@ -1139,16 +1158,25 @@ local function GetRecipesForProfession(professionName)
         return cached.recipes
     end
 
-    -- Fallback recipes
-    local fallback = MarketSync.CraftingData and (MarketSync.CraftingData[normalized] or MarketSync.CraftingData[prof])
-    if fallback and type(fallback) == "table" and #fallback > 0 then
-        return fallback
-    end
-
+    -- Static recipes are not proof that this character learned them.
     return {}
 end
 
 function MarketSync.GetCraftRecipeCount(professionName)
+    if professionName == "ALL" then
+        local total = 0
+        local seen = {}
+        for _, name in ipairs(MarketSync.GetProcessingProfessions()) do
+            for _, recipe in ipairs(GetRecipesForProfession(name)) do
+                local key = CraftRecipeKey(recipe)
+                if not seen[key] then
+                    seen[key] = true
+                    total = total + 1
+                end
+            end
+        end
+        return total
+    end
     local recipes = GetRecipesForProfession(professionName)
     return #recipes
 end
@@ -1206,26 +1234,8 @@ local function GetPriceInfoByItemID(itemID)
 end
 
 -- Estimate the disenchant EV for a generic item of given quality / ilvl / slot.
--- Returns expected main-AH proceeds after the sale cut, stale, and missing-price count.
-local function GetAuctionatorDisenchantGross(itemID)
-    local api = Auctionator and Auctionator.API and Auctionator.API.v1
-    local fn = api and api.GetDisenchantPriceByItemID
-    local probabilityData = Auctionator and Auctionator.Constants and Auctionator.Constants.DisenchantingProbability
-    if CLIENT_EXPANSION_LEVEL == 1
-        or not itemID
-        or type(fn) ~= "function"
-        or type(probabilityData) ~= "table" then
-        return nil
-    end
-    local ok, grossValue = pcall(fn, CALLER_ID, tonumber(itemID))
-    if ok and type(grossValue) == "number" and grossValue > 0 then
-        -- Auctionator v329 returns gross expected material value; it does not
-        -- subtract an AH sale cut. NetMainAuctionValue is applied below once.
-        return grossValue
-    end
-    return nil
-end
-
+-- Returns expected main-AH proceeds after the sale cut, stale, missing-price
+-- count, possible outcomes, and priced low/high proceeds.
 local function EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID)
     local classID = tonumber(classOrWeapon)
     if not classID then classID = classOrWeapon and 2 or 4 end
@@ -1236,28 +1246,37 @@ local function EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID)
     local hasAnyPrice = false
     local anyStale = false
     local missingCount = 0
+    local lowestGross, highestGross
     for _, drop in ipairs(drops) do
         local price, _, stale = GetPriceInfoByItemID(drop.itemID)
         if price and price > 0 then
             directGross = directGross + (price * drop.expected)
             hasAnyPrice = true
             if stale then anyStale = true end
+            for _, outcome in ipairs(drop.outcomes or {}) do
+                local value = price * outcome.quantity
+                if not lowestGross or value < lowestGross then lowestGross = value end
+                if not highestGross or value > highestGross then highestGross = value end
+            end
         else
             missingCount = missingCount + 1
         end
     end
 
-    local apiGross = GetAuctionatorDisenchantGross(itemID)
-    local grossValue = apiGross or (hasAnyPrice and directGross or nil)
+    -- The EV and range must use the same outcome table and the same prices.
+    -- An external EV may describe different expansion-specific odds.
+    local grossValue = hasAnyPrice and directGross or nil
     if not grossValue or grossValue <= 0 then
-        return nil, anyStale, missingCount, nil, missingCount > 0, drops
+        return nil, anyStale, missingCount, nil, missingCount > 0, drops, nil, nil
     end
+    if missingCount > 0 then lowestGross, highestGross = nil, nil end
     return math.floor(NetMainAuctionValue(grossValue)), anyStale, missingCount,
-        grossValue, missingCount > 0, drops
+        grossValue, missingCount > 0, drops,
+        lowestGross and math.floor(NetMainAuctionValue(lowestGross)) or nil,
+        highestGross and math.floor(NetMainAuctionValue(highestGross)) or nil
 end
 
--- Public API for UI or other modules; the original boolean third argument is
--- retained, while callers with an item ID can use Auctionator's exact gross EV.
+-- Public API for UI or other modules; retain the existing positional returns.
 function MarketSync.EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID)
     return EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID)
 end
@@ -1395,13 +1414,6 @@ function MarketSync.GetProcessingProfessions()
     local knownRecipeStore = GetKnownCraftingStore()
     for name, payload in pairs(knownRecipeStore) do
         if type(name) == "string" and type(payload) == "table" then
-            AddProfessionIfEligible(name)
-        end
-    end
-
-    -- Fallback path if profession APIs are unavailable or no profs scanned.
-    if #out == 0 and not hasKnownProfs then
-        for name in pairs(MarketSync.CraftingData or {}) do
             AddProfessionIfEligible(name)
         end
     end
@@ -1692,7 +1704,7 @@ function MarketSync.FindArbitrageByProcess(processType, marginPercent)
 
                     -- Only equipment (Weapons = 2, Armor = 4) with Uncommon+ quality
                     if quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl > 0 then
-                        local deEV, deStale, deMissing, deGross, dePartial =
+                        local deEV, deStale, deMissing, deGross, dePartial, deDrops, deLow, deHigh =
                             EstimateDisenchantEV(quality, ilvl, classID, tonumber(itemID))
 
                         if deEV and deEV > 0 then
@@ -1714,6 +1726,10 @@ function MarketSync.FindArbitrageByProcess(processType, marginPercent)
                                     evStale = deStale,
                                     missingOutputs = deMissing,
                                     partialEV = dePartial,
+                                    lowNetPerAction = deLow,
+                                    highNetPerAction = deHigh,
+                                    disenchantDrops = deDrops,
+                                    disenchantItemLevel = ilvl,
                                     maxBuyPerUnit = maxBuyPerUnit,
                                     livePrice = livePrice,
                                     liveAge = liveAge,
@@ -1799,81 +1815,93 @@ end
 function MarketSync.FindProfitableCrafts(professionName, minMarginCopper)
     MarketSync.RefreshKnownCraftingRecipes()
 
-    local recipes = GetRecipesForProfession(professionName)
-    if not recipes then return {} end
-
-    local minMargin = tonumber(minMarginCopper) or 0
-    local out = {}
-
-    for _, recipe in ipairs(recipes) do
-        local outputPrice, outputAge, outputStale = GetPriceInfoByItemID(recipe.outputItemID)
-        outputPrice = outputPrice or 0
-        if outputPrice > 0 then
-            local craftCost = 0
-            local hasMissing = false
-            local hasStaleMat = false
-            local matsDetailed = {}
-            for _, mat in ipairs(recipe.mats or {}) do
-                local matPrice, matAge, matStale = GetPriceInfoByItemID(mat.itemID)
-                if not matPrice or matPrice <= 0 then
-                    hasMissing = true
-                    break
-                end
-                local qty = tonumber(mat.qty) or 1
-                craftCost = craftCost + (matPrice * qty)
-                matsDetailed[#matsDetailed + 1] = {
-                    itemID = mat.itemID,
-                    qty = qty,
-                    price = matPrice,
-                    age = matAge,
-                    stale = matStale,
-                }
-                if matStale then
-                    hasStaleMat = true
-                end
-            end
-            if not hasMissing then
-                local outputQty = math.max(1, tonumber(recipe.outputQty) or 1)
-                local outputQtyMin = math.max(1, tonumber(recipe.outputQtyMin) or outputQty)
-                local outputQtyMax = math.max(outputQtyMin, tonumber(recipe.outputQtyMax) or outputQty)
-                local revenue = math.floor(NetMainAuctionValue(outputPrice * outputQty))
-                local margin = revenue - craftCost
-                local maxCraftCost = math.max(0, revenue - minMargin)
-                local matCapScale = (craftCost > 0) and (maxCraftCost / craftCost) or 1
-                for _, matInfo in ipairs(matsDetailed) do
-                    matInfo.capPrice = math.max(1, math.floor((matInfo.price or 0) * matCapScale))
-                end
-
-                table.insert(out, {
-                    profession = professionName,
-                    recipeName = recipe.name or ("Item " .. tostring(recipe.outputItemID)),
-                    outputItemID = recipe.outputItemID,
-                    outputName = GetItemName(recipe.outputItemID) or ("Item " .. tostring(recipe.outputItemID)),
-                    skillType = recipe.skillType,
-                    numSkillUps = recipe.numSkillUps,
-                    recipeIndex = recipe.recipeIndex,
-                    outputUnitPrice = outputPrice,
-                    outputQty = outputQty,
-                    outputQtyMin = outputQtyMin,
-                    outputQtyMax = outputQtyMax,
-                    ahCutPercent = MAIN_AH_CUT_PERCENT,
-                    craftCost = craftCost,
-                    revenue = revenue,
-                    margin = margin,
-                    meetsMargin = (margin >= minMargin),
-                    outputAge = outputAge,
-                    outputStale = outputStale,
-                    hasStaleMat = hasStaleMat,
-                    maxCraftCost = maxCraftCost,
-                    matCapScale = matCapScale,
-                    matsDetailed = matsDetailed,
-                    mats = recipe.mats,
-                })
+    local recipeEntries = {}
+    local seen = {}
+    local professions = professionName == "ALL" and MarketSync.GetProcessingProfessions() or { professionName }
+    for _, profession in ipairs(professions) do
+        for _, recipe in ipairs(GetRecipesForProfession(profession)) do
+            local key = CraftRecipeKey(recipe)
+            if not seen[key] then
+                seen[key] = true
+                recipeEntries[#recipeEntries + 1] = { recipe = recipe, profession = profession }
             end
         end
     end
 
-    table.sort(out, function(a, b) return (a.margin or 0) > (b.margin or 0) end)
+    local minMargin = tonumber(minMarginCopper) or 0
+    local out = {}
+
+    for _, entry in ipairs(recipeEntries) do
+        local recipe = entry.recipe
+        local outputPrice, outputAge, outputStale = GetPriceInfoByItemID(recipe.outputItemID)
+        outputPrice = outputPrice or 0
+        local craftCost = 0
+        local hasMissing = outputPrice <= 0
+        local hasStaleMat = false
+        local matsDetailed = {}
+        for _, mat in ipairs(recipe.mats or {}) do
+            local matPrice, matAge, matStale = GetPriceInfoByItemID(mat.itemID)
+            local qty = tonumber(mat.qty) or 1
+            if matPrice and matPrice > 0 then
+                craftCost = craftCost + (matPrice * qty)
+            else
+                hasMissing = true
+            end
+            matsDetailed[#matsDetailed + 1] = {
+                itemID = mat.itemID,
+                qty = qty,
+                price = matPrice,
+                age = matAge,
+                stale = matStale,
+            }
+            if matStale then hasStaleMat = true end
+        end
+        local outputQty = math.max(1, tonumber(recipe.outputQty) or 1)
+        local outputQtyMin = math.max(1, tonumber(recipe.outputQtyMin) or outputQty)
+        local outputQtyMax = math.max(outputQtyMin, tonumber(recipe.outputQtyMax) or outputQty)
+        local revenue = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQty)) or nil
+        local margin = not hasMissing and (revenue - craftCost) or nil
+        local maxCraftCost = revenue and math.max(0, revenue - minMargin) or nil
+        local matCapScale = (maxCraftCost and craftCost > 0) and (maxCraftCost / craftCost) or nil
+        if matCapScale then
+            for _, matInfo in ipairs(matsDetailed) do
+                if matInfo.price and matInfo.price > 0 then
+                    matInfo.capPrice = math.max(1, math.floor(matInfo.price * matCapScale))
+                end
+            end
+        end
+        table.insert(out, {
+            profession = entry.profession,
+            recipeName = recipe.name or ("Item " .. tostring(recipe.outputItemID)),
+            outputItemID = recipe.outputItemID,
+            outputName = GetItemName(recipe.outputItemID) or ("Item " .. tostring(recipe.outputItemID)),
+            skillType = recipe.skillType,
+            numSkillUps = recipe.numSkillUps,
+            recipeIndex = recipe.recipeIndex,
+            outputUnitPrice = outputPrice,
+            outputQty = outputQty,
+            outputQtyMin = outputQtyMin,
+            outputQtyMax = outputQtyMax,
+            ahCutPercent = MAIN_AH_CUT_PERCENT,
+            craftCost = craftCost,
+            revenue = revenue,
+            margin = margin,
+            hasMissingPrice = hasMissing,
+            meetsMargin = margin and (margin >= minMargin) or false,
+            outputAge = outputAge,
+            outputStale = outputStale,
+            hasStaleMat = hasStaleMat,
+            maxCraftCost = maxCraftCost,
+            matCapScale = matCapScale,
+            matsDetailed = matsDetailed,
+            mats = recipe.mats,
+        })
+    end
+
+    table.sort(out, function(a, b)
+        if a.hasMissingPrice ~= b.hasMissingPrice then return not a.hasMissingPrice end
+        return (a.margin or 0) > (b.margin or 0)
+    end)
     return out
 end
 
@@ -2199,25 +2227,26 @@ local function ResolveReagentNode(itemID, reqQty, visited, depth, userOverrides)
             newVisited[itemID] = true
 
             local subOutputQty = math.max(1, tonumber(subRecipe.outputQty) or 1)
+            local craftActions = math.ceil(reqQty / subOutputQty)
             local subTreeList = {}
-            local subUnitCraftCost = 0
+            local subCraftTotalCost = 0
             local subHasMissing = false
             local subHasStale = false
 
             for _, mat in ipairs(subRecipe.mats) do
                 local mID = tonumber(mat.itemID)
                 local mQtyPerAction = tonumber(mat.qty) or 1
-                local totalMatQty = math.max(1, math.ceil(mQtyPerAction * (reqQty / subOutputQty)))
+                local totalMatQty = math.max(1, math.ceil(mQtyPerAction * craftActions))
                 local subNode = ResolveReagentNode(mID, totalMatQty, newVisited, depth + 1, userOverrides)
                 table.insert(subTreeList, subNode)
                 if subNode.hasMissing then subHasMissing = true end
                 if subNode.hasStale then subHasStale = true end
-                subUnitCraftCost = subUnitCraftCost + (subNode.effectiveUnitPrice * mQtyPerAction)
+                subCraftTotalCost = subCraftTotalCost + (subNode.effectiveTotalPrice or 0)
             end
 
-            local unitCostToCraft = math.floor(subUnitCraftCost / subOutputQty)
+            local unitCostToCraft = math.floor(subCraftTotalCost / reqQty)
             node.craftUnitPrice = unitCostToCraft
-            node.craftTotalPrice = unitCostToCraft * reqQty
+            node.craftTotalPrice = subCraftTotalCost
             node.subMats = subTreeList
             node.subRecipe = subRecipe
 
@@ -2231,9 +2260,9 @@ local function ResolveReagentNode(itemID, reqQty, visited, depth, userOverrides)
     if override ~= nil and node.canCraft and not node.craftMissing then
         node.chooseCraft = (override == true)
     elseif node.canCraft and not node.craftMissing then
-        if node.directUnitPrice > 0 and node.craftUnitPrice and node.craftUnitPrice > 0 then
-            node.chooseCraft = (node.craftUnitPrice < node.directUnitPrice)
-        elseif node.directUnitPrice == 0 and node.craftUnitPrice and node.craftUnitPrice > 0 then
+        if node.directTotalPrice > 0 and node.craftTotalPrice and node.craftTotalPrice > 0 then
+            node.chooseCraft = (node.craftTotalPrice < node.directTotalPrice)
+        elseif node.directTotalPrice == 0 and node.craftTotalPrice and node.craftTotalPrice > 0 then
             node.chooseCraft = true
         else
             node.chooseCraft = false
@@ -2243,11 +2272,11 @@ local function ResolveReagentNode(itemID, reqQty, visited, depth, userOverrides)
     end
 
     -- 4. Effective Price
-    if node.chooseCraft and node.craftUnitPrice and node.craftUnitPrice > 0 then
+    if node.chooseCraft and node.craftTotalPrice and node.craftTotalPrice > 0 then
         node.effectiveUnitPrice = node.craftUnitPrice
         node.effectiveTotalPrice = node.craftTotalPrice
-        node.unitSavings = math.max(0, node.directUnitPrice - node.craftUnitPrice)
-        node.totalSavings = node.unitSavings * reqQty
+        node.unitSavings = math.max(0, (node.directTotalPrice - node.craftTotalPrice) / reqQty)
+        node.totalSavings = math.max(0, node.directTotalPrice - node.craftTotalPrice)
         node.isCrafted = true
         node.hasMissing = false
     else
@@ -2701,11 +2730,42 @@ local function OnTooltipSetItem(tooltip, data)
                     tooltip:AddLine(" ")
                     tooltip:AddLine("|cffffd700MarketSync Disenchanting|r")
                     addedHeader = true
+                    local sortedDrops = {}
                     for _, drop in ipairs(drops) do
-                        local yName = GetItemName(drop.itemID) or ("Item " .. tostring(drop.itemID))
-                        tooltip:AddLine(string.format("- %sx %s (%.1f%% chance)",
-                            FormatExpectedQuantity(drop.expected), yName, drop.chance * 100), 0.85, 0.85, 0.85)
+                        sortedDrops[#sortedDrops + 1] = drop
                     end
+                    table.sort(sortedDrops, function(a, b)
+                        local chanceA = tonumber(a.chance) or 0
+                        local chanceB = tonumber(b.chance) or 0
+                        if chanceA == chanceB then
+                            return (tonumber(a.itemID) or 0) < (tonumber(b.itemID) or 0)
+                        end
+                        return chanceA > chanceB
+                    end)
+
+                    tooltip:AddLine("|cffaaaaaaChance · possible quantity|r", 0.67, 0.67, 0.67)
+                    for _, drop in ipairs(sortedDrops) do
+                        local yName = GetItemName(drop.itemID) or ("Item " .. tostring(drop.itemID))
+                        local _, _, outputQuality = SafeGetItemInfo(drop.itemID)
+                        if MarketSync.FormatColoredItemName then
+                            yName = MarketSync.FormatColoredItemName(yName, outputQuality)
+                        end
+                        local minQty, maxQty
+                        for _, outcome in ipairs(drop.outcomes or {}) do
+                            local qty = tonumber(outcome.quantity)
+                            if qty then
+                                minQty = minQty and math.min(minQty, qty) or qty
+                                maxQty = maxQty and math.max(maxQty, qty) or qty
+                            end
+                        end
+                        local quantity = tostring(minQty or "?")
+                        if maxQty and maxQty ~= minQty then quantity = quantity .. "-" .. tostring(maxQty) end
+                        tooltip:AddLine(string.format("%.1f%%  ·  %sx %s",
+                            (tonumber(drop.chance) or 0) * 100, quantity, yName), 0.85, 0.85, 0.85)
+                    end
+                elseif MarketSync.Provider and MarketSync.Provider.GetActiveName
+                    and MarketSync.Provider.GetActiveName() == "forever" then
+                    tooltip:AddLine("|cffffaa00MarketSync: disenchant odds not verified for this item level.|r")
                 end
             end
 
@@ -2752,7 +2812,23 @@ end
 -- Returns a flat list of data points for the graph and scan table.
 -- When granular PersonalData is available, each 30-min bucket becomes
 -- its own data point. Otherwise, falls back to daily Auctionator aggregates.
+local function ResolveHistoryDBKey(input)
+    local itemID, suffix
+    if MarketSync.ParseItemIDFromDBKey then
+        itemID, suffix = MarketSync.ParseItemIDFromDBKey(input)
+    end
+    if itemID and suffix and suffix ~= 0 then
+        return string.format("p:%d:%d", itemID, suffix)
+    end
+    if itemID and (type(input) == "number"
+        or (type(input) == "string" and (input:match("^%d+$") or input:match("item:%d+")))) then
+        return tostring(itemID)
+    end
+    return input
+end
+
 function MarketSync.GetItemHistory(dbKey)
+    dbKey = ResolveHistoryDBKey(dbKey)
     local pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
     local priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
     if (not priceData or not priceData.h) and (not pData or not pData.h) then return {} end
@@ -2876,6 +2952,7 @@ end
 -- Compact daily/weekly records are skipped to preserve intraday accuracy.
 -- Each entry: { day, bucketOffset, price, quantity, timestamp }
 function MarketSync.GetGranularHistory(dbKey)
+    dbKey = ResolveHistoryDBKey(dbKey)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
     local pData = realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey]
     if not pData or not pData.h then return {} end

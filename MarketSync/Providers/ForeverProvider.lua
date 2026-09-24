@@ -31,6 +31,16 @@ function ForeverProvider.ToItemKey(keyOrLink)
     end
 
     if type(keyOrLink) == "string" then
+        local dbItemID, dbSuffix = keyOrLink:match("^p:(%d+):(%-?%d+)$")
+        if dbItemID then
+            return {
+                itemID = tonumber(dbItemID),
+                itemLevel = 0,
+                itemSuffix = tonumber(dbSuffix) or 0,
+                battlePetSpeciesID = 0,
+            }
+        end
+
         -- Native Key string "itemID:itemLevel:itemSuffix:battlePetSpeciesID"
         local kId, kLvl, kSuf, kPet = keyOrLink:match("^(%d+):(%d+):(%d+):(%d+)$")
         if kId then
@@ -45,11 +55,16 @@ function ForeverProvider.ToItemKey(keyOrLink)
         -- Parse item link: item:itemID:enchantID:gemID1:gemID2:gemID3:gemID4:suffixID:...
         local itemID = keyOrLink:match("item:(%d+)")
         if itemID then
-            local suffixID = keyOrLink:match("item:%d+:[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:(%-?%d+)")
+            local itemString = keyOrLink:match("|H(item:[^|]+)|h") or keyOrLink:match("(item:%d+[^%s|]*)")
+            local itemFields = {}
+            for field in (itemString or ""):gmatch("([^:]+)") do
+                itemFields[#itemFields + 1] = field
+            end
+            local suffixID = tonumber(itemFields[8]) or 0
             return {
                 itemID = tonumber(itemID),
                 itemLevel = 0,
-                itemSuffix = tonumber(suffixID) or 0,
+                itemSuffix = suffixID,
                 battlePetSpeciesID = 0,
             }
         end

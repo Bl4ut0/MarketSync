@@ -563,7 +563,7 @@ function MarketSync.CreateProcessingPanel(parent)
     processDesc:SetText("|cff777777Evaluates all auction house ores, herbs, and gear for mass processing profit.|r")
 
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
-    panel.selectedProfession = professionOptions[1] or nil
+    panel.selectedProfession = "ALL"
 
     local professionLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     professionLabel:SetPoint("TOPLEFT", 8, -26)
@@ -572,7 +572,9 @@ function MarketSync.CreateProcessingPanel(parent)
     local professionDropdown
     professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, LEFT_W - 16, function(self, level)
         professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or professionOptions
-        for _, p in ipairs(professionOptions) do
+        local options = { "ALL" }
+        for _, name in ipairs(professionOptions) do options[#options + 1] = name end
+        for _, p in ipairs(options) do
             local opt = UIDropDownMenu_CreateInfo()
             opt.text = p
             opt.func = function()
@@ -586,7 +588,7 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end)
     professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
-    UIDropDownMenu_SetText(professionDropdown, panel.selectedProfession or "No professions")
+    UIDropDownMenu_SetText(professionDropdown, "ALL")
 
     local craftDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
     craftDesc:SetPoint("TOPLEFT", 8, -94)
@@ -1515,6 +1517,37 @@ function MarketSync.CreateProcessingPanel(parent)
                 ColorLabel("Live AH/Input:"), (livePrice > 0) and MoneyText(livePrice) or "Unavailable")
             detailLines[#detailLines + 1] = string.format("%s %s",
                 ColorLabel("Edge/Input:"), FormatDelta(delta))
+            if r.processType == "DISENCHANT" then
+                if r.lowNetPerAction and r.highNetPerAction then
+                    detailLines[#detailLines + 1] = string.format("%s %s / %s / %s",
+                        ColorLabel("Net materials (low / expected / high):"),
+                        MoneyText(r.lowNetPerAction), MoneyText(evPerUnit), MoneyText(r.highNetPerAction))
+                    detailLines[#detailLines + 1] = string.format("%s %s / %s / %s",
+                        ColorLabel("Profit after purchase (low / expected / high):"),
+                        FormatDelta(r.lowNetPerAction - livePrice),
+                        FormatDelta(evPerUnit - livePrice),
+                        FormatDelta(r.highNetPerAction - livePrice))
+                else
+                    detailLines[#detailLines + 1] = ColorWarn("Profit range unavailable until all possible materials have prices.")
+                end
+                detailLines[#detailLines + 1] = ColorMuted("Possible disenchant outputs:")
+                local drops = {}
+                for _, drop in ipairs(r.disenchantDrops or {}) do drops[#drops + 1] = drop end
+                table.sort(drops, function(a, b) return (a.chance or 0) > (b.chance or 0) end)
+                for _, drop in ipairs(drops) do
+                    local name = ResolveItemVisual(drop.itemID)
+                    local minQty, maxQty
+                    for _, outcome in ipairs(drop.outcomes or {}) do
+                        local qty = tonumber(outcome.quantity) or 0
+                        if not minQty or qty < minQty then minQty = qty end
+                        if not maxQty or qty > maxQty then maxQty = qty end
+                    end
+                    detailLines[#detailLines + 1] = string.format("  %.1f%%  %s x%s%s",
+                        (drop.chance or 0) * 100, tostring(name), tostring(minQty or "?"),
+                        (maxQty and maxQty ~= minQty) and ("-" .. tostring(maxQty)) or "")
+                end
+                detailLines[#detailLines + 1] = ColorMuted("Odds are table estimates for this item's cached level; verify unusual Forever items in-game.")
+            end
             if r.targetName then
                 detailLines[#detailLines + 1] = string.format("%s %s  %s %s",
                     ColorLabel("Target AH/Each (gross):"), ColorInfo(r.targetName), ColorMuted("@"), ColorGood(MoneyText(r.targetPrice or 0)))
@@ -1578,10 +1611,14 @@ function MarketSync.CreateProcessingPanel(parent)
             local margin = tonumber(c.margin) or 0
             local maxSpend = tonumber(c.maxCraftCost) or 0
             local capDelta = maxSpend - craftCost
+            local missingPrice = c.hasMissingPrice == true
 
             local status
             local statusRank = 0
-            if c.outputStale or c.hasStaleMat then
+            if missingPrice then
+                status = "|cffffaa00NO PRICE|r"
+                statusRank = 1
+            elseif c.outputStale or c.hasStaleMat then
                 status = "|cffffaa00STALE|r"
                 statusRank = 2
             elseif c.meetsMargin then
@@ -1598,6 +1635,7 @@ function MarketSync.CreateProcessingPanel(parent)
             local outputQtyMax = tonumber(c.outputQtyMax) or outputQty
             local ahCutPercent = tonumber(c.ahCutPercent) or 5
             detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Recipe:"), ColorInfo(outputName))
+            detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profession:"), ColorInfo(c.profession or "Unknown"))
             if outputQtyMin ~= outputQtyMax then
                 detailLines[#detailLines + 1] = string.format("%s |cffffffff%g-%g|r %s",
                     ColorLabel("Output/Craft:"), outputQtyMin, outputQtyMax,
@@ -1606,10 +1644,14 @@ function MarketSync.CreateProcessingPanel(parent)
                 detailLines[#detailLines + 1] = string.format("%s |cffffffff%g|r", ColorLabel("Output/Craft:"), outputQty)
             end
             detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
-                ColorLabel("Output AH/Each (gross):"), MoneyText(c.outputUnitPrice or 0))
-            detailLines[#detailLines + 1] = string.format("%s %s %s", ColorLabel("Net Revenue/Craft:"),
-                ColorGood(MoneyText(revenue)), ColorMuted("(after " .. tostring(ahCutPercent) .. "% main-AH cut)"))
-            detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r", ColorLabel("Material Cost/Craft:"), MoneyText(craftCost))
+                ColorLabel("Output AH/Each (gross):"), (c.outputUnitPrice and c.outputUnitPrice > 0) and MoneyText(c.outputUnitPrice) or "Unavailable")
+            if missingPrice then
+                detailLines[#detailLines + 1] = ColorWarn("Profit unavailable: scan missing output or material prices.")
+            else
+                detailLines[#detailLines + 1] = string.format("%s %s %s", ColorLabel("Net Revenue/Craft:"),
+                    ColorGood(MoneyText(revenue)), ColorMuted("(after " .. tostring(ahCutPercent) .. "% main-AH cut)"))
+                detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r", ColorLabel("Material Cost/Craft:"), MoneyText(craftCost))
+            end
 
             local marginText = MoneyText(math.abs(margin))
             if margin >= 0 then
@@ -1617,9 +1659,11 @@ function MarketSync.CreateProcessingPanel(parent)
             else
                 marginText = "-" .. marginText
             end
-            detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profit/Craft:"), (margin >= 0) and ColorGood(marginText) or ColorBad(marginText))
+            if not missingPrice then
+                detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profit/Craft:"), (margin >= 0) and ColorGood(marginText) or ColorBad(marginText))
+            end
 
-            if maxSpend > 0 then
+            if maxSpend > 0 and not missingPrice then
                 detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r", ColorLabel("Material Cost Cap/Craft:"), MoneyText(maxSpend))
             end
 
@@ -1631,7 +1675,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 end
                 local matName = ResolveItemVisual(mat.itemID)
                 local qty = tonumber(mat.qty) or 1
-                local matPriceText = MoneyText(mat.price or 0)
+                local matPriceText = (mat.price and mat.price > 0) and MoneyText(mat.price) or "No price"
                 local priceColor = mat.stale and ColorWarn(matPriceText) or "|cffffffff" .. matPriceText .. "|r"
                 detailLines[#detailLines + 1] = string.format("%s x%d %s %s%s",
                     ColorMuted(matName), qty, ColorMuted("@"), priceColor, ColorMuted("/ea"))
@@ -1643,15 +1687,15 @@ function MarketSync.CreateProcessingPanel(parent)
                 link = itemLink,
                 icon = icon,
                 nameText = Truncate(itemName, 24),
-                typeText = Truncate(tostring(c.skillType or "Craft"), 10),
-                valueText = SignedMoneyText(margin, true),
-                maxText = MoneyText(maxSpend),
-                liveText = MoneyText(craftCost),
-                deltaText = FormatDelta(capDelta),
+                typeText = Truncate(tostring(c.profession or c.skillType or "Craft"), 12),
+                valueText = missingPrice and "-" or SignedMoneyText(margin, true),
+                maxText = missingPrice and "-" or MoneyText(maxSpend),
+                liveText = missingPrice and "-" or MoneyText(craftCost),
+                deltaText = missingPrice and "-" or FormatDelta(capDelta),
                 statusText = status,
                 itemSort = string.lower(itemName or ""),
-                typeSort = string.lower(tostring(c.skillType or "")),
-                valueSort = tonumber(margin) or 0,
+                typeSort = string.lower(tostring(c.profession or c.skillType or "")),
+                valueSort = missingPrice and -math.huge or margin,
                 maxSort = tonumber(maxSpend) or 0,
                 liveSort = tonumber(craftCost) or 0,
                 deltaSort = tonumber(capDelta) or 0,

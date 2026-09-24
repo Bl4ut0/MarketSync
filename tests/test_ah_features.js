@@ -247,6 +247,9 @@ test('Scanner parses table itemKey in ITEM_SEARCH_RESULTS_UPDATED and commodity 
       GetRealmDB = function() return { PersonalData = {} } end,
       Debug = function() end,
       ToBase36 = function(n) return tostring(n) end,
+      UpsertScanBucket = function(_, offset, price, quantity)
+        return tostring(offset) .. ":" .. tostring(price) .. ":" .. tostring(quantity)
+      end,
     }
     MarketSyncDB = {}
     registeredEvents = {}
@@ -921,7 +924,22 @@ test('Tiered retention downsampler, compact records, and analytics clarity', () 
           ["20700"] = "2:2s:1",         -- 14 days ago: strip from vh!
           ["20670"] = "D:2s:30:2v:4",   -- 44 days ago: strip from vh!
         }
-      }
+      },
+      ["p:4471:12"] = {
+        m = 120, d = currentDay,
+        h = { ["20714"] = "5:2s:1,5:3c:2", ["20700"] = "5:2s:1", ["20670"] = "D:2s:3c:30:4" },
+        vh = { ["20714"] = "5:2s:1,5:3c:2" },
+      },
+      ["p:4471:13"] = {
+        m = 200, d = currentDay,
+        h = { ["20714"] = "5:5k:1" },
+        vh = { ["20714"] = "5:5k:1" },
+      },
+      ["p:4471:14"] = {
+        m = 75, d = 20500,
+        h = { ["20500"] = "5:23:1" },
+        vh = { ["20500"] = "5:23:1" },
+      },
     }
 
     MarketSync.DownsampleRetention()
@@ -943,6 +961,26 @@ test('Tiered retention downsampler, compact records, and analytics clarity', () 
     assert(entry.vh["20714"] == "5:b4:a", "Hot tier vh preserved for sync")
     assert(entry.vh["20700"] == nil, "Older vh entry should be pruned")
     assert(entry.vh["20670"] == nil, "Cold vh entry should be pruned")
+
+    -- The three retention tiers and expiry operate on exact suffix keys.
+    local boar = realmDB.PersonalData["p:4471:12"]
+    local eagle = realmDB.PersonalData["p:4471:13"]
+    assert(boar and eagle and boar ~= eagle, "Suffix variants must remain separate entries")
+    assert(boar.h["20714"] == "5:3c:2", "Duplicate hot bucket must keep the latest variant price")
+    assert(boar.vh["20714"] == "5:3c:2", "Verified sync history must keep one point per bucket")
+    assert(boar.h["20700"]:sub(1, 2) == "D:", "Variant warm history must compact independently")
+    assert(boar.h[weekKey] and boar.h[weekKey]:sub(1, 2) == "W:",
+      "Variant cold history must remain under its own weekly key")
+    assert(eagle.h["20714"] == "5:5k:1", "One variant must not change another variant's price")
+    assert(realmDB.PersonalData["p:4471:14"] == nil, "Expired variant must be purged")
+    assert(realmDB.PersonalData["4471"] == entry, "Purging a variant must preserve its base item")
+    local boarPoints = MarketSync.GetGranularHistory("p:4471:12")
+    local eaglePoints = MarketSync.GetGranularHistory("p:4471:13")
+    assert(#boarPoints == 1 and boarPoints[1].price == 120, "Analytics must read the boar variant only")
+    assert(#eaglePoints == 1 and eaglePoints[1].price == 200, "Analytics must read the eagle variant only")
+    local linkedBoarPoints = MarketSync.GetGranularHistory("item:4471:0:0:0:0:0:12:0")
+    assert(#linkedBoarPoints == 1 and linkedBoarPoints[1].price == 120,
+      "Analytics must resolve a variant hyperlink to its exact history")
 
     -- D. Test GetItemHistory and GetGranularHistory reading of compact records
     local fullHistory = MarketSync.GetItemHistory("4471")
@@ -988,7 +1026,10 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     GetNormalizedRealmName = function() return "TestRealm" end
     GetRealmName = function() return "TestRealm" end
     C_Item = {
-      GetItemInfo = function(id) return "Test Item", "item:" .. tostring(id), 1, 1, 1, "Misc", "Misc", 1, "", 134400 end,
+      GetItemInfo = function(id)
+        _G.ItemInfoCalls = (_G.ItemInfoCalls or 0) + 1
+        return "Test Item", "item:" .. tostring(id), 2, 16, 1, "Armor", "Cloth", 1, "", 134400, 0, 4, 1
+      end,
       GetItemLink = function(id) return "item:" .. tostring(id) end
     }
   `;
@@ -1018,6 +1059,14 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     local dbKey4, id4 = MarketSync.NormalizeItemKey("|cffffffff|Hitem:7890:0:0:0|h[Item]|h|r")
     assert(dbKey4 == "7890" and id4 == 7890, "NormalizeItemKey failed for item link")
 
+    local dbKey5 = MarketSync.NormalizeItemKey("item:4471:0:0:0:0:0:12:0")
+    assert(dbKey5 == "p:4471:12", "Item link suffix must identify its own price record")
+    local dbKey6 = MarketSync.NormalizeItemKey("p:4471:-13")
+    assert(dbKey6 == "p:4471:-13", "Signed suffix key must retain its identity")
+    local nativeKey = MarketSync.Scanner.ToItemKey("p:4471:-13")
+    assert(nativeKey and nativeKey.itemID == 4471 and nativeKey.itemSuffix == -13,
+      "Scanner searches must retain a signed suffix key")
+
     -- 2. Test RecordScanObservation and immediate callback
     MarketSync.InitializeDB()
     local callbackFired = false
@@ -1034,7 +1083,9 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     local realmDB = MarketSync.GetRealmDB()
     assert(realmDB.PersonalData["4471"] ~= nil, "PersonalData must contain scanned item")
     assert(realmDB.PersonalData["4471"].m == 25000, "PersonalData market price must match unitPrice")
-
+    local metadata = MarketSyncDB.ItemInfoCache[4471]
+    assert(metadata and metadata.r == 2 and metadata.i == 16 and metadata.c == 4,
+      "Scan must cache green equipment metadata for processing")
     -- Assert HistoryLog (data logs) contains the scan
     assert(realmDB.HistoryLog ~= nil and #realmDB.HistoryLog > 0, "HistoryLog must contain the observation")
     assert(realmDB.HistoryLog[1].price == 25000, "HistoryLog price must match unitPrice")
@@ -1043,6 +1094,35 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     -- Assert GetAuctionPrice returns the freshly scanned price immediately
     local price = MarketSync.GetAuctionPrice(4471)
     assert(price == 25000, "MarketSync.GetAuctionPrice must return 25000, got: " .. tostring(price))
+
+    local callsAfterFirstScan = _G.ItemInfoCalls
+    callbackFired = false
+    MarketSync.RecordScanObservation(4471, 24000, 5, true, true, true)
+    assert(_G.ItemInfoCalls == callsAfterFirstScan, "Cached metadata must avoid another item-info lookup")
+    assert(callbackFired == false, "Deferred full-scan records must not refresh UI per item")
+
+    -- Repeated scans replace the same 30-minute slot for each variant.
+    MarketSync.RecordScanObservation({ itemID = 4471, itemSuffix = 12 }, 12000, 2, false, true, true)
+    MarketSync.RecordScanObservation({ itemID = 4471, itemSuffix = 12 }, 11000, 3, false, true, true)
+    MarketSync.RecordScanObservation({ itemID = 4471, itemSuffix = 13 }, 22000, 1, false, true, true)
+    local day = tostring(MarketSync.GetCurrentScanDay())
+    local offset = MarketSync.GetCurrentBucket() % 48
+    assert(realmDB.PersonalData["p:4471:12"].h[day] == offset .. ":" .. MarketSync.ToBase36(11000) .. ":3",
+      "Repeated scans must retain one latest boar point in the current bucket, got "
+        .. tostring(realmDB.PersonalData["p:4471:12"].h[day]))
+    assert(realmDB.PersonalData["p:4471:13"].m == 22000,
+      "Other suffix must retain its own price")
+    assert(MarketSync.GetAuctionPrice("p:4471:12") == 11000,
+      "Variant price lookup must use the exact suffix")
+    assert(MarketSync.GetAuctionPrice("item:4471:0:0:0:0:0:12:0") == 11000,
+      "Variant hyperlink price lookup must use the exact suffix")
+    assert(MarketSync.GetItemPriceAndScanInfo("p:4471:13").price == 22000,
+      "Analytics price info must use the exact suffix")
+    assert(MarketSync.GetItemPriceAndScanInfo("p:4471:14") == nil,
+      "Missing suffix price must not fall back to the base item")
+    local repaired = MarketSync.UpsertScanBucket("0:2s:1,0:3c:2", 0, 150, 3)
+    assert(repaired == "0:" .. MarketSync.ToBase36(150) .. ":3",
+      "Existing duplicate buckets must collapse to the latest point")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Individual scan observation test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

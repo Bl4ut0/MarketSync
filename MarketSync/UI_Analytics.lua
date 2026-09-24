@@ -64,22 +64,34 @@ end
 local function ResolveItem(input)
     if not input then return nil end
     local itemID = tonumber(input)
+    local suffixID
     if not itemID and type(input) == "string" then
+        if MarketSync.ParseItemIDFromDBKey then
+            itemID, suffixID = MarketSync.ParseItemIDFromDBKey(input)
+        end
+        if not suffixID and MarketSync.Scanner and MarketSync.Scanner.ToItemKey then
+            local nativeKey = MarketSync.Scanner.ToItemKey(input)
+            if nativeKey then
+                itemID = nativeKey.itemID or itemID
+                suffixID = tonumber(nativeKey.itemSuffix) or suffixID
+            end
+        end
         local linkID = input:match("item:(%d+)")
-        if linkID then
+        if not itemID and linkID then
             itemID = tonumber(linkID)
         end
     end
 
     local name, link, quality, icon
     if itemID then
-        name, link, quality, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
+        local lookup = suffixID and string.format("item:%d:0:0:0:0:0:%d:0", itemID, suffixID) or itemID
+        name, link, quality, _, _, _, _, _, _, icon = SafeGetItemInfo(lookup)
         if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
             local c = MarketSyncDB.ItemInfoCache[itemID]
             name = c.n
             icon = c.ic
             quality = c.r
-            link = "item:" .. itemID
+            link = suffixID and string.format("item:%d:0:0:0:0:0:%d:0", itemID, suffixID) or ("item:" .. itemID)
         end
     else
         name = input
@@ -110,10 +122,12 @@ local function ResolveItem(input)
     end
 
     if not itemID and not name then return nil end
-    local dbKey = itemID and tostring(itemID) or input
+    local dbKey = itemID and ((suffixID and suffixID ~= 0) and string.format("p:%d:%d", itemID, suffixID)
+        or (type(input) == "string" and input:match("^p:%d+:%-?%d+$") and input)
+        or tostring(itemID)) or input
     local price = 0
     if itemID and MarketSync.GetAuctionPrice then
-        price = MarketSync.GetAuctionPrice(itemID) or 0
+        price = MarketSync.GetAuctionPrice(dbKey) or 0
     end
 
     return {
@@ -489,9 +503,12 @@ function MarketSync.CreateAnalyticsPanel(parent)
             -- From live Scanner results
             local recent = (MarketSync.Scanner and MarketSync.Scanner.RecentResults) or {}
             for _, r in ipairs(recent) do
-                if r.itemID and not seen[r.itemID] then
-                    seen[r.itemID] = true
+                local dbKey = r.dbKey or (r.itemKey and MarketSync.NormalizeItemKey and select(1, MarketSync.NormalizeItemKey(r.itemKey)))
+                    or tostring(r.itemID or "")
+                if r.itemID and not seen[dbKey] then
+                    seen[dbKey] = true
                     table.insert(itemsList, {
+                        dbKey = dbKey,
                         itemID = r.itemID,
                         name = r.name,
                         icon = r.icon,
@@ -505,17 +522,29 @@ function MarketSync.CreateAnalyticsPanel(parent)
             if #itemsList < 20 and MarketSyncDB and MarketSync.GetRealmDB then
                 local pData = MarketSync.GetRealmDB().PersonalData or {}
                 for k, v in pairs(pData) do
-                    local id = tonumber(k)
-                    if id and not seen[id] then
-                        seen[id] = true
-                        local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
+                    local id, suffix
+                    if MarketSync.ParseItemIDFromDBKey then
+                        id, suffix = MarketSync.ParseItemIDFromDBKey(k)
+                    else
+                        id = tonumber(k)
+                    end
+                    if id and not seen[k] then
+                        seen[k] = true
+                        local lookup = suffix and string.format("item:%d:0:0:0:0:0:%d:0", id, suffix) or id
+                        local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(lookup)
                         if not name and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
                             name = MarketSyncDB.ItemInfoCache[id].n
                             icon = MarketSyncDB.ItemInfoCache[id].ic
                             qual = MarketSyncDB.ItemInfoCache[id].r
                         end
-                        local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(id) or 0
+                        local cachedName = MarketSyncDB and MarketSyncDB.ItemInfoCache
+                            and MarketSyncDB.ItemInfoCache[id] and MarketSyncDB.ItemInfoCache[id].n
+                        if suffix and suffix ~= 0 and name and name == cachedName then
+                            name = name .. " (Variant " .. tostring(suffix) .. ")"
+                        end
+                        local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(k) or 0
                         table.insert(itemsList, {
+                            dbKey = tostring(k),
                             itemID = id,
                             name = name or ("Item #" .. id),
                             icon = icon or 134400,
@@ -598,7 +627,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 row:SetPoint("TOPLEFT", 0, -(i - 1) * rowH)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
-                local isSelected = (selectedDBKey and selectedDBKey == tostring(item.itemID))
+                local itemDBKey = tostring(item.dbKey or item.itemID)
+                local isSelected = (selectedDBKey and selectedDBKey == itemDBKey)
                 if isSelected then
                     row:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
                     row:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
@@ -615,7 +645,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 row.price:SetText(FormatMoneyPlain(item.price))
 
                 row:SetScript("OnClick", function()
-                    selectedDBKey = tostring(item.itemID)
+                    selectedDBKey = itemDBKey
                     panel:ShowItem(selectedDBKey, nil, item.name, item.icon, item.price)
                     RefreshItemsList()
                 end)
@@ -720,7 +750,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
     searchAHBtn:SetText("Search in AH")
     searchAHBtn:SetScript("OnClick", function()
         if panel.currentItem and MarketSync.SearchInAuctionHouse then
-            local success = MarketSync.SearchInAuctionHouse(panel.currentItem.itemID or panel.currentItem.name)
+            local success = MarketSync.SearchInAuctionHouse(
+                panel.currentItem.link or panel.currentItem.itemID or panel.currentItem.name)
             if not success and not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then
                 print("|cFFFFD100[MarketSync]|r Please visit an Auctioneer to search in the Auction House.")
             end
@@ -1130,7 +1161,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
             panel:ShowItem(panel.currentItem.dbKey, panel.currentItem.link, panel.currentItem.name, panel.currentItem.icon, panel.currentItem.price)
         elseif #itemsList > 0 then
             local first = itemsList[1]
-            panel:ShowItem(tostring(first.itemID), nil, first.name, first.icon, first.price)
+            panel:ShowItem(tostring(first.dbKey or first.itemID), nil, first.name, first.icon, first.price)
         else
             ShowEmptyState()
         end

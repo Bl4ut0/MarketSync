@@ -2123,7 +2123,13 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
     if sender and IsBlocked(sender) then return end
 
     local realmDB = MarketSync.GetRealmDB() -- Cache once per call (hot path during sync)
-    local itemLink = "item:" .. tostring(key) -- Fallback for logs
+    local itemID, itemSuffix
+    if MarketSync.ParseItemIDFromDBKey then
+        itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(tostring(key))
+    end
+    local itemLink = (itemID and itemSuffix and itemSuffix ~= 0)
+        and string.format("item:%d:0:0:0:0:0:%d:0", itemID, itemSuffix)
+        or (itemID and ("item:" .. tostring(itemID)) or ("item:" .. tostring(key)))
 
     -- DIRECT INSERTION to ensure persistence (when Auctionator is loaded)
     local priceData = nil

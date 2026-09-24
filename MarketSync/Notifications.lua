@@ -5,6 +5,19 @@
 
 local ADDON_CALLER_ID = "MarketSync"
 local PERIODIC_FRESHNESS_SECONDS = 300
+MarketSync.NotificationsMuted = false -- Session only; never persisted.
+
+function MarketSync.ToggleNotificationMute()
+    MarketSync.NotificationsMuted = not MarketSync.NotificationsMuted
+    if MarketSync.NotificationsMuted then
+        if MarketSync.StopMinimapFlash then MarketSync.StopMinimapFlash() end
+        print("|cff00ff00[MarketSync]|r Alerts muted until logout or Shift-Left-Click on the minimap button again.")
+    else
+        MarketSync.RefreshNotificationUnreadState()
+        print("|cff00ff00[MarketSync]|r Alerts enabled.")
+    end
+    return MarketSync.NotificationsMuted
+end
 
 local function NormalizeScope(scope)
     if scope == "main" or scope == "neutral" or scope == "all" then
@@ -54,6 +67,7 @@ end
 function MarketSync.PlayNotificationSound(soundID, preview)
     local id = tonumber(soundID)
     if not id or id <= 0 then return false end
+    if MarketSync.NotificationsMuted and not preview then return false end
     if not preview and (not MarketSyncDB or not MarketSyncDB.EnableNotificationSounds) then
         return false
     end
@@ -92,7 +106,8 @@ function MarketSync.RefreshNotificationUnreadState()
     MarketSync.NotificationUnreadCount = unread
     if unread <= 0 and MarketSync.StopMinimapFlash then
         MarketSync.StopMinimapFlash()
-    elseif unread > 0 and (not MarketSyncDB or MarketSyncDB.EnableMinimapAlerts ~= false)
+    elseif unread > 0 and not MarketSync.NotificationsMuted
+        and (not MarketSyncDB or MarketSyncDB.EnableMinimapAlerts ~= false)
         and MarketSync.StartMinimapFlash then
         MarketSync.StartMinimapFlash()
     end
@@ -100,6 +115,7 @@ function MarketSync.RefreshNotificationUnreadState()
 end
 
 local function AlertNotification(req, state, itemName, price, eventScope, sourceName, isUrgent)
+    if MarketSync.NotificationsMuted then return end
     local threshold = req.thresholdCopper or 0
     local scope = NormalizeScope(eventScope or req.scope)
     local scopeText = (scope == "neutral") and "Neutral" or ((scope == "main") and "Main" or "Any")
@@ -359,6 +375,7 @@ local function EvaluateMatchedRequest(realmDB, id, req, price, eventScope, sourc
 end
 
 function MarketSync.EvaluateNotificationsForRecord(dbKey, price, eventScope, sourceName, explicitName, explicitItemID)
+    if MarketSync.NotificationsMuted then return 0 end
     local mode = MarketSyncDB and MarketSyncDB.NotificationMode or "on_scan"
     if mode ~= "on_scan" and mode ~= "both" then return 0 end
     local realmDB = MarketSync.GetRealmDB()
@@ -466,6 +483,7 @@ end
 
 -- Low-cost scan/periodic evaluator: iterates tracked requests, never the full AH database.
 function MarketSync.EvaluateTrackedNotifications(eventScope, sourceName)
+    if MarketSync.NotificationsMuted then return 0 end
     local scope = NormalizeScope(eventScope)
     local mode = MarketSyncDB and MarketSyncDB.NotificationMode or "on_scan"
     local isPeriodic = sourceName == "Periodic"

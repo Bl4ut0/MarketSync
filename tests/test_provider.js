@@ -203,12 +203,15 @@ test('ForeverProvider enforces complete quote semantics and rejects partial brow
 test('ForeverProvider uses native Unix 30-minute buckets', () => {
   const L = createLuaState(`
     MarketSyncForeverScanner = { Version = "0.3.0" }
+    Auctionator = { Constants = { SCAN_DAY_0 = 1600000000 }, Database = { db = {} } }
   `);
   execLua(L, `
     MarketSync.Provider.Select("forever")
     local bucket = MarketSync.GetCurrentBucket()
     local expected = math.floor(1773780000 / 1800)
     assert(bucket == expected, "Forever should use Unix 30-min bucket: " .. tostring(bucket) .. " vs " .. tostring(expected))
+    assert(MarketSync.GetCurrentScanDay() == math.floor(expected / 48),
+      "Forever scan day must match the Unix bucket even with Auctionator installed")
   `);
 });
 
