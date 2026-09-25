@@ -12,9 +12,9 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require(path.join(de
 
 const marketSyncDir = path.resolve(__dirname, '../MarketSync');
 
-test('Escape registration uses dedicated handler on modern clients and legacy fallback otherwise', () => {
+test('Escape registration leaves modern protected dispatcher untouched', () => {
   const source = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
-  const start = source.indexOf('local escapeFrames = {}');
+  const start = source.indexOf('function MarketSync.RegisterEscapeFrame(frame)');
   const end = source.indexOf('local ADDON_NAME =', start);
   if (start < 0 || end < 0) throw new Error('Escape registration code not found');
   const chunk = source.slice(start, end);
@@ -24,11 +24,9 @@ test('Escape registration uses dedicated handler on modern clients and legacy fa
     MarketSync = {}
     UISpecialFrames = {}
     GameMenuEscPriority = { AddOn = 8 }
-    local handler, registrations = nil, 0
+    local registrations = 0
     RegisterGameMenuEscHandler = function(priority, callback)
-      assert(priority == 8)
       registrations = registrations + 1
-      handler = callback
     end
     ${chunk}
     local frame = {
@@ -38,9 +36,8 @@ test('Escape registration uses dedicated handler on modern clients and legacy fa
       Hide = function(self) self.shown = false end,
     }
     MarketSync.RegisterEscapeFrame(frame)
-    assert(registrations == 1 and #UISpecialFrames == 0)
-    assert(handler() == true and frame.shown == false)
-    assert(handler() == false)
+    assert(registrations == 0 and #UISpecialFrames == 0)
+    assert(frame.shown == true)
     RegisterGameMenuEscHandler = nil
     MarketSync.RegisterEscapeFrame(frame)
     assert(UISpecialFrames[1] == 'MarketSyncTestFrame')

@@ -5,32 +5,14 @@
 
 MarketSync = MarketSync or {}
 
--- Register add-on windows with the dedicated Escape dispatcher when available.
--- Adding names to UISpecialFrames on newer clients can taint Blizzard's
--- CloseWindows path, which also hides protected character/player UI.
-local escapeFrames = {}
-local escapeHandlerRegistered = false
+-- Do not mutate Blizzard's Escape handler registry on modern clients. Its
+-- casting handler runs before add-on handlers and calls SpellStopCasting(),
+-- which is protected. Add-on registration can taint that dispatch path.
 function MarketSync.RegisterEscapeFrame(frame)
     local name = frame and frame.GetName and frame:GetName()
     if not name then return end
-    if type(RegisterGameMenuEscHandler) == "function"
-        and GameMenuEscPriority and GameMenuEscPriority.AddOn then
-        escapeFrames[#escapeFrames + 1] = frame
-        if not escapeHandlerRegistered then
-            escapeHandlerRegistered = true
-            RegisterGameMenuEscHandler(GameMenuEscPriority.AddOn, function()
-                for i = #escapeFrames, 1, -1 do
-                    local candidate = escapeFrames[i]
-                    if candidate and candidate:IsShown() then
-                        candidate:Hide()
-                        return true
-                    end
-                end
-                return false
-            end)
-        end
-    elseif UISpecialFrames then
-        -- Legacy clients predate the dedicated dispatcher.
+    if type(RegisterGameMenuEscHandler) ~= "function" and UISpecialFrames then
+        -- Older clients without the protected casting dispatcher retain Esc.
         table.insert(UISpecialFrames, name)
     end
 end
