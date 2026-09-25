@@ -2,7 +2,7 @@
 
 **Scan once. Share prices with your guild. Browse the market away from the Auction House.**
 
-MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, and shopping lists. Version 0.9.1 targets Forever 1.60.1 (build 69893). Auctionator is optional: MarketSync can scan on its own, or use Auctionator's scans when both addons are installed.
+MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, and shopping lists. Version 0.9.2 targets Forever 1.60.1 (build 69893). Auctionator is optional: MarketSync can scan on its own, or use Auctionator's scans when both addons are installed.
 
 ## What you can do
 
@@ -32,7 +32,7 @@ Processing estimates profit from known recipes and available prices. It does not
 
 Alerts trigger on configured price thresholds. **Shift-Left-Click** the minimap button to mute alert delivery until logout or until you use the shortcut again; the first mute asks for confirmation.
 
-Version 0.9.1 targets Forever. Metadata for other WoW interface versions remains in the addon, but this release has not been validated on those clients. Please report the client build, scanner mode, reproduction steps, and any Lua error when filing a bug.
+Version 0.9.2 targets Forever. Metadata for other WoW interface versions remains in the addon, but this release has not been validated on those clients. Please report the client build, scanner mode, reproduction steps, and any Lua error when filing a bug.
 
 ## Commands
 

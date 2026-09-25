@@ -5,10 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-09-25
+
+### Added
+- Authoritative server time synchronization: introduced `MarketSync.GetServerTime()` using Blizzard's `GetServerTime()` API to eliminate PC clock drift across players.
+- Chronological scan tracking: `scanTime` Unix timestamp is now emitted on all `ObservationAPI.v1` batch lifecycle events (`start`, `finish`, `cancel`) and individual observations to facilitate freshness comparisons and ordering.
+- Calculated realm timestamps: observations now include `observedTime` in shared realm time (exact seconds for local scans, start of 30-minute interval with $\pm 15$ min precision for synced transfers).
+- Published the official `OBSERVATION_API.md` guide detailing realm time alignment and companion synchronization workflows.
+
 ## [0.9.1] - 2026-09-25
 
 ### Added
-- Versioned `MarketSync.ObservationAPI.v1` callback for ForeverLedgerSync and other companion addons. Native, Auctionator-backed, and verified guild-sync paths identify local versus synced observations and emit scan start/finish/cancel lifecycle events. See `FOREVERLEDGER_INTEGRATION.md` for timestamp and quantity precision limits.
+- Versioned `MarketSync.ObservationAPI.v1` callback for companion addons (e.g. ForeverLedgerSync). Native, Auctionator-backed, and verified guild-sync paths identify local versus synced observations and emit scan start/finish/cancel lifecycle events. See `OBSERVATION_API.md` for timestamp and quantity precision limits.
 
 ## [0.9.0] - 2026-09-25
 
