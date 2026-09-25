@@ -168,6 +168,9 @@ local function CreateMainFrame()
         closeBtn = CreateFrame("Button", nil, MainFrame, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", -4, -4)
     end
+    closeBtn:SetScript("OnClick", function()
+        MainFrame:Hide()
+    end)
     MainFrame.CloseBtn = closeBtn
 
     -- --- TITLE ---

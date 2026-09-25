@@ -57,6 +57,7 @@ local function CreateCraftingTreeFrame()
     f:SetFrameStrata("DIALOG")
     f:SetFrameLevel(60)
     ApplyBackdrop(f)
+    if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(f) end
 
     f.userOverrides = {}
     f.expandedNodes = {}

@@ -13,7 +13,7 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require(path.join(de
 
 const marketSyncDir = path.resolve(__dirname, '../MarketSync');
 
-test('Escape registration leaves modern protected dispatcher untouched', () => {
+test('Escape registration reliably registers UISpecialFrames and frame-level OnKeyDown handler', () => {
   const source = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
   const start = source.indexOf('function MarketSync.RegisterEscapeFrame(frame)');
   const end = source.indexOf('local ADDON_NAME =', start);
@@ -24,24 +24,32 @@ test('Escape registration leaves modern protected dispatcher untouched', () => {
   const script = `
     MarketSync = {}
     UISpecialFrames = {}
-    GameMenuEscPriority = { AddOn = 8 }
-    local registrations = 0
-    RegisterGameMenuEscHandler = function(priority, callback)
-      registrations = registrations + 1
-    end
     ${chunk}
     local frame = {
       shown = true,
+      scripts = {},
       GetName = function() return 'MarketSyncTestFrame' end,
       IsShown = function(self) return self.shown end,
       Hide = function(self) self.shown = false end,
+      EnableKeyboard = function(self, enabled) self.keyboardEnabled = enabled end,
+      SetPropagateKeyboardInput = function(self, prop) self.prop = prop end,
+      HookScript = function(self, scriptType, fn) end,
+      SetScript = function(self, scriptType, fn) self.scripts[scriptType] = fn end,
+      GetScript = function(self, scriptType) return self.scripts[scriptType] end,
     }
     MarketSync.RegisterEscapeFrame(frame)
-    assert(registrations == 0 and #UISpecialFrames == 0)
-    assert(frame.shown == true)
-    RegisterGameMenuEscHandler = nil
+    assert(#UISpecialFrames == 1, 'expected 1 entry in UISpecialFrames')
+    assert(UISpecialFrames[1] == 'MarketSyncTestFrame', 'expected MarketSyncTestFrame in UISpecialFrames')
+    -- Re-registration should not duplicate entry
     MarketSync.RegisterEscapeFrame(frame)
-    assert(UISpecialFrames[1] == 'MarketSyncTestFrame')
+    assert(#UISpecialFrames == 1, 'expected no duplicate in UISpecialFrames')
+    -- Verify OnKeyDown handles ESCAPE and hides frame while propagating other keys
+    assert(type(frame.scripts['OnKeyDown']) == 'function', 'expected OnKeyDown handler')
+    frame.scripts['OnKeyDown'](frame, 'W')
+    assert(frame.prop == true, 'expected normal keys to propagate')
+    frame.scripts['OnKeyDown'](frame, 'ESCAPE')
+    assert(frame.shown == false, 'expected ESCAPE to hide frame')
+    assert(frame.prop == false, 'expected ESCAPE not to propagate to game menu')
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
     throw new Error(to_jsstring(lua.lua_tostring(L, -1)));

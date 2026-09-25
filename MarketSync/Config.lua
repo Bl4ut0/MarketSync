@@ -5,15 +5,59 @@
 
 MarketSync = MarketSync or {}
 
--- Do not mutate Blizzard's Escape handler registry on modern clients. Its
--- casting handler runs before add-on handlers and calls SpellStopCasting(),
--- which is protected. Add-on registration can taint that dispatch path.
+-- Escape handling: Registers frame with Blizzard's UISpecialFrames table
+-- and attaches a key listener with keyboard propagation to guarantee Escape
+-- closes the window reliably without tainting protected game paths.
 function MarketSync.RegisterEscapeFrame(frame)
-    local name = frame and frame.GetName and frame:GetName()
-    if not name then return end
-    if type(RegisterGameMenuEscHandler) ~= "function" and UISpecialFrames then
-        -- Older clients without the protected casting dispatcher retain Esc.
-        table.insert(UISpecialFrames, name)
+    if not frame then return end
+    local name = frame.GetName and frame:GetName()
+
+    -- 1. Register with Blizzard UISpecialFrames (standard engine Esc-to-close)
+    if name and UISpecialFrames then
+        local found = false
+        for _, n in ipairs(UISpecialFrames) do
+            if n == name then
+                found = true
+                break
+            end
+        end
+        if not found then
+            table.insert(UISpecialFrames, name)
+        end
+    end
+
+    -- 2. Frame-level ESC interception via OnKeyDown + SetPropagateKeyboardInput
+    -- Guarantees the frame closes on Escape even if UISpecialFrames is bypassed,
+    -- delayed, or shadowed by dialog strata on modern clients.
+    if frame.SetPropagateKeyboardInput and frame.EnableKeyboard then
+        frame:HookScript("OnShow", function(self)
+            self:EnableKeyboard(true)
+            if self.SetPropagateKeyboardInput then
+                self:SetPropagateKeyboardInput(true)
+            end
+        end)
+        frame:HookScript("OnHide", function(self)
+            self:EnableKeyboard(false)
+        end)
+        if frame:IsShown() then
+            frame:EnableKeyboard(true)
+            if frame.SetPropagateKeyboardInput then
+                frame:SetPropagateKeyboardInput(true)
+            end
+        end
+
+        frame:SetScript("OnKeyDown", function(self, key)
+            if key == "ESCAPE" then
+                if self.SetPropagateKeyboardInput then
+                    self:SetPropagateKeyboardInput(false)
+                end
+                self:Hide()
+            else
+                if self.SetPropagateKeyboardInput then
+                    self:SetPropagateKeyboardInput(true)
+                end
+            end
+        end)
     end
 end
 
