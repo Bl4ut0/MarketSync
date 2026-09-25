@@ -123,7 +123,7 @@ local function CreateMainFrame()
     MainFrame:SetScript("OnDragStop", MainFrame.StopMovingOrSizing)
     MainFrame:SetFrameStrata("HIGH")
     MainFrame:SetToplevel(true)
-    tinsert(UISpecialFrames, "MarketSyncMainFrame")
+    if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(MainFrame) end
 
     -- --- PORTRAIT ---
     local portrait = MainFrame.GetPortrait and MainFrame:GetPortrait()
@@ -422,7 +422,6 @@ local function CreateMainFrame()
             "AuctionHouseFrameDisplayModeTabTemplate",
             "AuctionHouseFrameTabTemplate",
             "PanelTabButtonTemplate",
-            "CharacterFrameTabButtonTemplate",
         }
         for _, tmpl in ipairs(templates) do
             local ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, tmpl)

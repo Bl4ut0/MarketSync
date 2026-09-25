@@ -5,6 +5,36 @@
 
 MarketSync = MarketSync or {}
 
+-- Register add-on windows with the dedicated Escape dispatcher when available.
+-- Adding names to UISpecialFrames on newer clients can taint Blizzard's
+-- CloseWindows path, which also hides protected character/player UI.
+local escapeFrames = {}
+local escapeHandlerRegistered = false
+function MarketSync.RegisterEscapeFrame(frame)
+    local name = frame and frame.GetName and frame:GetName()
+    if not name then return end
+    if type(RegisterGameMenuEscHandler) == "function"
+        and GameMenuEscPriority and GameMenuEscPriority.AddOn then
+        escapeFrames[#escapeFrames + 1] = frame
+        if not escapeHandlerRegistered then
+            escapeHandlerRegistered = true
+            RegisterGameMenuEscHandler(GameMenuEscPriority.AddOn, function()
+                for i = #escapeFrames, 1, -1 do
+                    local candidate = escapeFrames[i]
+                    if candidate and candidate:IsShown() then
+                        candidate:Hide()
+                        return true
+                    end
+                end
+                return false
+            end)
+        end
+    elseif UISpecialFrames then
+        -- Legacy clients predate the dedicated dispatcher.
+        table.insert(UISpecialFrames, name)
+    end
+end
+
 local ADDON_NAME = "MarketSync"
 local PREFIX = "MarketSync"
 
@@ -1305,9 +1335,7 @@ function MarketSync.CreateModernDialog(name, width, height, titleText)
     frame:SetBackdropColor(0.075, 0.070, 0.065, 0.98)
     frame:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.95)
 
-    if name then
-        table.insert(UISpecialFrames, name)
-    end
+    if name then MarketSync.RegisterEscapeFrame(frame) end
 
     -- Header bar
     local header = CreateFrame("Frame", nil, frame)

@@ -6,7 +6,7 @@
 local ADDON_NAME = MarketSync.ADDON_NAME
 local category  -- Forward declaration for minimap/options access
 
-StaticPopupDialogs = StaticPopupDialogs or {}
+if not StaticPopupDialogs then StaticPopupDialogs = {} end
 StaticPopupDialogs["MARKETSYNC_CONFIRM_SESSION_MUTE"] = {
     text = "Mute all MarketSync alerts for this session? You can turn them back on with Shift-Left-Click on the minimap button. This confirmation appears only once.",
     button1 = YES,
