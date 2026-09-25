@@ -1119,7 +1119,7 @@ local function CreateMainFrame()
     rightHeader:SetPoint("BOTTOMLEFT", rightInfoBox, "TOPLEFT", 80, 2) -- Centered
     rightHeader:SetText("|cffffd700Quick Info|r")
 
-    local rightStatsText = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    local rightStatsText = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     rightStatsText:SetPoint("TOPLEFT", rightInfoBox, "TOPLEFT", 15, -12)
     rightStatsText:SetWidth(207)
     rightStatsText:SetJustifyH("LEFT")
@@ -1519,10 +1519,11 @@ local function CreateMainFrame()
         local syncedItems = 0
         local neutralItems = 0
         local uniqueSyncers = 0
-        if Auctionator and Auctionator.Database and Auctionator.Database.db then
-            for _ in pairs(Auctionator.Database.db) do totalItems = totalItems + 1 end
-        end
         if MarketSyncDB then
+            local personalData = MarketSync.GetRealmDB().PersonalData
+            if personalData then
+                for _ in pairs(personalData) do totalItems = totalItems + 1 end
+            end
             if MarketSync.GetRealmDB().ItemMetadata then
                 for _ in pairs(MarketSync.GetRealmDB().ItemMetadata) do syncedItems = syncedItems + 1 end
             end
@@ -1600,11 +1601,11 @@ local function CreateMainFrame()
             syncActiveStr = "\n|cff00ccffNeutral Sync In Progress|r (" .. (idxStatus.neutralIncoming or 0) .. " incoming)"
         end
         SettingsContent.rightStatsText:SetText(
-            "|cff00ff00Total Items:|r " .. totalItems .. "  |cff00ff00Synced:|r " .. syncedItems .. "  |cff00ccffNeutral:|r " .. neutralItems .. "\n" ..
-            "|cff00ff00Personal Cache:|r " .. personalCache .. "\n" ..
-            "|cff00ff00Guild Cache:|r " .. guildCache .. "\n" ..
-            "|cff00ccffNeutral Cache:|r " .. neutralCache .. "\n" ..
-            "|cff00ff00Sync Partners:|r " .. uniqueSyncers ..
+            "|cff00ff00Personal:|r " .. totalItems .. "  |cff00ff00Guild:|r " .. syncedItems .. "\n" ..
+            "|cff00ccffNeutral:|r " .. neutralItems .. "  |cff00ff00Partners:|r " .. uniqueSyncers .. "\n" ..
+            "|cff00ff00Personal cache:|r " .. personalCache .. "\n" ..
+            "|cff00ff00Guild cache:|r " .. guildCache .. "\n" ..
+            "|cff00ccffNeutral cache:|r " .. neutralCache ..
             syncActiveStr
         )
     end

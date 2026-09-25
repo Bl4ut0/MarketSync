@@ -938,7 +938,10 @@ function MarketSync.CreateAnalyticsPanel(parent)
         lbl:SetText(label)
 
         local val = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        val:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
         val:SetPoint("RIGHT", 0, 0)
+        val:SetJustifyH("RIGHT")
+        if val.SetWordWrap then val:SetWordWrap(false) end
         row.val = val
         return val
     end
@@ -948,10 +951,10 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local rowOff3 = isEmbedded and -44 or -40
     local rowOff4 = isEmbedded and -64 or -58
 
-    panel.mPrice = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff1, "Current Market Value")
-    panel.mStatus = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff2, "Data Health / Confidence")
-    panel.mAge = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff3, "Data Age (Last Scanned)")
-    panel.mSource = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff4, "Source Distribution")
+    panel.mPrice = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff1, "Market Value")
+    panel.mStatus = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff2, "Data Confidence")
+    panel.mAge = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff3, "Last Scanned")
+    panel.mSource = CreateMetricRow(metricsCard, leftMetricsTitle, rowOff4, "Sources")
 
     -- Subtle vertical divider in metrics card
     local vDivider = metricsCard:CreateTexture(nil, "BORDER")
@@ -976,14 +979,17 @@ function MarketSync.CreateAnalyticsPanel(parent)
         lbl:SetText(label)
 
         local val = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        val:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
         val:SetPoint("RIGHT", 0, 0)
+        val:SetJustifyH("RIGHT")
+        if val.SetWordWrap then val:SetWordWrap(false) end
         row.val = val
         return val
     end
 
-    panel.mBestTime = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff1, "Best Time to Buy")
-    panel.mVolatility = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff2, "Intraday Price Volatility")
-    panel.mDataPoints = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff3, "Granular Snapshots")
+    panel.mBestTime = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff1, "Best Buy Time")
+    panel.mVolatility = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff2, "Price Volatility")
+    panel.mDataPoints = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff3, "Snapshots")
 
     local debugNote = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
     debugNote:SetPoint("BOTTOMLEFT", metricsCard, "BOTTOM", 15, isEmbedded and 8 or 6)

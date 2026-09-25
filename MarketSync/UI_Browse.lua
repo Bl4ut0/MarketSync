@@ -1373,12 +1373,12 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     -- --- COLUMN HEADERS (matches Blizzard AH dark charcoal headers) ---
     local colDefs = {
-        {name = "Rarity",  width = 275, sortKey = "rarity"},
+        {name = "Item",    width = 275, sortKey = "rarity"},
         {name = "Lvl",     width = 42,  sortKey = "minLevel"},
         {name = "Price",   width = 100, sortKey = "price"},
         {name = "Age",     width = 50,  sortKey = nil},
-        {name = "Source",  width = 55,  sortKey = nil},
-        {name = "Src Age", width = 60,  sortKey = nil},
+        {name = "Src",     width = 55,  sortKey = nil},
+        {name = "Seen",    width = 60,  sortKey = nil},
         {name = "",        width = 48,  sortKey = nil},
     }
     local colX = 184
