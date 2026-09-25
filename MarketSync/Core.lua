@@ -388,7 +388,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 2: PROFESSIONS & CRAFTING (Out of Beta!)
     -- ================================================================
-    local cardProf = CreateCard(565, 95, cardMemory, -10)
+    local cardProf = CreateCard(565, 70, cardMemory, -10)
 
     local hProf = cardProf:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hProf:SetPoint("TOPLEFT", 12, -10)
@@ -398,17 +398,10 @@ local function PopulateAddonSettings(panel)
     sProf:SetPoint("TOPLEFT", hProf, "BOTTOMLEFT", 0, -3)
     sProf:SetText("Direct in-game trade skill margin calculations, vendor pricing, and materials tree.")
 
-    CreateOptCheckbox(cardProf, 12, -40, "TradeSkill Costs & Profitability (Production)",
+    CreateOptCheckbox(cardProf, 12, -38, "TradeSkill Costs & Profitability (Production)",
         "Show crafting costs, net profit margins (with 5% AH cut), vendor materials, and recursive component trees directly in the Blizzard TradeSkill window.",
         "EnableProfessionCraftInfo", true, function(val)
             if MarketSync.RefreshCraftingInfoUI then MarketSync.RefreshCraftingInfoUI() end
-        end)
-
-    CreateOptCheckbox(cardProf, 12, -66, "Enable Processing Tab",
-        "Show the Processing tab (recursive solver, vendor arbitrage, and batch shopping list) on MainFrame and Auction House.",
-        "EnableProcessingTab", false, function(val)
-            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
-            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
         end)
 
     -- ================================================================
@@ -665,7 +658,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 6: BETA & EXPERIMENTAL FEATURES
     -- ================================================================
-    local cardBeta = CreateCard(565, 90, cardSwarm, -10)
+    local cardBeta = CreateCard(565, 116, cardSwarm, -10)
 
     local hBeta = cardBeta:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hBeta:SetPoint("TOPLEFT", 12, -10)
@@ -675,14 +668,21 @@ local function PopulateAddonSettings(panel)
     sBeta:SetPoint("TOPLEFT", hBeta, "BOTTOMLEFT", 0, -3)
     sBeta:SetText("Modules currently under active development.")
 
-    CreateOptCheckbox(cardBeta, 12, -38, "|cffff6600[BETA]|r Enable Price Alerts Tab",
+    CreateOptCheckbox(cardBeta, 12, -38, "|cffff6600[BETA]|r Enable Processing Tab",
+        "Show the Processing tab (recursive solver, vendor arbitrage, and batch shopping list) on MainFrame and Auction House.",
+        "EnableProcessingTab", false, function(val)
+            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        end)
+
+    CreateOptCheckbox(cardBeta, 12, -64, "|cffff6600[BETA]|r Enable Price Alerts Tab",
         "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both portable window and Auction House.",
         "EnableAlertsTab", false, function(val)
             if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
         end)
 
-    CreateOptCheckbox(cardBeta, 12, -64, "Enable Debug Diagnostics",
+    CreateOptCheckbox(cardBeta, 12, -90, "Enable Debug Diagnostics",
         "Print verbose synchronization, retention, and scanning diagnostics in chat.",
         "DebugMode", false, nil)
 

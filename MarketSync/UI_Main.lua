@@ -820,19 +820,7 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableAnalyticsTab ~= false) end
     end)
 
-    local chkProcessing = CreateCheckbox(boxAH, chkAnalytics, "BOTTOMLEFT",
-        "Enable Processing Tab", "Show the Processing tab (materials solver, arbitrage, and batch crafting) on portable window and Auction House.")
-    chkProcessing:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableProcessingTab = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Processing " .. (self:GetChecked() and "Enabled" or "Disabled"))
-        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
-        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
-    end)
-    chkProcessing:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableProcessingTab == true) end
-    end)
-
-    local chkAuctionatorScan = CreateCheckbox(boxAH, chkProcessing, "BOTTOMLEFT",
+    local chkAuctionatorScan = CreateCheckbox(boxAH, chkAnalytics, "BOTTOMLEFT",
         "Auctionator Scanning", "Let Auctionator perform AH scans and import its price database. Disable to use MarketSync's native scanner.")
     chkAuctionatorScan:SetScript("OnClick", function(self)
         local isChecked = self:GetChecked()
@@ -1122,12 +1110,25 @@ local function CreateMainFrame()
     betaBadge:SetPoint("LEFT", betaHeader, "RIGHT", 4, 0)
     betaBadge:SetText("|cffff6600[BETA]|r")
 
-    local chkBetaAlerts = CreateCheckbox(betaBox, betaHeader, "BOTTOMLEFT",
+    local chkBetaProcessing = CreateCheckbox(betaBox, betaHeader, "BOTTOMLEFT",
+        "Enable Processing", "Show the Processing tab (materials solver, arbitrage, and batch crafting) on portable window and Auction House.")
+    chkBetaProcessing:ClearAllPoints()
+    chkBetaProcessing:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 6, -24)
+    chkBetaProcessing:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableProcessingTab = self:GetChecked()
+        print("|cFF00FF00[MarketSync]|r Processing " .. (self:GetChecked() and "Enabled" or "Disabled"))
+        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+    end)
+    chkBetaProcessing:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableProcessingTab == true) end
+    end)
+
+    local chkBetaAlerts = CreateCheckbox(betaBox, chkBetaProcessing, "BOTTOMLEFT",
         "Enable Alerts", "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both the portable window and Auction House.")
-    chkBetaAlerts:ClearAllPoints()
-    chkBetaAlerts:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 6, -24)
     chkBetaAlerts:SetScript("OnClick", function(self)
         MarketSyncDB.EnableAlertsTab = self:GetChecked()
+        print("|cFF00FF00[MarketSync]|r Alerts " .. (self:GetChecked() and "Enabled" or "Disabled"))
         if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
         if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
     end)
