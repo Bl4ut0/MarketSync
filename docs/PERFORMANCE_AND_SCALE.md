@@ -119,8 +119,8 @@ When 30,000 items are scanned, `MarketSync.ObservationAPI.v1` emits observations
 ## 6. External Data Extraction (30,000-Item Reality)
 
 For external web dashboards, discord bots, or pricing sites:
-* **Clipboard Copying is Impossible**: 30,000 items with history requires **~5 to 12 MB of text** (~250,000+ lines in `MarketSyncDB.lua`). World of Warcraft's in-game `EditBox` is safely capped at ~12 KB. Manually copying would require **over 400 separate copy-paste operations**.
-* **Direct File Streaming**: As documented in [`DATA_EXTRACTION_GUIDE.md`](DATA_EXTRACTION_GUIDE.md), web applications should use the browser **File System Access API** or upload forms to read `MarketSyncDB.lua` directly from the `WTF/` folder.
+* **Clipboard Copying is Impossible**: 30,000 items with history requires **~5 to 12 MB of text** (~250,000+ lines in `SavedVariables/MarketSync.lua`). World of Warcraft's in-game `EditBox` is safely capped at ~12 KB. Manually copying would require **over 400 separate copy-paste operations**.
+* **Direct File Streaming**: As documented in [`DATA_EXTRACTION_GUIDE.md`](DATA_EXTRACTION_GUIDE.md), web applications should use the browser **File System Access API** or upload forms to read `MarketSync.lua` directly from the `WTF/` folder.
 * **Extraction Performance**: Modern JavaScript (or Python/Node) parses the full 30,000-item Lua table in **~50 to 150 milliseconds**, with **zero CPU or memory impact on the World of Warcraft game client**.
 
 ---
