@@ -1661,6 +1661,12 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             if row.link then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink(row.link)
+                GameTooltip:AddLine(" ")
+                if panel.dataSource == "neutral" then
+                    GameTooltip:AddLine("|cff00ccffNeutral cache item|r", 1, 1, 1)
+                else
+                    GameTooltip:AddLine("|cff00ff00Click to view price history|r", 1, 1, 1)
+                end
                 GameTooltip:Show()
             end
         end)
@@ -1703,26 +1709,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             if self.link then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink(self.link)
-                -- Show scan details below the item tooltip
-                if self.itemData then
-                    GameTooltip:AddLine(" ")
-                    local d = self.itemData
-                    -- Auction Age
-                    if d.age or d.exactTime then
-                        local ageText = MarketSync.FormatAuctionAge and MarketSync.FormatAuctionAge(d.age, d.exactTime, true)
-                        if ageText then
-                            GameTooltip:AddDoubleLine("Auction Age:", ageText, 0.6, 0.6, 0.6, 1, 1, 1)
-                        end
-                    end
-                    -- Exact scan time (if available)
-                    if d.exactTime then
-                        GameTooltip:AddDoubleLine("Scanned:", MarketSync.FormatRealmDateString(d.exactTime), 0.6, 0.6, 0.6, 1, 1, 1)
-                    end
-                    -- Data source
-                    if d.source then
-                        GameTooltip:AddDoubleLine("Source:", d.source, 0.6, 0.6, 0.6, 1, 1, 1)
-                    end
-                end
                 GameTooltip:AddLine(" ")
                 if panel.dataSource == "neutral" then
                     GameTooltip:AddLine("|cff00ccffNeutral cache item|r", 1, 1, 1)

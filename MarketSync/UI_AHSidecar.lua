@@ -936,13 +936,13 @@ function MarketSync.CreateAHSidecar(parent)
                         GameTooltip:AddLine(string.format("%s (Slot %d)", bag.name, item.slot), 0.8, 0.8, 0.8)
                         GameTooltip:AddLine(string.format("Stack Count: |cFFFFD100%d|r", item.stackCount), 1, 1, 1)
                         if item.marketPrice and item.marketPrice > 0 then
-                            local priceStr = MarketSync.FormatMoney and MarketSync.FormatMoney(item.marketPrice) or tostring(item.marketPrice)
-                            GameTooltip:AddLine(string.format("Market Price: %s", priceStr), 1, 1, 1)
+                            if MarketSyncDB and MarketSyncDB.EnableTooltipAuctionPrice == false then
+                                local priceStr = MarketSync.FormatMoney and MarketSync.FormatMoney(item.marketPrice) or tostring(item.marketPrice)
+                                GameTooltip:AddLine(string.format("Market Price: %s", priceStr), 1, 1, 1)
+                            end
                             local under = math.max(1, item.marketPrice - 1)
                             local underStr = MarketSync.FormatMoney and MarketSync.FormatMoney(under) or tostring(under)
                             GameTooltip:AddLine(string.format("Suggested Undercut (-1c): %s", underStr), 0.4, 1.0, 0.4)
-                        else
-                            GameTooltip:AddLine("Market Price: |cff888888No data|r", 1, 1, 1)
                         end
                         GameTooltip:AddLine(" ")
                         GameTooltip:AddLine("|cFF00FF00Left-Click|r: Select into AH Sell slot", 0.9, 0.9, 0.9)

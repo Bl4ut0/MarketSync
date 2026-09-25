@@ -693,9 +693,6 @@ function MarketSync.CreateAnalyticsPanel(parent)
                     end
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddLine("|cFF00FF00Click|r: View price analytics & trends", 0.8, 0.8, 0.8)
-                    if item.sourceText then
-                        GameTooltip:AddLine("|cFF888888Source: " .. item.sourceText .. "|r", 0.7, 0.7, 0.7)
-                    end
                     GameTooltip:Show()
                 end)
 

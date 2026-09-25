@@ -1,6 +1,7 @@
 // Automated test suite for MarketSync AH features
 const fs = require('fs');
 const path = require('path');
+const assert = require('assert');
 
 const candidateDeps = [
   path.resolve(__dirname, '../node_modules'),
@@ -1990,6 +1991,19 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Low RAM & Settings check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
+});
+
+test('Browse row hover and sidecar tooltips do not duplicate auction scan or price metadata', () => {
+  const browseCode = fs.readFileSync(path.join(marketSyncDir, 'UI_Browse.lua'), 'utf8');
+  assert(!browseCode.includes('GameTooltip:AddDoubleLine("Auction Age:"'), 'UI_Browse must not add duplicate Auction Age line');
+  assert(!browseCode.includes('GameTooltip:AddDoubleLine("Scanned:"'), 'UI_Browse must not add duplicate Scanned line');
+  assert(!browseCode.includes('GameTooltip:AddDoubleLine("Source:"'), 'UI_Browse must not add duplicate Source line');
+
+  const analyticsCode = fs.readFileSync(path.join(marketSyncDir, 'UI_Analytics.lua'), 'utf8');
+  assert(!analyticsCode.includes('Source: " .. item.sourceText'), 'UI_Analytics must not add duplicate Source line');
+
+  const sidecarCode = fs.readFileSync(path.join(marketSyncDir, 'UI_AHSidecar.lua'), 'utf8');
+  assert(!sidecarCode.includes('GameTooltip:AddLine("Market Price: |cff888888No data|r"'), 'UI_AHSidecar should not add empty No data price line');
 });
 
 test('AST syntax check on all MarketSync Lua files', () => {
