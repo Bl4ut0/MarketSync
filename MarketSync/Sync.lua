@@ -844,6 +844,96 @@ local function MergeTimeseriesPoint(histStr, bucketOffset, price, quantity, reje
     return table.concat(points, ","), changed, accepted
 end
 
+-- Auctionator's legacy full-scan event supplies the original auction links.
+-- Its database groups random enchants by suffix name, which cannot recover the
+-- numeric suffix later. Capture exact variants here without rescanning the AH.
+function MarketSync.CaptureAuctionatorRawSuffixScan(rawScan, onComplete, exactKeys)
+    if type(rawScan) ~= "table" or not (C_Timer and C_Timer.After) then return false end
+    local groups = {}
+    local index, total = 1, #rawScan
+    if total > 0 and (type(rawScan[1]) ~= "table"
+        or type(rawScan[1].itemLink) ~= "string"
+        or type(rawScan[1].auctionInfo) ~= "table") then return false end
+    local scanTime = time()
+    local scanDay = MarketSync.GetCurrentScanDay()
+    local dayKey = tostring(scanDay)
+    local bucketID = MarketSync.GetCurrentBucket()
+    local bucketOffset = bucketID % 48
+    local function ProcessRows()
+        local last = math.min(index + 249, total)
+        while index <= last do
+            local row = rawScan[index]
+            local info = row and row.auctionInfo
+            local link = row and row.itemLink
+            local quantity = info and tonumber(info[3]) or 0
+            local buyout = info and tonumber(info[10]) or 0
+            if type(link) == "string" and quantity > 0 and buyout > 0
+                and MarketSync.NormalizeItemKey then
+                local key, _, itemKey = MarketSync.NormalizeItemKey(link)
+                if key and itemKey and itemKey.itemSuffix ~= 0 then
+                    local unitPrice = math.ceil(buyout / quantity)
+                    local group = groups[key]
+                    if not group then
+                        group = { price = unitPrice, quantity = 0 }
+                        groups[key] = group
+                    elseif unitPrice < group.price then
+                        group.price = unitPrice
+                    end
+                    group.quantity = group.quantity + quantity
+                end
+            end
+            index = index + 1
+        end
+        if index <= total then
+            C_Timer.After(0, ProcessRows)
+            return
+        end
+
+        local realmDB = MarketSync.GetRealmDB()
+        realmDB.PersonalData = realmDB.PersonalData or {}
+        local nextKey = next(groups)
+        local recorded = 0
+        local function SaveGroups()
+            local processed = 0
+            while nextKey and processed < 150 do
+                local key = nextKey
+                local group = groups[key]
+                nextKey = next(groups, key)
+                local entry = realmDB.PersonalData[key]
+                if not entry then
+                    entry = { m = 0, d = 0, h = {}, vh = {} }
+                    realmDB.PersonalData[key] = entry
+                end
+                entry.h = entry.h or {}
+                entry.vh = entry.vh or {}
+                local history, _, accepted = MergeTimeseriesPoint(
+                    entry.h[dayKey], bucketOffset, group.price, group.quantity, true)
+                entry.h[dayKey] = history
+                if accepted then
+                    entry.vh[dayKey] = select(1, MergeTimeseriesPoint(
+                        entry.vh[dayKey], bucketOffset, group.price, group.quantity, false))
+                    entry.m = group.price
+                    entry.d = scanDay
+                    entry.observedAt = scanTime
+                    entry.latestBucket = math.max(tonumber(entry.latestBucket) or 0, bucketID)
+                    realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
+                    if exactKeys then exactKeys[key] = true end
+                    recorded = recorded + 1
+                end
+                processed = processed + 1
+            end
+            if nextKey then
+                C_Timer.After(0, SaveGroups)
+            elseif onComplete then
+                onComplete(recorded)
+            end
+        end
+        SaveGroups()
+    end
+    C_Timer.After(0, ProcessRows)
+    return true
+end
+
 function MarketSync.EnsureVerifiedSnapshotSchema()
     local realmDB = MarketSync.GetRealmDB()
     if tonumber(realmDB.VerifiedSnapshotSchema) == 1 then return false end

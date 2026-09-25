@@ -259,6 +259,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     local entry = pData[dbKey]
     entry.m = unitPrice
     entry.d = currentDay
+    entry.observedAt = now
     entry.latestBucket = bucketID
     if not entry.h then entry.h = {} end
     if not entry.vh then entry.vh = {} end

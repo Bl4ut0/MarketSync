@@ -500,60 +500,82 @@ function MarketSync.CreateAnalyticsPanel(parent)
             emptyListText:SetText("No scanned items recorded.\nRun an AH scan or drop an item above.")
             recentBtn:Disable()
             favBtn:Enable()
-            local seen = {}
-            -- From live Scanner results
+            -- Select the newest per-item observations before resolving item
+            -- metadata. A full AH snapshot may contain tens of thousands of
+            -- rows; keep only the best 40 while walking the saved database.
+            local candidates = {}
+            local function Consider(candidate)
+                if #candidates < 40 then
+                    candidates[#candidates + 1] = candidate
+                    return
+                end
+                local oldest = 1
+                for i = 2, #candidates do
+                    if candidates[i].observedAt < candidates[oldest].observedAt then oldest = i end
+                end
+                if candidate.observedAt > candidates[oldest].observedAt then
+                    candidates[oldest] = candidate
+                end
+            end
+            if MarketSyncDB and MarketSync.GetRealmDB then
+                for dbKey, entry in pairs(MarketSync.GetRealmDB().PersonalData or {}) do
+                    if type(entry) == "table" then
+                        Consider({
+                            dbKey = tostring(dbKey),
+                            observedAt = tonumber(entry.observedAt)
+                                or ((tonumber(entry.d) or 0) * 86400),
+                            price = entry.m,
+                        })
+                    end
+                end
+            end
             local recent = (MarketSync.Scanner and MarketSync.Scanner.RecentResults) or {}
-            for _, r in ipairs(recent) do
-                local dbKey = r.dbKey or (r.itemKey and MarketSync.NormalizeItemKey and select(1, MarketSync.NormalizeItemKey(r.itemKey)))
-                    or tostring(r.itemID or "")
-                if r.itemID and not seen[dbKey] then
-                    seen[dbKey] = true
-                    table.insert(itemsList, {
-                        dbKey = dbKey,
-                        itemID = r.itemID,
-                        name = r.name,
-                        icon = r.icon,
-                        quality = r.quality,
-                        price = r.unitPrice,
-                        sourceText = "Live Scan Feed",
+            for _, result in ipairs(recent) do
+                if result.itemID then
+                    Consider({
+                        dbKey = tostring(result.dbKey or result.itemID),
+                        observedAt = tonumber(result.time) or 0,
+                        live = result,
+                        price = result.unitPrice,
                     })
                 end
             end
-            -- From PersonalData DB if recent is small
-            if #itemsList < 20 and MarketSyncDB and MarketSync.GetRealmDB then
-                local pData = MarketSync.GetRealmDB().PersonalData or {}
-                for k, v in pairs(pData) do
+            table.sort(candidates, function(a, b)
+                if a.observedAt ~= b.observedAt then return a.observedAt > b.observedAt end
+                return a.dbKey < b.dbKey
+            end)
+            local seen = {}
+            for _, candidate in ipairs(candidates) do
+                local k, r = candidate.dbKey, candidate.live
+                if not seen[k] then
+                    seen[k] = true
                     local id, suffix
-                    if MarketSync.ParseItemIDFromDBKey then
+                    if r then
+                        id = r.itemID
+                    elseif MarketSync.ParseItemIDFromDBKey then
                         id, suffix = MarketSync.ParseItemIDFromDBKey(k)
                     else
                         id = tonumber(k)
                     end
-                    if id and not seen[k] then
-                        seen[k] = true
+                    if id then
                         local lookup = suffix and string.format("item:%d:0:0:0:0:0:%d:0", id, suffix) or id
-                        local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(lookup)
-                        if not name and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
-                            name = MarketSyncDB.ItemInfoCache[id].n
-                            icon = MarketSyncDB.ItemInfoCache[id].ic
-                            qual = MarketSyncDB.ItemInfoCache[id].r
+                        local name, _, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(lookup)
+                        local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id]
+                        if not name and cached then
+                            name, icon, qual = cached.n, cached.ic, cached.r
                         end
-                        local cachedName = MarketSyncDB and MarketSyncDB.ItemInfoCache
-                            and MarketSyncDB.ItemInfoCache[id] and MarketSyncDB.ItemInfoCache[id].n
-                        if suffix and suffix ~= 0 and name and name == cachedName then
+                        if suffix and suffix ~= 0 and name and cached and name == cached.n then
                             name = name .. " (Variant " .. tostring(suffix) .. ")"
                         end
-                        local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(k) or 0
                         table.insert(itemsList, {
-                            dbKey = tostring(k),
+                            dbKey = k,
                             itemID = id,
-                            name = name or ("Item #" .. id),
-                            icon = icon or 134400,
-                            quality = qual or 1,
-                            price = p,
-                            sourceText = "AH Scan Database",
+                            name = (r and r.name) or name or ("Item #" .. id),
+                            icon = (r and r.icon) or icon or 134400,
+                            quality = (r and r.quality) or qual or 1,
+                            price = candidate.price or 0,
+                            sourceText = r and "Live Scan Feed" or "AH Scan Database",
                         })
-                        if #itemsList >= 40 then break end
                     end
                 end
             end
@@ -781,7 +803,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     searchAHBtn:SetScript("OnClick", function()
         if panel.currentItem and MarketSync.SearchInAuctionHouse then
             local success = MarketSync.SearchInAuctionHouse(
-                panel.currentItem.link or panel.currentItem.itemID or panel.currentItem.name)
+                panel.currentItem.name or panel.currentItem.link or panel.currentItem.itemID)
             if not success and not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then
                 print("|cFFFFD100[MarketSync]|r Please visit an Auctioneer to search in the Auction House.")
             end

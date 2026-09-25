@@ -771,8 +771,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                         end
                     else
                         if MarketSync.SearchInAuctionHouse and data.itemID then
-                            local link = data.itemKey and data.itemKey.itemLink
-                            MarketSync.SearchInAuctionHouse(link or data.itemID)
+                            MarketSync.SearchInAuctionHouse(data.name or data.itemID)
                         end
                     end
                 end)

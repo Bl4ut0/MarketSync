@@ -516,6 +516,66 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
   }
 });
 
+test('Auctionator raw full scan retains exact numeric suffix prices without base-key pollution', () => {
+  const L = createLuaEnv(`
+    pendingCallbacks = {}
+    C_Timer.After = function(_, callback)
+      pendingCallbacks[#pendingCallbacks + 1] = callback
+    end
+  `);
+  for (const file of ['Config.lua', 'Sync.lua']) {
+    const source = fs.readFileSync(path.join(marketSyncDir, file), 'utf8');
+    if (lauxlib.luaL_dostring(L, to_luastring(source)) !== 0) {
+      throw new Error(`Failed to load ${file}: ` + to_jsstring(lua.lua_tostring(L, -1)));
+    }
+  }
+  const script = `
+    MarketSync.GetCurrentScanDay = function() return 20500 end
+    MarketSync.GetCurrentBucket = function() return 20500 * 48 + 20 end
+    MarketSync.NormalizeItemKey = function(link)
+      local id, suffix = MarketSync.ParseItemIDFromDBKey(link)
+      if not id then return nil end
+      return suffix and suffix ~= 0 and string.format("p:%d:%d", id, suffix) or tostring(id),
+        id, { itemID = id, itemSuffix = suffix or 0 }
+    end
+    local function Row(link, quantity, buyout)
+      local info = { [3] = quantity, [10] = buyout }
+      return { itemLink = link, auctionInfo = info }
+    end
+    local done
+    local exactKeys = {}
+    local scan = {
+      Row("item:4471:0:0:0:0:0:12:0", 2, 2000),
+      Row("item:4471:0:0:0:0:0:12:0", 3, 2700),
+      Row("item:4471:0:0:0:0:0:13:0", 1, 1800),
+      Row("item:4471:0:0:0:0:0:-14:0", 1, 1600),
+      Row("item:4472:0:0:0:0:0:0:0", 4, 4000),
+    }
+    assert(MarketSync.CaptureAuctionatorRawSuffixScan(scan, function(count) done = count end, exactKeys))
+    local steps = 0
+    while #pendingCallbacks > 0 do
+      local callback = table.remove(pendingCallbacks, 1)
+      callback()
+      steps = steps + 1
+      assert(steps < 20, "capture should finish in bounded ticks")
+    end
+    local entries = MarketSync.GetRealmDB().PersonalData
+    assert(done == 3, "expected three exact suffix records")
+    assert(entries["p:4471:12"].m == 900 and entries["p:4471:13"].m == 1800,
+      "suffixes must retain separate lowest unit prices")
+    assert(entries["p:4471:12"].vh["20500"] == "20:p0:5", "quantity should aggregate for exact suffix")
+    assert(entries["p:4471:-14"].m == 1600 and exactKeys["p:4471:-14"],
+      "negative suffix must remain distinct and be refreshed in the browse index")
+    assert(entries["4471"] == nil and entries["4472"] == nil,
+      "raw suffix capture must not invent or overwrite base-item records")
+    assert(entries["p:4471:12"].latestBucket == 20500 * 48 + 20,
+      "exact suffix must be eligible for guild sync")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
+    throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 // ---------------------------------------------------------------------
 // TEST 5: Network Load Simulation: 20-Player Swarm Pull Contention & Election
 // ---------------------------------------------------------------------

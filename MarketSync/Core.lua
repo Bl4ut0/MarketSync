@@ -199,6 +199,17 @@ local function RegisterAuctionatorHooks()
             or (MarketSync.IsNeutralAHSession and MarketSync.IsNeutralAHSession())
     end
 
+    local function WarnGroupedSuffixKeys(keys)
+        if not MarketSyncDB or MarketSyncDB.AuctionatorGroupedSuffixWarningShown then return end
+        for key in pairs(keys or {}) do
+            if type(key) == "string" and key:match("^gr:%d+:") then
+                MarketSyncDB.AuctionatorGroupedSuffixWarningShown = true
+                print("|cFFFF8800[MarketSync]|r Auctionator's targeted or neutral scan supplied grouped suffix prices only. Exact numeric suffix pricing is captured from main AH full scans when raw links are available.")
+                return
+            end
+        end
+    end
+
     local function SnapshotAuctionatorChanges(authoritative, exactKeys)
         if IsNeutralCaptureActive() or not MarketSync.SnapshotPersonalScan then return false end
         local ok, count, todayCount, changedCount = pcall(MarketSync.SnapshotPersonalScan, {
@@ -244,7 +255,7 @@ local function RegisterAuctionatorHooks()
         end
     end
 
-    local function HandleFullScanComplete()
+    local function HandleFullScanComplete(rawScan, isAuctionatorFullScan)
         local completedScope = fullScanState.scope or (IsNeutralCaptureActive() and "N" or "M")
         local completedKeys = fullScanState.keys
         ResetFullScanState()
@@ -252,43 +263,56 @@ local function RegisterAuctionatorHooks()
 
         if completedScope == "N" then
             suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
+            WarnGroupedSuffixKeys(completedKeys)
             if MarketSync.CompleteNeutralFullScan then
                 MarketSync.CompleteNeutralFullScan(completedKeys)
             end
             return
         end
-        MarketSync._ahFullScanCompleted = true
-        -- Without a SetPrice key hook, fail closed. Sweeping Auctionator's whole
-        -- DB can certify prices imported from guild sync or partial searches.
-        if completedKeys == nil then
-            suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
-            MarketSync.Debug("Auctionator full scan completed without exact keys; freshness was not advanced")
-            return
+        suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
+        local function FinishSnapshot()
+            MarketSync._ahFullScanCompleted = true
+            -- Without a SetPrice key hook, fail closed. Sweeping Auctionator's whole
+            -- DB can certify prices imported from guild sync or partial searches.
+            if completedKeys == nil then
+                MarketSync.Debug("Auctionator full scan completed without exact keys; freshness was not advanced")
+                return
+            end
+
+            local ok, _, todayCount = SnapshotAuctionatorChanges(true, completedKeys)
+            if not ok then return end
+            local realmDB = MarketSync.GetRealmDB()
+            local now, today = time(), MarketSync.GetCurrentScanDay()
+            realmDB.PersonalScanTime, realmDB.SwarmTSF = now, now
+            realmDB.CachedScanStats = nil
+            if MarketSync.GetMyLatestScanDay and MarketSync.GetMyLatestScanDay() == today then
+                realmDB.LastCountDay = today
+                realmDB.LastTodayCount = tonumber(todayCount) or 0
+            end
+            if C_Timer and C_Timer.After then
+                if MarketSync.BuildSearchIndex then
+                    C_Timer.After(1, function()
+                        if MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
+                    end)
+                end
+                if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+                    C_Timer.After(2, function()
+                        if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end
+                    end)
+                end
+            end
         end
 
-        local ok, _, todayCount = SnapshotAuctionatorChanges(true, completedKeys)
-        if not ok then return end
-        suppressNextScheduledDBSnapshot = auctionatorDBUpdateRegistered
-        local realmDB = MarketSync.GetRealmDB()
-        local now, today = time(), MarketSync.GetCurrentScanDay()
-        realmDB.PersonalScanTime, realmDB.SwarmTSF = now, now
-        realmDB.CachedScanStats = nil
-        if MarketSync.GetMyLatestScanDay and MarketSync.GetMyLatestScanDay() == today then
-            realmDB.LastCountDay = today
-            realmDB.LastTodayCount = tonumber(todayCount) or 0
-        end
-        if C_Timer and C_Timer.After then
-            if MarketSync.BuildSearchIndex then
-                C_Timer.After(1, function()
-                    if MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
-                end)
-            end
-            if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
-                C_Timer.After(2, function()
-                    if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end
-                end)
+        if isAuctionatorFullScan and completedKeys then
+            local capture = MarketSync.CaptureAuctionatorRawSuffixScan
+            local started = type(capture) == "function" and capture(rawScan, FinishSnapshot, completedKeys)
+            if started then return end
+            if MarketSyncDB and not MarketSyncDB.AuctionatorSuffixFidelityWarningShown then
+                MarketSyncDB.AuctionatorSuffixFidelityWarningShown = true
+                print("|cFFFF8800[MarketSync]|r Auctionator did not provide raw scan links. Exact numeric suffix prices cannot be captured from this scan; grouped prices are still available.")
             end
         end
+        FinishSnapshot()
     end
 
     local function ScheduleDBSnapshot()
@@ -304,6 +328,7 @@ local function RegisterAuctionatorHooks()
             local keys = pendingAuctionatorKeys
             pendingAuctionatorKeys = {}
             if auctionatorSetPriceHookInstalled and next(keys) then
+                WarnGroupedSuffixKeys(keys)
                 SnapshotAuctionatorChanges(false, keys)
             end
         end)
@@ -314,7 +339,7 @@ local function RegisterAuctionatorHooks()
     local incrementalScanEvents = Auctionator.IncrementalScan and Auctionator.IncrementalScan.Events
     if fullScanEvents then table.insert(scanEventSets, fullScanEvents) end
     if incrementalScanEvents then table.insert(scanEventSets, incrementalScanEvents) end
-    function auctionatorFullScanListener:ReceiveEvent(eventName)
+    function auctionatorFullScanListener:ReceiveEvent(eventName, scanData)
         if not (MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true) then return end
         if #scanEventSets == 0 then return end
         local ok, err = pcall(function()
@@ -324,7 +349,7 @@ local function RegisterAuctionatorHooks()
                         HandleFullScanStart()
                         break
                     elseif events.ScanComplete and eventName == events.ScanComplete then
-                        HandleFullScanComplete()
+                        HandleFullScanComplete(scanData, events == fullScanEvents)
                         break
                     elseif events.ScanFailed and eventName == events.ScanFailed then
                         HandleFullScanFailed()
