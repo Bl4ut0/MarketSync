@@ -91,6 +91,33 @@ test('auto-selects AuctionatorProvider when Auctionator is loaded without scanne
   `);
 });
 
+test('uses Auctionator item-ID APIs for numeric price and age fallbacks', () => {
+  const L = createLuaState(`
+    Auctionator = {
+      Database = { db = {} },
+      API = { v1 = {
+        GetAuctionPriceByItemID = function(caller, id)
+          assert(caller == "MarketSync" and type(id) == "number")
+          return 9876
+        end,
+        GetAuctionAgeByItemID = function(caller, id)
+          assert(caller == "MarketSync" and type(id) == "number")
+          return 1.25
+        end,
+        GetAuctionPriceByItemLink = function() error("Item-link API received an item ID") end,
+        GetAuctionAgeByItemLink = function() error("Item-link API received an item ID") end,
+      }},
+    }
+  `);
+  execLua(L, `
+    MarketSync.Provider.Select("none")
+    assert(MarketSync.GetAuctionPrice(1234) == 9876)
+    assert(MarketSync.GetAuctionPrice("1234") == 9876)
+    assert(MarketSync.GetAuctionAge(1234) == 1.25)
+    assert(MarketSync.GetAuctionAge("1234") == 1.25)
+  `);
+});
+
 test('falls back to NullProvider without error when no auction backends are loaded', () => {
   const L = createLuaState(`
     MarketSyncForeverScanner = nil

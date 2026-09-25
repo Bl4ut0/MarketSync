@@ -790,10 +790,18 @@ function MarketSync.GetAuctionPrice(itemLink)
         local price = MarketSync.Provider.GetPrice(itemLink)
         if price ~= nil then return price end
     end
-    if Auctionator and Auctionator.API and Auctionator.API.v1
-        and not (type(itemLink) == "string" and itemLink:match("^p:%d+:%-?%d+$")) then
-        local aPrice = Auctionator.API.v1.GetAuctionPriceByItemLink(ADDON_NAME, itemLink)
-        if aPrice ~= nil then return aPrice end
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    if api then
+        local itemType = type(itemLink)
+        local itemID = itemType == "number" and itemLink
+            or (itemType == "string" and itemLink:match("^%d+$") and tonumber(itemLink))
+        local method = itemID and api.GetAuctionPriceByItemID
+            or (itemType == "string" and not itemLink:match("^p:%d+:%-?%d+$")
+                and api.GetAuctionPriceByItemLink)
+        if type(method) == "function" then
+            local ok, aPrice = pcall(method, ADDON_NAME, itemID or itemLink)
+            if ok and aPrice ~= nil then return aPrice end
+        end
     end
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
     if realmDB and realmDB.PersonalData and itemLink then
@@ -815,8 +823,18 @@ function MarketSync.GetAuctionAge(itemLink)
         local age = MarketSync.Provider.GetPriceAge(itemLink)
         if age ~= nil then return age end
     end
-    if Auctionator and Auctionator.API and Auctionator.API.v1 then
-        return Auctionator.API.v1.GetAuctionAgeByItemLink(ADDON_NAME, itemLink)
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    if api then
+        local itemType = type(itemLink)
+        local itemID = itemType == "number" and itemLink
+            or (itemType == "string" and itemLink:match("^%d+$") and tonumber(itemLink))
+        local method = itemID and api.GetAuctionAgeByItemID
+            or (itemType == "string" and not itemLink:match("^p:%d+:%-?%d+$")
+                and api.GetAuctionAgeByItemLink)
+        if type(method) == "function" then
+            local ok, age = pcall(method, ADDON_NAME, itemID or itemLink)
+            if ok then return age end
+        end
     end
     return nil
 end
