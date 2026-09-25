@@ -65,6 +65,7 @@ Fields on every event:
 | `scanId` | string | Opaque batch identifier; compare for equality within the current session. |
 | `source` | string | `local` or `synced` as defined above. |
 | `scope` | string | `main` or `neutral` as defined above. |
+| `scanTime` | number | Unix timestamp of the overall scan batch. For `local` scans, this is the authoritative realm time (`GetServerTime()`) when executed. For `synced` transfers, this is the sender's advertised `scanTime` from protocol negotiation. Use this to determine freshness between scans. |
 
 `cancel` additionally has `reason` (string). There is no progress event, completion count, scan type, provider name, realm, faction, game build, sender name, or upload status in v1.
 
@@ -72,12 +73,14 @@ Fields on `observation` only:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
+| `scanTime` | number | Unix timestamp of the scan batch this observation belongs to. |
 | `key` | string | Exact MarketSync database key for the item/variant. Preserve verbatim; encodings vary by provider. |
 | `itemID` | number or `nil` | Parsed item ID when possible. |
 | `itemSuffix` | number or `nil` | Parsed random suffix when possible. Base items may be `0` **or `nil`**, depending on the producer. |
 | `unitPrice` | number | Copper per unit; MarketSync's recorded price for this item/variant. |
 | `quantity` | number or `nil` | Recorded available quantity when positive and known; `nil` means unknown. Never coerce unknown to zero or one. |
-| `observedAt` | number or `nil` | Unix-second observation time when retained; `nil` means exact seconds are unavailable. |
+| `observedAt` | number or `nil` | Exact Unix-second observation time when recorded locally; `nil` for synced historical buckets where only the 30-minute window was transmitted. |
+| `observedTime` | number or `nil` | Calculated Unix-second timestamp for the observation. Exact for local scans; for synced 30m buckets, represents the start of the 30m window in shared realm time ($\pm 15$ min precision). |
 | `timePrecision` | string | `exact`, `30m`, `day`, or `unknown`, described below. |
 | `observedDay` | number or `nil` | Source scan-day number for historical/day-bucket observations. |
 | `observedBucketOffset` | number or `nil` | Half-hour slot within `observedDay`, from `0` to `47`. |
@@ -88,13 +91,13 @@ Optional fields are absent in Lua when unknown (`nil`). Do not identify an item 
 
 | Path | Time fields | Quantity |
 | --- | --- | --- |
-| Native MarketSync main-AH scan | `observedAt` is the Unix second at result recording; `timePrecision="exact"`. | Aggregated available quantity when positive; otherwise `nil`. |
-| Auctionator-backed main-AH full scan | Auctionator `latest.seenAt` if supplied (`exact`); otherwise `observedAt=nil` (`unknown`). | Auctionator's recorded daily availability when positive; otherwise `nil`. This is not a raw per-listing count. |
-| Auctionator-backed neutral-AH full scan | `observedAt=nil`, `observedDay`, `timePrecision="day"`. | Recorded neutral quantity when positive; otherwise `nil`. |
-| Verified main-AH guild transfer | `observedAt=nil`, `observedDay`, `observedBucketOffset`, `timePrecision="30m"`. | Transmitted bucket quantity when positive; otherwise `nil`. |
-| Verified neutral-AH guild transfer | `observedAt=nil`, `observedDay`, `timePrecision="day"`. | Transmitted quantity when positive; otherwise `nil`. |
+| Native MarketSync main-AH scan | `observedAt` and `observedTime` are authoritative realm seconds (`GetServerTime()`); `timePrecision="exact"`. `scanTime` matches `PersonalScanTime`. | Aggregated available quantity when positive; otherwise `nil`. |
+| Auctionator-backed main-AH full scan | Auctionator `latest.seenAt` if supplied (`exact`); `observedTime` is `seenAt` or `scanTime`. `scanTime` matches `PersonalScanTime`. | Auctionator's recorded daily availability when positive; otherwise `nil`. This is not a raw per-listing count. |
+| Auctionator-backed neutral-AH full scan | `observedAt=nil`, `observedDay`, `observedTime` (start of day), `timePrecision="day"`. `scanTime` matches scan completion. | Recorded neutral quantity when positive; otherwise `nil`. |
+| Verified main-AH guild transfer | `observedAt=nil`, `observedDay`, `observedBucketOffset`, `observedTime` (start of 30m window, $\pm 15$ min precision), `timePrecision="30m"`. `scanTime` is sender's advertised scan time (`SwarmTSF`). | Transmitted bucket quantity when positive; otherwise `nil`. |
+| Verified neutral-AH guild transfer | `observedAt=nil`, `observedDay`, `observedTime` (start of day), `timePrecision="day"`. `scanTime` is sender's advertised neutral scan time. | Transmitted quantity when positive; otherwise `nil`. |
 
-Guild protocol v2 transmits main-AH history in 30-minute buckets and neutral history by day; it does **not** transmit each original Unix second. Do not substitute local receive time, transfer completion time, or `scanTime` as an observation time. Scan-day numbers use the active provider's epoch; do not blindly multiply `observedDay` by 86,400 without accounting for that provider. Exact timestamps for synced records would require a future wire-protocol revision.
+Guild protocol v2 transmits main-AH history in 30-minute buckets and neutral history by day; it does **not** transmit each original sub-minute Unix second over in-game chat to prevent chat throttles. The calculated `observedTime` provides the realm timestamp for that 30-minute interval ($\pm 15$ minutes). The batch-level `scanTime` field is always available on all events (`start`, `observation`, `finish`, `cancel`) and should be used to establish chronological ordering and freshness between different scans.
 
 ## Coverage and import guidance
 
@@ -110,12 +113,14 @@ Current coverage is native main-AH scans and manual results, Auctionator **full*
     scanId = "sync-example-session",
     source = "synced",
     scope = "main",
+    scanTime = 1789725600,   -- sender's advertised scanTime (used for freshness comparison)
     key = "p:12345:-17",
     itemID = 12345,
     itemSuffix = -17,
     unitPrice = 25000,       -- copper per unit
     quantity = 4,
-    observedAt = nil,        -- exact second was not on the sync wire
+    observedAt = nil,        -- exact sub-minute second was not on the sync wire
+    observedTime = 1789724400, -- start of the 30-minute bucket window in shared realm time
     observedDay = 20714,
     observedBucketOffset = 19,
     timePrecision = "30m",

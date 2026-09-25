@@ -1033,11 +1033,13 @@ function MarketSync.SnapshotPersonalScan(options)
                     if observationScanID and MarketSync.ObservationAPI then
                         local itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(tostring(dbKey))
                         local seenAt = data.latest and tonumber(data.latest.seenAt) or nil
+                        local scanTime = (type(options) == "table" and options.scanTime) or (MarketSync.GetServerTime and MarketSync.GetServerTime() or time())
                         MarketSync.ObservationAPI.v1.Emit({ event = "observation",
                             scanId = observationScanID, source = "local", scope = "main",
+                            scanTime = scanTime,
                             key = tostring(dbKey), itemID = itemID, itemSuffix = itemSuffix,
                             unitPrice = observedPrice, quantity = qty > 0 and qty or nil,
-                            observedAt = seenAt, timePrecision = seenAt and "exact" or "unknown" })
+                            observedAt = seenAt, observedTime = seenAt or scanTime, timePrecision = seenAt and "exact" or "unknown" })
                     end
                     
                     local histStr, historyChanged, accepted = MergeTimeseriesPoint(

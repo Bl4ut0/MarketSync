@@ -22,7 +22,8 @@ end
 
 function API.v1.NewScanID(source)
     serial = serial + 1
-    return string.format("%s-%d-%d", source or "local", time(), serial)
+    local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    return string.format("%s-%d-%d", source or "local", now, serial)
 end
 
 function API.v1.Emit(event)

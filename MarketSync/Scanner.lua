@@ -190,10 +190,13 @@ end
 
 function S.Cancel(reason)
     if S.Active and S.ObservationScanID and MarketSync.ObservationAPI then
+        local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
         MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = S.ObservationScanID,
-            source = "local", scope = "main", reason = reason or "cancelled" })
+            source = "local", scope = "main", scanTime = S.ScanTime or now,
+            reason = reason or "cancelled" })
     end
     S.ObservationScanID = nil
+    S.ScanTime = nil
     S.Generation = S.Generation + 1
     S.Active = false
     StopDebugProgressTicker()
@@ -238,7 +241,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         or GetVariantItemLink(itemID, normalizedKey.itemSuffix)
     normalizedKey.dbKey = dbKey
 
-    local now = time()
+    local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
 
     -- Debounce duplicate event bursts for identical observation within 2 seconds
     if not isFullScan then
@@ -255,7 +258,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         and observationAPI.NewScanID("local") or nil
     if standaloneScanID then
         observationAPI.Emit({ event = "start", scanId = standaloneScanID,
-            source = "local", scope = "main" })
+            source = "local", scope = "main", scanTime = now })
     end
 
     local realmDB = MarketSync.GetRealmDB()
@@ -293,13 +296,14 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     if observationAPI then
         observationAPI.Emit({ event = "observation",
             scanId = S.ObservationScanID or standaloneScanID,
-            source = "local", scope = "main", key = dbKey, itemID = itemID,
+            source = "local", scope = "main", scanTime = S.ScanTime or now,
+            key = dbKey, itemID = itemID,
             itemSuffix = normalizedKey.itemSuffix, unitPrice = unitPrice,
             quantity = tonumber(available) and available > 0 and available or nil,
-            observedAt = now, timePrecision = "exact" })
+            observedAt = now, observedTime = now, timePrecision = "exact" })
         if standaloneScanID then
             observationAPI.Emit({ event = "finish", scanId = standaloneScanID,
-                source = "local", scope = "main" })
+                source = "local", scope = "main", scanTime = now })
         end
     end
 
@@ -475,9 +479,10 @@ function S.ScheduleNext()
             S.Active = false
             if S.ObservationScanID and MarketSync.ObservationAPI then
                 MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = S.ObservationScanID,
-                    source = "local", scope = "main" })
+                    source = "local", scope = "main", scanTime = S.ScanTime or (MarketSync.GetServerTime and MarketSync.GetServerTime() or time()) })
                 S.ObservationScanID = nil
             end
+            S.ScanTime = nil
             StopDebugProgressTicker()
             S.Pending = nil
             S.Status = "Scan Complete"
@@ -559,10 +564,12 @@ function S.StartScan(itemsOrKeys, label)
     end
 
     S.Progress.total = #S.Queue
+    local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    S.ScanTime = now
     if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
         S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
         MarketSync.ObservationAPI.v1.Emit({ event = "start", scanId = S.ObservationScanID,
-            source = "local", scope = "main" })
+            source = "local", scope = "main", scanTime = now })
     end
     S.Progress.current = 0
     S.Status = label or string.format("Starting scan of %d items...", S.Progress.total)
@@ -686,10 +693,12 @@ function S.StartFullScan()
     S.Progress.total = 0
     S.Progress.current = 0
     S.Status = "Requesting full AH snapshot from server..."
+    local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    S.ScanTime = now
     if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
         S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
         MarketSync.ObservationAPI.v1.Emit({ event = "start", scanId = S.ObservationScanID,
-            source = "local", scope = "main" })
+            source = "local", scope = "main", scanTime = now })
     end
     StartDebugProgressTicker()
     S.Notify()
@@ -698,9 +707,10 @@ function S.StartFullScan()
     if not ok or requestResult == false then
         if S.ObservationScanID and MarketSync.ObservationAPI then
             MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = S.ObservationScanID,
-                source = "local", scope = "main", reason = "request failed" })
+                source = "local", scope = "main", scanTime = S.ScanTime or now, reason = "request failed" })
             S.ObservationScanID = nil
         end
+        S.ScanTime = nil
         S.Active = false
         StopDebugProgressTicker()
         S.Status = "ReplicateItems request failed"
@@ -781,17 +791,19 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         local scanGeneration = S.Generation
 
         local function FinishFullScan()
+            local finishTime = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
             if S.ObservationScanID and MarketSync.ObservationAPI then
                 MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = S.ObservationScanID,
-                    source = "local", scope = "main" })
+                    source = "local", scope = "main", scanTime = S.ScanTime or finishTime })
                 S.ObservationScanID = nil
             end
-            MarketSyncDB.LastFullScanAt = time()
+            S.ScanTime = nil
+            MarketSyncDB.LastFullScanAt = finishTime
             local realmDB = MarketSync.GetRealmDB()
             if realmDB then
-                realmDB.FullScanTime = time()
-                realmDB.PersonalScanTime = time()
-                realmDB.SwarmTSF = time()
+                realmDB.FullScanTime = finishTime
+                realmDB.PersonalScanTime = finishTime
+                realmDB.SwarmTSF = finishTime
             end
             S.Active = false
             S.ReplicateProcessing = false

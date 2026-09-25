@@ -177,7 +177,8 @@ end
 
 function ForeverProvider.GetCurrentBucket()
     -- Native Unix 30-minute tracking buckets
-    return math.floor(time() / 1800)
+    local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    return math.floor(now / 1800)
 end
 
 function ForeverProvider.GetMarketID()

@@ -102,6 +102,14 @@ function MarketSync.FromBase36(s)
     return tonumber(s, 36) or 0
 end
 
+function MarketSync.GetServerTime()
+    if GetServerTime then
+        local st = GetServerTime()
+        if st and st > 0 then return st end
+    end
+    return time()
+end
+
 -- ================================================================
 -- GRANULAR TIME-SERIES
 -- Maps the current UNIX time into a 30-minute tracking bucket
@@ -112,7 +120,8 @@ function MarketSync.GetCurrentBucket()
         return MarketSync.Provider.GetCurrentBucket()
     end
     local dayZero = Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0 or 1600000000
-    return math.floor((time() - dayZero) / 1800)
+    local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    return math.floor((now - dayZero) / 1800)
 end
 
 -- Main prefix for control messages (ADV, PULL, ACCEPT, REQ, RES, ERR)

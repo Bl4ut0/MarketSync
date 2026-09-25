@@ -36,13 +36,15 @@ assert(not api.Register("bad"))
 local first = api.NewScanID("local")
 local second = api.NewScanID("local")
 assert(first ~= second)
-api.Emit({ event = "observation", scanId = first, quantity = 3 })
+api.Emit({ event = "observation", scanId = first, scanTime = 1800000000, observedTime = 1800000000, quantity = 3 })
 assert(#received == 2)
 assert(received[1] ~= received[2])
 assert(received[2].event == "observation" or received[1].event == "observation")
+assert(received[1].scanTime == 1800000000 and received[1].observedTime == 1800000000)
 api.Unregister(listener)
-api.Emit({ event = "finish", scanId = first })
+api.Emit({ event = "finish", scanId = first, scanTime = 1800000000 })
 assert(#received == 3)
+assert(received[3].scanTime == 1800000000)
 `;
 if (lauxlib.luaL_dostring(L, to_luastring(script)) !== lua.LUA_OK) {
   throw new Error(lua.lua_tojsstring(L, -1));

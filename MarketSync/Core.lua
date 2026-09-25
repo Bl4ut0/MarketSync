@@ -210,7 +210,7 @@ local function RegisterAuctionatorHooks()
         end
     end
 
-    local function SnapshotAuctionatorChanges(authoritative, exactKeys, observationScanID)
+    local function SnapshotAuctionatorChanges(authoritative, exactKeys, observationScanID, scanTime)
         if IsNeutralCaptureActive() or not MarketSync.SnapshotPersonalScan then return false end
         local ok, count, todayCount, changedCount = pcall(MarketSync.SnapshotPersonalScan, {
             evaluateNotifications = true,
@@ -218,6 +218,7 @@ local function RegisterAuctionatorHooks()
             keys = exactKeys,
             exactKeys = exactKeys ~= nil,
             observationScanID = observationScanID,
+            scanTime = scanTime,
         })
         if not ok then
             MarketSync.Debug("Auctionator database snapshot failed: " .. tostring(count))
@@ -234,25 +235,30 @@ local function RegisterAuctionatorHooks()
     local function ResetFullScanState()
         fullScanState.active, fullScanState.scope, fullScanState.keys = false, nil, nil
         fullScanState.observationScanID = nil
+        fullScanState.scanTime = nil
         MarketSync._auctionatorScanActive = false
     end
 
     local function HandleFullScanStart()
+        local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
         if fullScanState.observationScanID and MarketSync.ObservationAPI then
             MarketSync.ObservationAPI.v1.Emit({ event = "cancel",
                 scanId = fullScanState.observationScanID, source = "local",
                 scope = fullScanState.scope == "N" and "neutral" or "main",
+                scanTime = fullScanState.scanTime or now,
                 reason = "replaced by new scan" })
         end
         pendingAuctionatorKeys = {}
         fullScanState.active = true
         fullScanState.scope = IsNeutralCaptureActive() and "N" or "M"
         fullScanState.keys = auctionatorSetPriceHookInstalled and {} or nil
+        fullScanState.scanTime = now
         if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
             fullScanState.observationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
             MarketSync.ObservationAPI.v1.Emit({ event = "start",
                 scanId = fullScanState.observationScanID, source = "local",
-                scope = fullScanState.scope == "N" and "neutral" or "main" })
+                scope = fullScanState.scope == "N" and "neutral" or "main",
+                scanTime = now })
         end
         MarketSync._auctionatorScanActive = true
         if fullScanState.scope == "N" and MarketSync.BeginNeutralFullScan then
@@ -262,10 +268,12 @@ local function RegisterAuctionatorHooks()
 
     local function HandleFullScanFailed()
         local failedScope = fullScanState.scope
+        local failedScanTime = fullScanState.scanTime or (MarketSync.GetServerTime and MarketSync.GetServerTime() or time())
         if fullScanState.observationScanID and MarketSync.ObservationAPI then
             MarketSync.ObservationAPI.v1.Emit({ event = "cancel",
                 scanId = fullScanState.observationScanID, source = "local",
-                scope = failedScope == "N" and "neutral" or "main", reason = "scan failed" })
+                scope = failedScope == "N" and "neutral" or "main",
+                scanTime = failedScanTime, reason = "scan failed" })
         end
         ResetFullScanState()
         pendingAuctionatorKeys = {}
@@ -278,6 +286,7 @@ local function RegisterAuctionatorHooks()
         local completedScope = fullScanState.scope or (IsNeutralCaptureActive() and "N" or "M")
         local completedKeys = fullScanState.keys
         local observationScanID = fullScanState.observationScanID
+        local scanTime = fullScanState.scanTime or (MarketSync.GetServerTime and MarketSync.GetServerTime() or time())
         ResetFullScanState()
         pendingAuctionatorKeys = {}
 
@@ -295,17 +304,20 @@ local function RegisterAuctionatorHooks()
                     if price and price > 0 then
                         local itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(tostring(dbKey))
                         local quantity = tonumber(entry.vq)
+                        local dayNum = tonumber(entry.vd)
+                        local observedTime = dayNum and MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(dayNum) or nil
                         MarketSync.ObservationAPI.v1.Emit({ event = "observation",
                             scanId = observationScanID, source = "local", scope = "neutral",
+                            scanTime = scanTime,
                             key = tostring(dbKey), itemID = itemID, itemSuffix = itemSuffix,
                             unitPrice = price, quantity = quantity and quantity > 0 and quantity or nil,
-                            observedAt = nil, observedDay = tonumber(entry.vd), timePrecision = "day" })
+                            observedAt = nil, observedTime = observedTime, observedDay = dayNum, timePrecision = "day" })
                     end
                 end
             end
             if observationScanID and MarketSync.ObservationAPI then
                 MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = observationScanID,
-                    source = "local", scope = "neutral" })
+                    source = "local", scope = "neutral", scanTime = scanTime })
             end
             return
         end
@@ -318,25 +330,25 @@ local function RegisterAuctionatorHooks()
                 MarketSync.Debug("Auctionator full scan completed without exact keys; freshness was not advanced")
                 if observationScanID and MarketSync.ObservationAPI then
                     MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = observationScanID,
-                        source = "local", scope = "main", reason = "exact keys unavailable" })
+                        source = "local", scope = "main", scanTime = scanTime, reason = "exact keys unavailable" })
                 end
                 return
             end
 
-            local ok, _, todayCount = SnapshotAuctionatorChanges(true, completedKeys, observationScanID)
+            local ok, _, todayCount = SnapshotAuctionatorChanges(true, completedKeys, observationScanID, scanTime)
             if not ok then
                 if observationScanID and MarketSync.ObservationAPI then
                     MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = observationScanID,
-                        source = "local", scope = "main", reason = "snapshot failed" })
+                        source = "local", scope = "main", scanTime = scanTime, reason = "snapshot failed" })
                 end
                 return
             end
             if observationScanID and MarketSync.ObservationAPI then
                 MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = observationScanID,
-                    source = "local", scope = "main" })
+                    source = "local", scope = "main", scanTime = scanTime })
             end
             local realmDB = MarketSync.GetRealmDB()
-            local now, today = time(), MarketSync.GetCurrentScanDay()
+            local now, today = scanTime, MarketSync.GetCurrentScanDay()
             realmDB.PersonalScanTime, realmDB.SwarmTSF = now, now
             realmDB.CachedScanStats = nil
             if MarketSync.GetMyLatestScanDay and MarketSync.GetMyLatestScanDay() == today then
