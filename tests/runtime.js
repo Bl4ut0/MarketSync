@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const deps = path.resolve(__dirname, '../../ItemRack-Forever/node_modules');
+const deps = path.resolve(__dirname, '../node_modules'),
+  path.resolve(__dirname, '../../ItemRack-Forever/node_modules');
 const luaparse = require(path.join(deps, 'luaparse'));
 const { lua, lauxlib, lualib, to_luastring } = require(path.join(deps, 'fengari'));
 const root = path.resolve(__dirname, '../MarketSyncForeverScanner');

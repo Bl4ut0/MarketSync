@@ -1,0 +1,13 @@
+{
+  "name": "marketsync",
+  "version": "0.9.2",
+  "description": "MarketSync development and test tooling",
+  "private": true,
+  "scripts": {
+    "test": "node tests/test_observation_api.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_provider.js"
+  },
+  "devDependencies": {
+    "fengari": "^0.1.4",
+    "luaparse": "^0.3.1"
+  }
+}
