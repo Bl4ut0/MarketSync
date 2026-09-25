@@ -47,7 +47,13 @@ local function AttachBuyAnalyticsButton(buyFrame, btnName)
     local btn = CreateFrame("Button", btnName, buyFrame, "UIPanelButtonTemplate")
     btn:SetSize(110, 22)
     btn:SetText("View Analytics")
-    btn:SetPoint("TOPRIGHT", buyFrame, "TOPRIGHT", -24, -10)
+    -- Keep this action in the buy-frame navigation row. The old top-right
+    -- anchor covered the commodity list's "Available" column header.
+    if buyFrame.BackButton then
+        btn:SetPoint("LEFT", buyFrame.BackButton, "RIGHT", 8, 0)
+    else
+        btn:SetPoint("TOPLEFT", buyFrame, "TOPLEFT", 129, -9)
+    end
     btn:SetScript("OnClick", function()
         local itemID, itemLink = GetBuyFrameItem(buyFrame)
         if itemID or itemLink then
