@@ -113,6 +113,15 @@ test('Scanner cooldown remaining and multi-list scanning', () => {
     local ok = S.ScanMultipleLists({ "ListA", "ListB" })
     assert(ok == true, "ScanMultipleLists should return true")
     assert(S.Progress.total == 3, "expected 3 unique items in queue, got " .. tostring(S.Progress.total))
+
+    S.Cancel("test")
+    Auctionator = { Database = {} }
+    MarketSyncDB.UseAuctionatorScanner = true
+    assert(S.StartScan({ 1001 }, "blocked") == false, "native item scan should be blocked")
+    assert(S.StartFullScan() == false, "native full scan should be blocked")
+    assert(S.Active == false, "blocked scan must remain inactive")
+    MarketSyncDB.UseAuctionatorScanner = false
+    assert(S.StartScan({ 1001 }, "override") == true, "settings override should restore native scanning")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(checkScript)) !== 0) {
     throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

@@ -1040,6 +1040,12 @@ local function CreateMainFrame()
         cb:SetScript("OnClick", function(self)
             local isChecked = self:GetChecked()
             MarketSyncDB[key] = isChecked
+            if key == "UseAuctionatorScanner" then
+                MarketSyncDB.AuctionatorScannerUserChoice = true
+                if isChecked and MarketSync.Scanner and MarketSync.Scanner.Active then
+                    MarketSync.Scanner.Cancel("Auctionator scanning enabled")
+                end
+            end
             print(string.format("|cFF00FF00[MarketSync]|r %s %s", label, isChecked and "Enabled" or "Disabled"))
             if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then

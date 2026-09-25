@@ -21,6 +21,18 @@ MarketSync.Scanner = {
 
 local S = MarketSync.Scanner
 
+function S.IsDisabledByAuctionator()
+    return MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true
+        and Auctionator and Auctionator.Database ~= nil
+end
+
+local function BlockNativeScan()
+    if not S.IsDisabledByAuctionator() then return false end
+    S.Status = "MarketSync scanning disabled while Auctionator scans"
+    S.Notify()
+    return true
+end
+
 local function GetAHAPI()
     return C_AuctionHouse or _G.C_AuctionHouse
 end
@@ -479,6 +491,7 @@ function S.ScheduleNext()
 end
 
 function S.StartScan(itemsOrKeys, label)
+    if BlockNativeScan() then return false end
     if not S.IsAvailable() then
         S.Status = "Auctioneer must be open to scan"
         S.Notify()
@@ -593,6 +606,7 @@ function S.ScanMultipleLists(listNames)
 end
 
 function S.StartFullScan()
+    if BlockNativeScan() then return false end
     if not S.IsAvailable() then
         S.Status = "Auctioneer must be open to scan"
         S.Notify()

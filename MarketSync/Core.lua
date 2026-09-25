@@ -556,17 +556,37 @@ function MarketSync.DownsampleRetention(onComplete)
 end
 
 local eventFrame = CreateFrame("Frame")
+local function HandleAuctionatorScannerDetection()
+    if not (MarketSyncDB and Auctionator and Auctionator.Database) then return end
+    if MarketSyncDB.AuctionatorScannerUserChoice ~= true then
+        MarketSyncDB.UseAuctionatorScanner = true
+    end
+    if MarketSyncDB.UseAuctionatorScanner ~= true then return end
+    if MarketSync.Scanner and MarketSync.Scanner.Active then
+        MarketSync.Scanner.Cancel("Auctionator scanning enabled")
+    end
+    if MarketSync.Provider and MarketSync.Provider.Select then MarketSync.Provider.Select() end
+    if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then
+        MarketSync.AuctionHouse.RefreshTabVisibility()
+    end
+    if not MarketSyncDB.AuctionatorScannerNoticeShown then
+        MarketSyncDB.AuctionatorScannerNoticeShown = true
+        print("|cFF00FF00[MarketSync]|r Auctionator detected. MarketSync scanning is disabled. To re-enable it, turn off 'Use Auctionator scanning' in MarketSync Settings.")
+    end
+end
 SafeRegisterEvent(eventFrame, "ADDON_LOADED")
 SafeRegisterEvent(eventFrame, "PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
 SafeRegisterEvent(eventFrame, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 == "Auctionator" then
+            HandleAuctionatorScannerDetection()
             if not MarketSync.Provider or MarketSync.Provider.GetActiveName() == "auctionator" then
                 RegisterAuctionatorHooks()
             end
         elseif arg1 == ADDON_NAME or arg1 == "AuctionatorAnnouncer" then
             MarketSync.InitializeDB()
+            HandleAuctionatorScannerDetection()
             CreateMinimapButton()
             if MarketSync.Provider and MarketSync.Provider.Initialize then
                 MarketSync.Provider.Initialize()
