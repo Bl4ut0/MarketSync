@@ -1,4 +1,10 @@
-# MarketSync Forever native scanner prototype
+# MarketSync 0.9.0 — Forever
+
+MarketSync is a Forever-first Auction House addon for scans, price history, guild and neutral-AH synchronization, saved shopping lists, and item analytics. Auctionator is optional. If it is installed, MarketSync uses its scan updates by default and its own scanner can be re-enabled in Settings. Processing and Alerts are opt-in beta tabs; Analytics is enabled by default.
+
+Install the packaged `MarketSync` folder under the Forever client's `Interface/AddOns` directory. Open an auctioneer to scan, or use the MarketSync tabs to browse saved prices and history. Open each profession window once before expecting its known recipes to appear in Processing. The current release targets Forever 1.60.1 (build 69893); other game versions have not been validated for this release.
+
+The sections below include technical details and historical notes from the separate native-scanner prototype. They are retained for development context, not as installation instructions for 0.9.0.
 
 ## Current MarketSync Forever processing work
 
@@ -57,7 +63,7 @@ The builder labels a supplied number as supplied for local testing, not validate
 
 ## MarketSync integration after the native test
 
-Current local MarketSync is `0.8.0-rc2`, based on commit `33107fc` with uncommitted changes. It declares Auctionator as a required dependency and uses Auctionator price/age helpers, scan epoch, private database hooks, personal/neutral capture, and shopping-list exports. Making that dependency optional alone is insufficient.
+Historical note: the older `0.8.0-rc2` MarketSync build required Auctionator. The current 0.9.0 Forever build uses an optional provider boundary and can run without Auctionator.
 
 The prototype exposes `MarketSyncForeverScanner.Provider` with `name`, `schema`, `GetMarketID()`, and `GetSnapshot(nativeItemKey)`. `GetSnapshot` returns a copy of the latest complete snapshot, including source, observation time, coverage, unit price, available/priced quantities, and bounded depth. It returns nil when only partial browse data exists.
 

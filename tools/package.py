@@ -44,7 +44,7 @@ def build(output, interface=None):
 
     manifest = {
         "addon": "MarketSync",
-        "version": "0.8.0-forever",
+        "version": "0.9.0",
         "targetVersion": "1.60.1",
         "targetBuild": "69893",
         "interface": interface,

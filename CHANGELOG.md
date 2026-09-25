@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-25
+
+### Added
+- Forever-first native Auction House scanning with optional Auctionator coexistence. MarketSync's scanner is disabled by default when Auctionator is detected and can be re-enabled in Settings.
+- Exact random-suffix item capture from full scans, with separate variant prices, history, and guild-sync keys.
+- Analytics for recent scans, saved shopping lists, and tiered price history. Processing and Alerts are opt-in beta tabs.
+- Craft profitability based on the character's captured recipes, disenchant value ranges for supported items, and item-price threshold alerts.
+
+### Changed
+- Guild and neutral sync preserve verified-source boundaries and compact 30-minute observations. Recent history remains detailed; older observations are downsampled by the existing retention policy.
+- Auctionator scan updates refresh only changed personal Browse rows. Item metadata cache validation runs in bounded slices without modifying price history.
+- Analytics recent-items selection avoids resolving metadata for the entire scan database; the View Analytics action no longer covers the native buy-list header.
+
+### Notes
+- Forever is the primary release target. Older-client ports and the opt-in beta tabs need continued client validation.
+- Disenchant probabilities for Forever custom gear are not independently verified; unsupported green item levels do not receive inferred TBC outcomes.
+
 ## [0.8.0-rc2] - 2026-08-03
 ### Changed
 - **Changed**: Added native Interface 11509 metadata and validated the release candidate against the installed WoW Classic Era/Season of Discovery 1.15.9.68940 client and Auctionator 332.
