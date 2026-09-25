@@ -24,16 +24,13 @@ def build(output, interface=None):
             rel = p.relative_to(ROOT).as_posix()
             files[rel] = p.read_bytes()
 
-    if (ROOT / "README.md").exists():
-        files[ADDON + "/README.md"] = (ROOT / "README.md").read_bytes()
-    if (ROOT / "DATA_EXTRACTION_GUIDE.md").exists():
-        files[ADDON + "/DATA_EXTRACTION_GUIDE.md"] = (ROOT / "DATA_EXTRACTION_GUIDE.md").read_bytes()
-    if (ROOT / "OBSERVATION_API.md").exists():
-        files[ADDON + "/OBSERVATION_API.md"] = (ROOT / "OBSERVATION_API.md").read_bytes()
-    if (ROOT / "PERFORMANCE_AND_SCALE.md").exists():
-        files[ADDON + "/PERFORMANCE_AND_SCALE.md"] = (ROOT / "PERFORMANCE_AND_SCALE.md").read_bytes()
-    if (ROOT / "LICENSE").exists():
-        files[ADDON + "/LICENSE"] = (ROOT / "LICENSE").read_bytes()
+    docs_dir = ROOT / "docs"
+    for doc_name in ["README.md", "DATA_EXTRACTION_GUIDE.md", "OBSERVATION_API.md", "PERFORMANCE_AND_SCALE.md", "LICENSE"]:
+        doc_path = ROOT / doc_name
+        if not doc_path.exists():
+            doc_path = docs_dir / doc_name
+        if doc_path.exists():
+            files[ADDON + "/" + doc_name] = doc_path.read_bytes()
 
     toc_name = ADDON + "/" + ADDON + ".toc"
     toc = files[toc_name].decode("utf-8")

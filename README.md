@@ -2,11 +2,11 @@
 
 MarketSync is a Forever-first Auction House addon for scans, price history, guild and neutral-AH synchronization, saved shopping lists, and item analytics. Auctionator is optional. If it is installed, MarketSync uses its scan updates by default and its own scanner can be re-enabled in Settings. Processing and Alerts are opt-in beta tabs; Analytics is enabled by default.
 
-For external price sites, web dashboards, or Discord bots, see the **[Data Extraction & Web Import Guide](DATA_EXTRACTION_GUIDE.md)** for importing the complete scan database (2,000 to 30,000+ items and history) directly from the game's SavedVariables file with zero software downloads via the browser File System Access API, drag-and-drop, or lightweight scripts.
+For external price sites, web dashboards, or Discord bots, see the **[Data Extraction & Web Import Guide](docs/DATA_EXTRACTION_GUIDE.md)** for importing the complete scan database (2,000 to 30,000+ items and history) directly from the game's SavedVariables file with zero software downloads via the browser File System Access API, drag-and-drop, or lightweight scripts.
 
-Companion addons (ledgers, uploaders, and external trackers) can subscribe to real-time scan observations directly in memory. See the [MarketSync Observation API Guide](OBSERVATION_API.md) for the event schema, lifecycle states, and timestamp precision rules.
+Companion addons (ledgers, uploaders, and external trackers) can subscribe to real-time scan observations directly in memory. See the [MarketSync Observation API Guide](docs/OBSERVATION_API.md) for the event schema, lifecycle states, and timestamp precision rules.
 
-For architecture, benchmarks, and safeguards scaling to 30,000+ items (frame-sliced batching, network bandwidth throttling, and tiered retention downsampling), see the **[Performance, Scaling & Architecture Guide](PERFORMANCE_AND_SCALE.md)**.
+For architecture, benchmarks, and safeguards scaling to 30,000+ items (frame-sliced batching, network bandwidth throttling, and tiered retention downsampling), see the **[Performance, Scaling & Architecture Guide](docs/PERFORMANCE_AND_SCALE.md)**. All guides and technical specifications are indexed in the **[Documentation Hub](docs/README.md)**.
 
 Install the packaged `MarketSync` folder under the Forever client's `Interface/AddOns` directory. Open an auctioneer to scan, or use the MarketSync tabs to browse saved prices and history. Open each profession window once before expecting its known recipes to appear in Processing. The current release targets Forever 1.60.1 (build 69893); other game versions have not been validated for this release.
 
@@ -29,7 +29,7 @@ The remainder of this README documents the earlier standalone `MarketSyncForever
 
 **Built for an initial test of Forever beta 1.60.1 (69893).** This separate addon records native auction searches, refreshes a small watch list, and provides a draggable saved-price window. It requires neither Auctionator nor the existing MarketSync addon. The original MarketSync worktree and installed addons are unchanged.
 
-**0.3.0 embeds a MarketSync control panel directly beside Blizzard's auction-house tabs.** It uses Blizzard's `SetDisplayMode` and `AuctionHouseFrameTabTemplate` while sharing a unified browser (`Browser.lua`) with the portable portrait window. The source track contains an [implementation guide](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/IMPLEMENTATION_GUIDE.md) and a [restart checklist/pasteable handoff](C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/MarketSync-Forever/RESUME.md). Those development guides are stored with the source, outside the client ZIP.
+**0.3.0 embeds a MarketSync control panel directly beside Blizzard's auction-house tabs.** It uses Blizzard's `SetDisplayMode` and `AuctionHouseFrameTabTemplate` while sharing a unified browser (`Browser.lua`) with the portable portrait window. The repository contains an [implementation guide](docs/archive/IMPLEMENTATION_GUIDE.md) and a [restart checklist/pasteable handoff](docs/archive/RESUME.md). Those development guides are preserved in `docs/archive/`, outside the client ZIP.
 
 The native Forever interface already covers grouped browsing, commodity quantity selection, buying, posting, and viewing your auctions. MarketSync can concentrate on collecting observations, preserving their identity and history, and displaying them away from an auctioneer.
 
