@@ -988,9 +988,110 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         panel.activeSubCategory = nil
         panel.activeSubIDs = nil
         panel.expandedCategory = nil
+        panel.minLevelFilter = nil
+        panel.maxLevelFilter = nil
+        panel.rarityFilter = nil
+        panel.groupByCategory = false
+        if panel.RefreshAdvancedFilters then panel:RefreshAdvancedFilters() end
         panel:RebuildFilters()
         panel:RunSearch()
     end)
+
+    -- These filters operate on cached item metadata, so they work for personal,
+    -- guild, and neutral results without issuing extra AH or item-info queries.
+    local filterBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    filterBtn:SetSize(76, 22)
+    filterBtn:SetPoint("LEFT", resetBtn, "RIGHT", 6, 0)
+    filterBtn:SetText("Filter")
+
+    local filterPopup = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    filterPopup:SetSize(205, 269)
+    filterPopup:SetPoint("TOPLEFT", filterBtn, "BOTTOMLEFT", 0, -3)
+    filterPopup:SetFrameStrata("DIALOG")
+    filterPopup:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    filterPopup:SetBackdropColor(0.035, 0.03, 0.025, 0.97)
+    filterPopup:SetBackdropBorderColor(0.75, 0.56, 0.20, 1)
+    filterPopup:Hide()
+    filterBtn:SetScript("OnClick", function()
+        if filterPopup:IsShown() then filterPopup:Hide() else filterPopup:Show() end
+    end)
+
+    local levelLabel = filterPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    levelLabel:SetPoint("TOPLEFT", 12, -12)
+    levelLabel:SetText("Required level")
+    local function MakeLevelBox(x)
+        local box = CreateFrame("EditBox", nil, filterPopup, "InputBoxTemplate")
+        box:SetSize(52, 19)
+        box:SetPoint("TOPLEFT", x, -30)
+        box:SetAutoFocus(false)
+        box:SetNumeric(true)
+        return box
+    end
+    local minBox = MakeLevelBox(14)
+    local maxBox = MakeLevelBox(91)
+    local levelDash = filterPopup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    levelDash:SetPoint("LEFT", minBox, "RIGHT", 8, 0)
+    levelDash:SetText("-")
+
+    local rarityLabel = filterPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    rarityLabel:SetPoint("TOPLEFT", 12, -59)
+    rarityLabel:SetText("Rarity")
+    local rarityNames = { "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Artifact" }
+    local rarityChecks = {}
+    local function ApplyAdvancedFilters()
+        panel.minLevelFilter = tonumber(minBox:GetText())
+        panel.maxLevelFilter = tonumber(maxBox:GetText())
+        panel.rarityFilter = {}
+        local selected = 0
+        for quality, check in ipairs(rarityChecks) do
+            if check:GetChecked() then
+                panel.rarityFilter[quality - 1] = true
+                selected = selected + 1
+            end
+        end
+        if selected == #rarityChecks then panel.rarityFilter = nil end
+        panel:RunSearch()
+    end
+    minBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyAdvancedFilters() end)
+    maxBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyAdvancedFilters() end)
+    minBox:SetScript("OnEditFocusLost", ApplyAdvancedFilters)
+    maxBox:SetScript("OnEditFocusLost", ApplyAdvancedFilters)
+    for quality, name in ipairs(rarityNames) do
+        local check = CreateFrame("CheckButton", nil, filterPopup, "UICheckButtonTemplate")
+        check:SetSize(20, 20)
+        check:SetPoint("TOPLEFT", 9, -75 - (quality - 1) * 23)
+        check:SetChecked(true)
+        local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", check, "RIGHT", 3, 0)
+        label:SetText(name)
+        local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality - 1]
+        if color then label:SetTextColor(color.r, color.g, color.b) end
+        check:SetScript("OnClick", ApplyAdvancedFilters)
+        rarityChecks[quality] = check
+    end
+    local groupCheck = CreateFrame("CheckButton", nil, filterPopup, "UICheckButtonTemplate")
+    groupCheck:SetSize(20, 20)
+    groupCheck:SetPoint("TOPLEFT", 9, -239)
+    local groupLabel = groupCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    groupLabel:SetPoint("LEFT", groupCheck, "RIGHT", 3, 0)
+    groupLabel:SetText("Group by category")
+    groupCheck:SetScript("OnClick", function(self)
+        panel.groupByCategory = self:GetChecked() == true
+        panel:RunSearch()
+    end)
+    function panel:RefreshAdvancedFilters()
+        minBox:SetText(self.minLevelFilter and tostring(self.minLevelFilter) or "")
+        maxBox:SetText(self.maxLevelFilter and tostring(self.maxLevelFilter) or "")
+        for quality, check in ipairs(rarityChecks) do
+            check:SetChecked(not self.rarityFilter or self.rarityFilter[quality - 1] == true)
+        end
+        groupCheck:SetChecked(self.groupByCategory == true)
+    end
 
     -- --- CATEGORY SIDEBAR & RESULTS INSETS ---
     local SIDEBAR_WIDTH = 156
@@ -1613,7 +1714,11 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 matchesQuery = (item.nameLower:find(query, 1, true) ~= nil)
             end
 
-            if matchesQuery then
+            local level = tonumber(item.minLevel) or 0
+            local matchesLevel = (not self.minLevelFilter or level >= self.minLevelFilter)
+                and (not self.maxLevelFilter or level <= self.maxLevelFilter)
+            local matchesRarity = not self.rarityFilter or self.rarityFilter[item.rarity or 1] == true
+            if matchesQuery and matchesLevel and matchesRarity then
                 local matchesCat = (not activeCat) or (item.classID == activeCat)
                 if not matchesCat and activeCat == 1 and item.classID == 11 then
                     matchesCat = true
@@ -1752,6 +1857,12 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         local field = self.sortField
         local asc = self.sortAscending
         table.sort(self.currentResults, function(a, b)
+            if self.groupByCategory then
+                local classA, classB = a.classID or -1, b.classID or -1
+                if classA ~= classB then return classA < classB end
+                local subA, subB = a.subClassID or -1, b.subClassID or -1
+                if subA ~= subB then return subA < subB end
+            end
             local va, vb = a[field], b[field]
             if va == nil then va = 0 end
             if vb == nil then vb = 0 end
