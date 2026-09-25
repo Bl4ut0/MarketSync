@@ -354,7 +354,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     -- ================================================================
     -- LEFT INSET: ITEM SELECTION & QUICK SEARCH
     -- ================================================================
-    -- Mode Switcher: [ Recent Scans ] [ Favorites ] across top of left inset
+    -- Mode Switcher: [ Recent Scans ] [ Shopping List selector ]
     local recentBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
     recentBtn:SetSize(110, 22)
     recentBtn:SetPoint("TOPLEFT", leftInset, "TOPLEFT", 8, -8)
@@ -370,11 +370,11 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local favBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
     favBtn:SetSize(110, 22)
     favBtn:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -8, -8)
-    favBtn:SetText("Favorites")
+    favBtn:SetText("Favorites  |cFFFFD100v|r")
     favBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("|cFFFFD100Favorite Items|r")
-        GameTooltip:AddLine("View your saved favorite items.", 1, 1, 1, true)
+        GameTooltip:SetText("|cFFFFD100Shopping Lists|r")
+        GameTooltip:AddLine("Choose a saved list to browse its items.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     favBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -402,9 +402,9 @@ function MarketSync.CreateAnalyticsPanel(parent)
             description = "Show recently scanned items list",
         })
         MarketSync.SetAccessibility(favBtn, {
-            name = "Favorite Items",
+            name = "Shopping Lists",
             context = "Button",
-            description = "Show favorite items list",
+            description = "Choose a saved shopping list to show in Analytics",
         })
         MarketSync.SetAccessibility(searchBox, {
             name = "Search Analytics",
@@ -414,6 +414,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     end
 
     local currentMode = "recent"
+    local selectedListName = "Favorites"
     local selectedDBKey = nil
     local itemsList = {}
     local itemRows = {}
@@ -557,11 +558,18 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 end
             end
         else
-            emptyListText:SetText("No favorite items saved.\nClick + Favorite on any item to save it.")
+            local lists = MarketSync.Favorites and MarketSync.Favorites.GetLists and MarketSync.Favorites.GetLists() or { "Favorites" }
+            local listExists = false
+            for _, name in ipairs(lists) do
+                if name == selectedListName then listExists = true; break end
+            end
+            if not listExists then selectedListName = "Favorites" end
+            favBtn:SetText(selectedListName .. "  |cFFFFD100v|r")
+            emptyListText:SetText("No items in " .. selectedListName .. ".\nAdd items from the MarketSync sidecar.")
             recentBtn:Enable()
-            favBtn:Disable()
+            favBtn:Enable()
             if MarketSync.Favorites and MarketSync.Favorites.GetList then
-                local favs = MarketSync.Favorites.GetList("Favorites") or {}
+                local favs = MarketSync.Favorites.GetList(selectedListName) or {}
                 for _, id in ipairs(favs) do
                     local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
                     if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
@@ -576,7 +584,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
                         icon = icon or 134400,
                         quality = qual or 1,
                         price = p,
-                        sourceText = "User Favorites",
+                        sourceText = selectedListName,
                     })
                 end
             end
@@ -701,13 +709,35 @@ function MarketSync.CreateAnalyticsPanel(parent)
         itemsContent:SetHeight(math.max(1, #itemsList * rowH))
     end
 
+    if MarketSync.Favorites and MarketSync.Favorites.RegisterCallback then
+        MarketSync.Favorites.RegisterCallback(function()
+            if panel:IsShown() then RefreshItemsList() end
+        end)
+    end
+
     recentBtn:SetScript("OnClick", function()
         currentMode = "recent"
         RefreshItemsList()
     end)
+    local listDropdown = CreateFrame("Frame", "MarketSyncAnalyticsListDropdown", leftInset, "UIDropDownMenuTemplate")
+    listDropdown:Hide()
+    UIDropDownMenu_Initialize(listDropdown, function(_, level)
+        local lists = MarketSync.Favorites and MarketSync.Favorites.GetLists and MarketSync.Favorites.GetLists() or { "Favorites" }
+        for _, name in ipairs(lists) do
+            local listName = name
+            local option = UIDropDownMenu_CreateInfo()
+            option.text = listName
+            option.checked = (currentMode == "favorites" and selectedListName == listName)
+            option.func = function()
+                selectedListName = listName
+                currentMode = "favorites"
+                RefreshItemsList()
+            end
+            UIDropDownMenu_AddButton(option, level)
+        end
+    end)
     favBtn:SetScript("OnClick", function()
-        currentMode = "favorites"
-        RefreshItemsList()
+        ToggleDropDownMenu(1, nil, listDropdown, favBtn, 0, 0)
     end)
 
     -- ================================================================
