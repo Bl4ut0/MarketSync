@@ -1,1 +1,0 @@
-GUILD_CHALLENGE_ORDER = { 1, 2, 3 };

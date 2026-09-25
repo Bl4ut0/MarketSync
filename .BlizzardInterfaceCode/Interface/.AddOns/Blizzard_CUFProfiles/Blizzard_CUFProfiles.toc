@@ -1,3 +1,0 @@
-## Title: Blizzard_CUFProfiles
-
-Blizzard_CompactUnitFrameProfiles.lua

@@ -4,3 +4,5 @@ node_modules/
 .Examples/
 /.Auctionator/
 /dist/
+.BlizzardInterfaceCode/
+.Versions/
