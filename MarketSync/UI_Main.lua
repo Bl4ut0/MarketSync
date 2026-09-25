@@ -661,6 +661,10 @@ local function CreateMainFrame()
     header1:SetTextColor(1, 0.82, 0)
     header1:SetText("Performance & Memory")
 
+    local UpdateMemorySettingsVisibility
+    local chkCache
+    local speedHeader
+
     local chkLowRam = CreateCheckbox(boxMemory, boxMemory, "TOPLEFT",
         "Enable Low RAM Mode", "Wipe search caches and run Lua garbage collection when windows are closed. Recommended on by default.")
     chkLowRam:ClearAllPoints()
@@ -672,12 +676,14 @@ local function CreateMainFrame()
                 MarketSync.BuildSearchIndex()
             end
         end
+        if UpdateMemorySettingsVisibility then UpdateMemorySettingsVisibility() end
     end)
     chkLowRam:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.LowRamMode) end
+        if UpdateMemorySettingsVisibility then UpdateMemorySettingsVisibility() end
     end)
 
-    local chkCache = CreateCheckbox(boxMemory, chkLowRam, "BOTTOMLEFT",
+    chkCache = CreateCheckbox(boxMemory, chkLowRam, "BOTTOMLEFT",
         "Pre-Build on Startup", "Pre-load and index item data shortly after login (disabled by default in Low RAM mode).")
     chkCache:SetScript("OnClick", function(self)
         MarketSyncDB.BuildCacheOnStartup = self:GetChecked()
@@ -687,10 +693,27 @@ local function CreateMainFrame()
     end)
 
     -- Cache Build Speed Slider
-    local speedHeader = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    speedHeader = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     speedHeader:SetPoint("TOPLEFT", chkCache, "BOTTOMLEFT", 4, -10)
     speedHeader:SetText("Cache Build Speed")
     speedHeader:SetTextColor(1, 0.82, 0)
+
+    UpdateMemorySettingsVisibility = function()
+        local isLowRam = MarketSyncDB and (MarketSyncDB.LowRamMode ~= false)
+        if isLowRam then
+            if chkCache then chkCache:Hide() end
+            if speedHeader then
+                speedHeader:ClearAllPoints()
+                speedHeader:SetPoint("TOPLEFT", chkLowRam, "BOTTOMLEFT", 4, -12)
+            end
+        else
+            if chkCache then chkCache:Show() end
+            if speedHeader then
+                speedHeader:ClearAllPoints()
+                speedHeader:SetPoint("TOPLEFT", chkCache, "BOTTOMLEFT", 4, -10)
+            end
+        end
+    end
 
     local speedSlider = CreateFrame("Slider", "MarketSyncMainCacheSpeedSlider", boxMemory, "OptionsSliderTemplate")
     speedSlider:SetPoint("TOPLEFT", speedHeader, "BOTTOMLEFT", 6, -14)
@@ -827,6 +850,11 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableChatPriceCheck ~= false) end
     end)
 
+    -- Forward declarations for dynamic visibility across columns
+    local UpdateAudioSettingsVisibility
+    local UpdateBetaSettingsVisibility
+    local chkBetaAlerts, undercutHeader, undercutSlider
+
     -- ================================================================
     -- COLUMN 3: AUDIO & NOTIFICATIONS
     -- ================================================================
@@ -835,12 +863,41 @@ local function CreateMainFrame()
     header3:SetTextColor(1, 0.82, 0)
     header3:SetText("Audio & Alerts")
 
+    local lockedAudioBox = CreateFrame("Frame", nil, boxAudio)
+    lockedAudioBox:SetAllPoints()
+
+    local lockedAudioIcon = lockedAudioBox:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    lockedAudioIcon:SetPoint("TOP", boxAudio, "TOP", 0, -28)
+    lockedAudioIcon:SetTextColor(1, 0.67, 0)
+    lockedAudioIcon:SetText("[BETA LOCKED]")
+
+    local lockedAudioDesc = lockedAudioBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    lockedAudioDesc:SetPoint("TOPLEFT", boxAudio, "TOPLEFT", 12, -56)
+    lockedAudioDesc:SetPoint("RIGHT", boxAudio, "RIGHT", -12, 0)
+    lockedAudioDesc:SetJustifyH("CENTER")
+    lockedAudioDesc:SetSpacing(3)
+    lockedAudioDesc:SetText("|cffaaaaaaPrice Alerts & Notifications are currently in Beta.\n\nTurn on '|cffffd700Enable Alerts|r' in the Beta Features panel to unlock notification sounds, volume, and visual alerts.|r")
+
+    local btnUnlockAudio = CreateFrame("Button", nil, lockedAudioBox, "UIPanelButtonTemplate")
+    btnUnlockAudio:SetSize(140, 22)
+    btnUnlockAudio:SetPoint("TOP", lockedAudioDesc, "BOTTOM", 0, -16)
+    btnUnlockAudio:SetText("Enable Alerts (Beta)")
+    btnUnlockAudio:SetScript("OnClick", function()
+        if MarketSyncDB then MarketSyncDB.EnableAlertsTab = true end
+        if chkBetaAlerts then chkBetaAlerts:SetChecked(true) end
+        if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
+        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
+    end)
+
     local chkNotifSound = CreateCheckbox(boxAudio, boxAudio, "TOPLEFT",
         "Enable Sound Alerts", "Play a sound when a tracked notification request triggers.")
     chkNotifSound:ClearAllPoints()
     chkNotifSound:SetPoint("TOPLEFT", boxAudio, "TOPLEFT", 10, -10)
     chkNotifSound:SetScript("OnClick", function(self)
         MarketSyncDB.EnableNotificationSounds = self:GetChecked()
+        if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
     end)
     chkNotifSound:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableNotificationSounds == true) end
@@ -935,6 +992,46 @@ local function CreateMainFrame()
     chkRaidAlerts:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableRaidWarningAlerts ~= false) end
     end)
+
+    UpdateAudioSettingsVisibility = function()
+        local alertsEnabled = MarketSyncDB and (MarketSyncDB.EnableAlertsTab == true)
+        if not alertsEnabled then
+            if lockedAudioBox then lockedAudioBox:Show() end
+            if chkNotifSound then chkNotifSound:Hide() end
+            if soundHeader then soundHeader:Hide() end
+            if soundDropdown then soundDropdown:Hide() end
+            if btnPlaySound then btnPlaySound:Hide() end
+            if volSlider then volSlider:Hide() end
+            if chkMinimapAlerts then chkMinimapAlerts:Hide() end
+            if chkRaidAlerts then chkRaidAlerts:Hide() end
+        else
+            if lockedAudioBox then lockedAudioBox:Hide() end
+            if chkNotifSound then chkNotifSound:Show() end
+            if chkMinimapAlerts then chkMinimapAlerts:Show() end
+            if chkRaidAlerts then chkRaidAlerts:Show() end
+
+            local soundEnabled = MarketSyncDB and (MarketSyncDB.EnableNotificationSounds ~= false)
+            if soundEnabled then
+                if soundHeader then soundHeader:Show() end
+                if soundDropdown then soundDropdown:Show() end
+                if btnPlaySound then btnPlaySound:Show() end
+                if volSlider then volSlider:Show() end
+                if chkMinimapAlerts then
+                    chkMinimapAlerts:ClearAllPoints()
+                    chkMinimapAlerts:SetPoint("TOPLEFT", volSlider, "BOTTOMLEFT", -14, -14)
+                end
+            else
+                if soundHeader then soundHeader:Hide() end
+                if soundDropdown then soundDropdown:Hide() end
+                if btnPlaySound then btnPlaySound:Hide() end
+                if volSlider then volSlider:Hide() end
+                if chkMinimapAlerts then
+                    chkMinimapAlerts:ClearAllPoints()
+                    chkMinimapAlerts:SetPoint("TOPLEFT", chkNotifSound, "BOTTOMLEFT", 0, -8)
+                end
+            end
+        end
+    end
 
     -- ================================================================
     -- COLUMN 4: SYNC & SWARM + BETA
@@ -1050,23 +1147,26 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableProcessingTab == true) end
     end)
 
-    local chkBetaAlerts = CreateCheckbox(betaBox, chkBetaProcessing, "BOTTOMLEFT",
+    chkBetaAlerts = CreateCheckbox(betaBox, chkBetaProcessing, "BOTTOMLEFT",
         "Enable Alerts", "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both the portable window and Auction House.")
     chkBetaAlerts:SetScript("OnClick", function(self)
         MarketSyncDB.EnableAlertsTab = self:GetChecked()
         print("|cFF00FF00[MarketSync]|r Alerts " .. (self:GetChecked() and "Enabled" or "Disabled"))
         if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
         if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
+        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
     chkBetaAlerts:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableAlertsTab == true) end
+        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
 
-    local undercutHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    undercutHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     undercutHeader:SetPoint("TOPLEFT", chkBetaAlerts, "BOTTOMLEFT", 6, -4)
     undercutHeader:SetText("Alert Undercut:")
 
-    local undercutSlider = CreateFrame("Slider", "MarketSyncMainUndercutSlider", betaBox, "OptionsSliderTemplate")
+    undercutSlider = CreateFrame("Slider", "MarketSyncMainUndercutSlider", betaBox, "OptionsSliderTemplate")
     undercutSlider:SetPoint("LEFT", undercutHeader, "RIGHT", 6, 0)
     undercutSlider:SetWidth(80)
     undercutSlider:SetHeight(14)
@@ -1099,6 +1199,25 @@ local function CreateMainFrame()
     chkDebug:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.DebugMode == true) end
     end)
+
+    UpdateBetaSettingsVisibility = function()
+        local alertsEnabled = MarketSyncDB and (MarketSyncDB.EnableAlertsTab == true)
+        if alertsEnabled then
+            if undercutHeader then undercutHeader:Show() end
+            if undercutSlider then undercutSlider:Show() end
+            if chkDebug then
+                chkDebug:ClearAllPoints()
+                chkDebug:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", -6, -8)
+            end
+        else
+            if undercutHeader then undercutHeader:Hide() end
+            if undercutSlider then undercutSlider:Hide() end
+            if chkDebug then
+                chkDebug:ClearAllPoints()
+                chkDebug:SetPoint("TOPLEFT", chkBetaAlerts, "BOTTOMLEFT", 0, -4)
+            end
+        end
+    end
 
     -- ================================================================
     -- Gold Bar Buttons & Labels
@@ -1540,6 +1659,9 @@ local function CreateMainFrame()
     SettingsContent:SetScript("OnShow", function(self)
         self.lastUpdate = 0
         UpdateSettingsStats()
+        if UpdateMemorySettingsVisibility then UpdateMemorySettingsVisibility() end
+        if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
+        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
 
     -- ================================================================

@@ -264,15 +264,19 @@ local function PopulateAddonSettings(panel)
     sMemory:SetPoint("TOPLEFT", hMemory, "BOTTOMLEFT", 0, -3)
     sMemory:SetText("Configure RAM conservation, on-demand loading, and background caching rate.")
 
+    local UpdateMemoryCardLayout
+    local chkStartup
+
     local chkLowRam = CreateOptCheckbox(cardMemory, 12, -42, "Enable Low RAM Mode (Default: ON)",
         "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Automatically loads caches on demand.",
         "LowRamMode", true, function(val)
             if not val and MarketSyncDB and MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
                 MarketSync.BuildSearchIndex()
             end
+            if UpdateMemoryCardLayout then UpdateMemoryCardLayout() end
         end)
 
-    local chkStartup = CreateOptCheckbox(cardMemory, 12, -68, "Pre-Build Search Index on Startup",
+    chkStartup = CreateOptCheckbox(cardMemory, 12, -68, "Pre-Build Search Index on Startup",
         "Pre-indexes stored auction data shortly after login. When Low RAM mode is enabled, on-demand indexing is recommended instead.",
         "BuildCacheOnStartup", false, function(val)
             if val and MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
@@ -296,7 +300,7 @@ local function PopulateAddonSettings(panel)
     speedNameText:SetPoint("LEFT", speedSlider, "RIGHT", 10, 0)
 
     local speedDescText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    speedDescText:SetPoint("TOPLEFT", 12, -118)
+    speedDescText:SetPoint("TOPLEFT", speedHeader, "BOTTOMLEFT", 0, -8)
     speedDescText:SetWidth(540)
     speedDescText:SetJustifyH("LEFT")
 
@@ -323,7 +327,7 @@ local function PopulateAddonSettings(panel)
 
     -- Live RAM Estimation
     local ramText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    ramText:SetPoint("TOPLEFT", 12, -146)
+    ramText:SetPoint("TOPLEFT", speedDescText, "BOTTOMLEFT", 0, -8)
     ramText:SetWidth(400)
     ramText:SetJustifyH("LEFT")
 
@@ -348,6 +352,26 @@ local function PopulateAddonSettings(panel)
         end
     end
     table.insert(refreshControls, RefreshRAM)
+
+    UpdateMemoryCardLayout = function()
+        local isLowRam = MarketSyncDB and (MarketSyncDB.LowRamMode ~= false)
+        if isLowRam then
+            if chkStartup then chkStartup:Hide() end
+            speedHeader:ClearAllPoints()
+            speedHeader:SetPoint("TOPLEFT", 12, -70)
+            btnRebuildCache:ClearAllPoints()
+            btnRebuildCache:SetPoint("TOPRIGHT", cardMemory, "TOPRIGHT", -12, -116)
+            cardMemory:SetHeight(148)
+        else
+            if chkStartup then chkStartup:Show() end
+            speedHeader:ClearAllPoints()
+            speedHeader:SetPoint("TOPLEFT", 12, -96)
+            btnRebuildCache:ClearAllPoints()
+            btnRebuildCache:SetPoint("TOPRIGHT", cardMemory, "TOPRIGHT", -12, -142)
+            cardMemory:SetHeight(175)
+        end
+    end
+    table.insert(refreshControls, UpdateMemoryCardLayout)
 
     -- ================================================================
     -- CARD 2: PROFESSIONS & CRAFTING (Out of Beta!)
@@ -421,9 +445,32 @@ local function PopulateAddonSettings(panel)
     sAudio:SetPoint("TOPLEFT", hAudio, "BOTTOMLEFT", 0, -3)
     sAudio:SetText("Audible alert triggers and visual deal notifications.")
 
-    CreateOptCheckbox(cardAudio, 12, -38, "Enable Notification Sounds",
+    local UpdateAudioAndAlertsCard
+    local chkBetaAlerts, undercutSlider
+
+    local lockedAudioNotice = cardAudio:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    lockedAudioNotice:SetPoint("TOPLEFT", 14, -38)
+    lockedAudioNotice:SetPoint("RIGHT", cardAudio, "RIGHT", -14, 0)
+    lockedAudioNotice:SetJustifyH("LEFT")
+    lockedAudioNotice:SetText("|cffffaa00[BETA LOCKED]|r Audio and visual notifications require the |cffffd700Price Alerts|r module.\nTurn on |cffffd700[BETA] Enable Price Alerts Tab|r under Beta Features below to unlock audio and alert settings.")
+
+    local btnUnlockAudio = CreateFrame("Button", nil, cardAudio, "UIPanelButtonTemplate")
+    btnUnlockAudio:SetSize(165, 20)
+    btnUnlockAudio:SetPoint("TOPLEFT", lockedAudioNotice, "BOTTOMLEFT", 0, -8)
+    btnUnlockAudio:SetText("Enable Price Alerts (Beta)")
+    btnUnlockAudio:SetScript("OnClick", function()
+        if MarketSyncDB then MarketSyncDB.EnableAlertsTab = true end
+        if chkBetaAlerts then chkBetaAlerts:SetChecked(true) end
+        if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
+    end)
+
+    local chkNotifSound = CreateOptCheckbox(cardAudio, 12, -38, "Enable Notification Sounds",
         "Play a sound when a tracked notification request triggers.",
-        "EnableNotificationSounds", true, nil)
+        "EnableNotificationSounds", true, function(val)
+            if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
+        end)
 
     -- Sound Dropdown
     local soundDropdown = CreateFrame("Frame", "MarketSyncAddonSoundDropdown", cardAudio, "UIDropDownMenuTemplate")
@@ -493,15 +540,58 @@ local function PopulateAddonSettings(panel)
     table.insert(refreshControls, RefreshVolume)
 
     -- Visual Alerts on right side of Card 4
-    CreateOptCheckbox(cardAudio, 360, -38, "Flash Minimap for Alerts",
+    local chkMinimapAlerts = CreateOptCheckbox(cardAudio, 360, -38, "Flash Minimap for Alerts",
         "Flash the MarketSync minimap button until notifications are acknowledged.",
         "EnableMinimapAlerts", true, function(val)
             if not val and MarketSync.StopMinimapFlash then MarketSync.StopMinimapFlash() end
         end)
 
-    CreateOptCheckbox(cardAudio, 360, -64, "Show On-Screen Alert Banner",
+    local chkRaidAlerts = CreateOptCheckbox(cardAudio, 360, -64, "Show On-Screen Alert Banner",
         "Display triggered notifications in the on-screen raid-warning banner.",
         "EnableRaidWarningAlerts", true, nil)
+
+    UpdateAudioAndAlertsCard = function()
+        local alertsEnabled = MarketSyncDB and (MarketSyncDB.EnableAlertsTab == true)
+        if undercutSlider then
+            if alertsEnabled then
+                undercutSlider:Show()
+            else
+                undercutSlider:Hide()
+            end
+        end
+
+        if not alertsEnabled then
+            if lockedAudioNotice then lockedAudioNotice:Show() end
+            if btnUnlockAudio then btnUnlockAudio:Show() end
+            if chkNotifSound then chkNotifSound:Hide() end
+            if soundDropdown then soundDropdown:Hide() end
+            if btnPlaySound then btnPlaySound:Hide() end
+            if volSlider then volSlider:Hide() end
+            if chkMinimapAlerts then chkMinimapAlerts:Hide() end
+            if chkRaidAlerts then chkRaidAlerts:Hide() end
+            cardAudio:SetHeight(95)
+        else
+            if lockedAudioNotice then lockedAudioNotice:Hide() end
+            if btnUnlockAudio then btnUnlockAudio:Hide() end
+            if chkNotifSound then chkNotifSound:Show() end
+            if chkMinimapAlerts then chkMinimapAlerts:Show() end
+            if chkRaidAlerts then chkRaidAlerts:Show() end
+
+            local soundEnabled = MarketSyncDB and (MarketSyncDB.EnableNotificationSounds ~= false)
+            if soundEnabled then
+                if soundDropdown then soundDropdown:Show() end
+                if btnPlaySound then btnPlaySound:Show() end
+                if volSlider then volSlider:Show() end
+                cardAudio:SetHeight(140)
+            else
+                if soundDropdown then soundDropdown:Hide() end
+                if btnPlaySound then btnPlaySound:Hide() end
+                if volSlider then volSlider:Hide() end
+                cardAudio:SetHeight(90)
+            end
+        end
+    end
+    table.insert(refreshControls, UpdateAudioAndAlertsCard)
 
     -- ================================================================
     -- CARD 5: DATA SYNC & SWARM
@@ -605,15 +695,16 @@ local function PopulateAddonSettings(panel)
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
         end)
 
-    CreateOptCheckbox(cardBeta, 12, -64, "|cffff6600[BETA]|r Enable Price Alerts Tab",
+    chkBetaAlerts = CreateOptCheckbox(cardBeta, 12, -64, "|cffff6600[BETA]|r Enable Price Alerts Tab",
         "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both portable window and Auction House.",
         "EnableAlertsTab", false, function(val)
             if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+            if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
         end)
 
     -- Default Undercut Slider (for Price Alerts)
-    local undercutSlider = CreateFrame("Slider", "MarketSyncAddonUndercutSlider", cardBeta, "OptionsSliderTemplate")
+    undercutSlider = CreateFrame("Slider", "MarketSyncAddonUndercutSlider", cardBeta, "OptionsSliderTemplate")
     undercutSlider:SetPoint("TOPLEFT", 320, -64)
     undercutSlider:SetWidth(130)
     undercutSlider:SetMinMaxValues(1, 50)
@@ -633,6 +724,7 @@ local function PopulateAddonSettings(panel)
         local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
         undercutSlider:SetValue(val)
         if undercutSlider.Text then undercutSlider.Text:SetText(string.format("Default Undercut: %d%%", val)) end
+        if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
     end
     table.insert(refreshControls, RefreshUndercut)
 

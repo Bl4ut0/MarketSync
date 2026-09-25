@@ -1995,6 +1995,16 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
       MarketSync.SettingsPanel:GetScript("OnShow")(MarketSync.SettingsPanel)
     end
     assert(MarketSync.SettingsPanel.initialized == true, "SettingsPanel should initialize controls on show")
+    if MarketSync.SettingsPanel.RefreshSettingsValues then
+      MarketSyncDB.EnableAlertsTab = false
+      MarketSync.SettingsPanel.RefreshSettingsValues()
+      MarketSyncDB.EnableAlertsTab = true
+      MarketSync.SettingsPanel.RefreshSettingsValues()
+      MarketSyncDB.LowRamMode = false
+      MarketSync.SettingsPanel.RefreshSettingsValues()
+      MarketSyncDB.LowRamMode = true
+      MarketSync.SettingsPanel.RefreshSettingsValues()
+    end
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Low RAM & Settings check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
