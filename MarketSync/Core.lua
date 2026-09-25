@@ -136,44 +136,569 @@ local panel = CreateFrame("Frame", "MarketSyncConfig", UIParent)
 panel.name = "MarketSync"
 category = (Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterCanvasLayoutCategory(panel, panel.name)) or (InterfaceOptions_AddCategory and InterfaceOptions_AddCategory(panel))
 if Settings then Settings.RegisterAddOnCategory(category) end
+MarketSync.SettingsCategory = category
+MarketSync.SettingsPanel = panel
 
-local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-title:SetPoint("TOPLEFT", 16, -16)
-title:SetText("MarketSync")
+local function PopulateAddonSettings(panel)
+    if panel.initialized then return end
+    panel.initialized = true
 
-local subText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-subText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-subText:SetText("MarketSync settings are managed within the main addon window.")
+    -- Header Title
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -14)
+    title:SetText("|cFFFFD100MarketSync Configuration|r")
 
-local btnOpen = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-btnOpen:SetPoint("TOPLEFT", subText, "BOTTOMLEFT", 0, -20)
-btnOpen:SetSize(160, 25)
-btnOpen:SetText("Open MarketSync")
-btnOpen:SetScript("OnClick", function()
-    if MarketSync_ToggleUI then MarketSync_ToggleUI() end
-    HideUIPanel(SettingsPanel)
-    HideUIPanel(InterfaceOptionsFrame)
-end)
+    -- Top-right shortcut button to open the portable MainFrame
+    local btnOpenMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    btnOpenMain:SetSize(165, 22)
+    btnOpenMain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -12)
+    btnOpenMain:SetText("Open MarketSync Window")
+    btnOpenMain:SetScript("OnClick", function()
+        if MarketSync_ToggleUI then MarketSync_ToggleUI() end
+        if SettingsPanel and SettingsPanel.Hide then SettingsPanel:Hide() end
+        if InterfaceOptionsFrame and InterfaceOptionsFrame.Hide then InterfaceOptionsFrame:Hide() end
+    end)
 
-local btnSettings = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-btnSettings:SetPoint("LEFT", btnOpen, "RIGHT", 10, 0)
-btnSettings:SetSize(160, 25)
-btnSettings:SetText("Open Settings")
-btnSettings:SetScript("OnClick", function()
-    if MarketSync_ToggleUI then
-        MarketSync_ToggleUI()
-        -- Switch to Settings tab (Tab 7)
-        if MarketSync.SelectMainFrameTab then
-            MarketSync.SelectMainFrameTab(7)
-        elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[7] then
-            MarketSyncMainFrame.tabs[7]:Click()
+    local subText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    subText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    subText:SetText("Configure memory management, auction scanning, profession calculation, notifications, and peer sync.")
+
+    -- ScrollFrame container
+    local scroll = CreateFrame("ScrollFrame", "MarketSyncConfigScrollFrame", panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -44)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 12)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(scroll) end
+    if scroll.EnableMouseWheel then scroll:EnableMouseWheel(true) end
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll() or 0
+        local step = 32
+        local maxScroll = (self.GetVerticalScrollRange and self:GetVerticalScrollRange()) or 0
+        local newScroll = math.max(0, math.min(maxScroll, current - (delta * step)))
+        if self.SetVerticalScroll then self:SetVerticalScroll(newScroll) end
+    end)
+
+    local canvas = CreateFrame("Frame", "MarketSyncConfigCanvas", scroll)
+    canvas:SetSize(570, 960)
+    scroll:SetScrollChild(canvas)
+
+    local function AttachTooltip(frame, text)
+        if not text or text == "" then return end
+        frame:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(text, nil, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    local function CreateCard(w, h, anchor, yOff)
+        local card = CreateFrame("Frame", nil, canvas, "BackdropTemplate")
+        card:SetSize(w, h)
+        if anchor then
+            card:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOff or -12)
+        else
+            card:SetPoint("TOPLEFT", canvas, "TOPLEFT", 0, 0)
+        end
+        card:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            tile = false, tileSize = 0, edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        card:SetBackdropColor(0.065, 0.060, 0.055, 0.95)
+        card:SetBackdropBorderColor(0.35, 0.30, 0.20, 0.85)
+
+        local topHighlight = card:CreateTexture(nil, "BORDER")
+        topHighlight:SetHeight(1)
+        topHighlight:SetPoint("TOPLEFT", 1, -1)
+        topHighlight:SetPoint("TOPRIGHT", -1, -1)
+        topHighlight:SetColorTexture(0.55, 0.45, 0.25, 0.35)
+
+        return card
+    end
+
+    local refreshControls = {}
+    local function CreateOptCheckbox(parent, x, y, label, tooltip, key, defaultVal, onChange)
+        local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        cb:SetSize(22, 22)
+        cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+        cb.text:SetText(label)
+        cb.text:SetFontObject("GameFontHighlightSmall")
+        cb.text:ClearAllPoints()
+        cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+        AttachTooltip(cb, tooltip)
+
+        cb:SetScript("OnClick", function(self)
+            local val = self:GetChecked()
+            if MarketSyncDB and key then
+                MarketSyncDB[key] = val
+            end
+            if onChange then onChange(val) end
+        end)
+
+        local function Refresh()
+            if MarketSyncDB and key then
+                if defaultVal == false then
+                    cb:SetChecked(MarketSyncDB[key] == true)
+                else
+                    cb:SetChecked(MarketSyncDB[key] ~= false)
+                end
+            end
+        end
+        table.insert(refreshControls, Refresh)
+        cb:SetScript("OnShow", Refresh)
+
+        return cb
+    end
+
+    -- ================================================================
+    -- CARD 1: PERFORMANCE & MEMORY MANAGEMENT
+    -- ================================================================
+    local cardMemory = CreateCard(565, 210, nil, 0)
+
+    local hMemory = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hMemory:SetPoint("TOPLEFT", 12, -10)
+    hMemory:SetText("|cffffd700Performance & Memory Management|r")
+
+    local sMemory = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    sMemory:SetPoint("TOPLEFT", hMemory, "BOTTOMLEFT", 0, -3)
+    sMemory:SetText("Configure RAM conservation, on-demand loading, and background caching rate.")
+
+    local subToggles = {}
+    local function UpdateSubToggles(enabled)
+        for _, sub in ipairs(subToggles) do
+            if enabled then
+                if sub.Enable then sub:Enable() end
+                if sub.text and sub.text.SetTextColor then sub.text:SetTextColor(1, 1, 1) end
+            else
+                if sub.Disable then sub:Disable() end
+                if sub.text and sub.text.SetTextColor then sub.text:SetTextColor(0.5, 0.5, 0.5) end
+            end
         end
     end
-    HideUIPanel(SettingsPanel)
-    HideUIPanel(InterfaceOptionsFrame)
-end)
 
--- Lock button moved to Main UI Settings tab
+    local chkLowRam = CreateOptCheckbox(cardMemory, 12, -42, "Enable Low RAM Mode (Default: ON)",
+        "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Highly recommended to minimize addon memory footprint.",
+        "LowRamMode", true, function(val)
+            UpdateSubToggles(val)
+            if not val and MarketSyncDB and MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
+                MarketSync.BuildSearchIndex()
+            end
+        end)
+
+    local chkODP = CreateOptCheckbox(cardMemory, 30, -66, "Personal Scan: On-Demand",
+        "Only loads and indexes personal auction data when the tab is clicked.",
+        "OnDemandPersonal", true, function(val)
+            if val and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        end)
+    table.insert(subToggles, chkODP)
+
+    local chkODG = CreateOptCheckbox(cardMemory, 210, -66, "Guild Sync: On-Demand",
+        "Only loads and indexes guild sync data when the tab is clicked.",
+        "OnDemandGuild", true, function(val)
+            if val and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        end)
+    table.insert(subToggles, chkODG)
+
+    local chkODN = CreateOptCheckbox(cardMemory, 385, -66, "Neutral AH: On-Demand",
+        "Only loads and indexes neutral auction data when the tab is clicked.",
+        "OnDemandNeutral", true, function(val)
+            if val and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        end)
+    table.insert(subToggles, chkODN)
+
+    local chkStartup = CreateOptCheckbox(cardMemory, 12, -92, "Pre-Build Search Index on Startup",
+        "Pre-indexes stored auction data shortly after login. When Low RAM mode is enabled, on-demand indexing is recommended instead.",
+        "BuildCacheOnStartup", false, function(val)
+            if val and MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
+        end)
+
+    -- Cache Build Speed Slider
+    local speedHeader = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    speedHeader:SetPoint("TOPLEFT", 12, -122)
+    speedHeader:SetText("|cffffd700Cache Build Speed:|r")
+
+    local speedSlider = CreateFrame("Slider", "MarketSyncAddonSpeedSlider", cardMemory, "OptionsSliderTemplate")
+    speedSlider:SetPoint("LEFT", speedHeader, "RIGHT", 14, 0)
+    speedSlider:SetWidth(120)
+    speedSlider:SetMinMaxValues(1, 4)
+    speedSlider:SetValueStep(1)
+    if speedSlider.SetObeyStepOnDrag then speedSlider:SetObeyStepOnDrag(true) end
+    if speedSlider.Low then speedSlider.Low:SetText("1") end
+    if speedSlider.High then speedSlider.High:SetText("4") end
+
+    local speedNameText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    speedNameText:SetPoint("LEFT", speedSlider, "RIGHT", 10, 0)
+
+    local speedDescText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    speedDescText:SetPoint("TOPLEFT", 12, -145)
+    speedDescText:SetWidth(540)
+    speedDescText:SetJustifyH("LEFT")
+
+    local function UpdateSpeedDisplay(val)
+        local preset = MarketSync.CacheSpeedPresets and MarketSync.CacheSpeedPresets[val]
+        if preset then
+            speedNameText:SetText("|cffffcc00" .. preset.name .. "|r")
+            speedDescText:SetText(preset.desc .. " |cff888888(Controls yield rate and item batch size)|r")
+        end
+        if speedSlider.Text then speedSlider.Text:SetText("") end
+    end
+
+    speedSlider:SetScript("OnValueChanged", function(self, val)
+        val = math.floor(val + 0.5)
+        if MarketSyncDB then MarketSyncDB.CacheSpeed = val end
+        UpdateSpeedDisplay(val)
+    end)
+    local function RefreshSpeed()
+        local val = (MarketSyncDB and MarketSyncDB.CacheSpeed) or 2
+        speedSlider:SetValue(val)
+        UpdateSpeedDisplay(val)
+        UpdateSubToggles(chkLowRam:GetChecked())
+    end
+    table.insert(refreshControls, RefreshSpeed)
+
+    -- Live RAM Estimation
+    local ramText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    ramText:SetPoint("TOPLEFT", 12, -178)
+    ramText:SetWidth(400)
+    ramText:SetJustifyH("LEFT")
+
+    local btnRebuildCache = CreateFrame("Button", nil, cardMemory, "UIPanelButtonTemplate")
+    btnRebuildCache:SetSize(130, 20)
+    btnRebuildCache:SetPoint("TOPRIGHT", cardMemory, "TOPRIGHT", -12, -174)
+    btnRebuildCache:SetText("Rebuild Cache")
+    AttachTooltip(btnRebuildCache, "Manually rebuild personal, guild, and neutral browse index caches.")
+    btnRebuildCache:SetScript("OnClick", function()
+        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        if MarketSync.BuildSearchIndex then
+            MarketSync.BuildSearchIndex()
+            print("|cFF00FF00[MarketSync]|r Triggered manual search cache rebuild.")
+        end
+    end)
+
+    local function RefreshRAM()
+        if MarketSync.GetEstimatedRAMUsage then
+            local estMB, totalItems, pCount, gCount, nCount = MarketSync.GetEstimatedRAMUsage()
+            ramText:SetText(string.format("|cff888888Index Footprint:|r |cffffffff~%.1f MB|r |cff888888(%d items: %d personal, %d guild, %d neutral)|r",
+                estMB, totalItems, pCount, gCount, nCount))
+        end
+    end
+    table.insert(refreshControls, RefreshRAM)
+
+    -- ================================================================
+    -- CARD 2: PROFESSIONS & CRAFTING (Out of Beta!)
+    -- ================================================================
+    local cardProf = CreateCard(565, 95, cardMemory, -10)
+
+    local hProf = cardProf:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hProf:SetPoint("TOPLEFT", 12, -10)
+    hProf:SetText("|cffffd700Professions & Crafting|r")
+
+    local sProf = cardProf:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    sProf:SetPoint("TOPLEFT", hProf, "BOTTOMLEFT", 0, -3)
+    sProf:SetText("Direct in-game trade skill margin calculations, vendor pricing, and materials tree.")
+
+    CreateOptCheckbox(cardProf, 12, -40, "TradeSkill Costs & Profitability (Production)",
+        "Show crafting costs, net profit margins (with 5% AH cut), vendor materials, and recursive component trees directly in the Blizzard TradeSkill window.",
+        "EnableProfessionCraftInfo", true, function(val)
+            if MarketSync.RefreshCraftingInfoUI then MarketSync.RefreshCraftingInfoUI() end
+        end)
+
+    CreateOptCheckbox(cardProf, 12, -66, "Enable Processing Tab",
+        "Show the Processing tab (recursive solver, vendor arbitrage, and batch shopping list) on MainFrame and Auction House.",
+        "EnableProcessingTab", false, function(val)
+            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        end)
+
+    -- ================================================================
+    -- CARD 3: AUCTION HOUSE & SCANNING
+    -- ================================================================
+    local cardAH = CreateCard(565, 175, cardProf, -10)
+
+    local hAH = cardAH:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hAH:SetPoint("TOPLEFT", 12, -10)
+    hAH:SetText("|cffffd700Auction House & Scanning|r")
+
+    local sAH = cardAH:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    sAH:SetPoint("TOPLEFT", hAH, "BOTTOMLEFT", 0, -3)
+    sAH:SetText("Auction House integration, tooltip prices, yields, and chat price answering.")
+
+    CreateOptCheckbox(cardAH, 12, -40, "Enable Analytics Tab",
+        "Show price history charts, volume trends, and item stats in both main window and Auction House.",
+        "EnableAnalyticsTab", true, function(val)
+            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        end)
+
+    CreateOptCheckbox(cardAH, 12, -66, "Use Auctionator Scanning (if present)",
+        "Let Auctionator perform full AH scans and import its price database. If disabled or Auctionator is absent, MarketSync uses its native high-speed scanner.",
+        "UseAuctionatorScanner", Auctionator ~= nil and Auctionator.Database ~= nil, function(val)
+            if MarketSyncDB then MarketSyncDB.AuctionatorScannerUserChoice = true end
+            if MarketSync.Provider then MarketSync.Provider.Select() end
+            if val and MarketSync.RegisterAuctionatorHooks then MarketSync.RegisterAuctionatorHooks() end
+        end)
+
+    CreateOptCheckbox(cardAH, 12, -92, "Show Auction Prices on Tooltips",
+        "Display buyout prices, stack totals, and scan freshness directly on item tooltips.",
+        "EnableTooltipAuctionPrice", true, nil)
+
+    CreateOptCheckbox(cardAH, 12, -118, "Show Expected Values (EV) on Tooltips",
+        "Show expected yields and EV values for Prospecting, Milling, and Disenchanting.",
+        "EnableTooltipProb", true, nil)
+
+    CreateOptCheckbox(cardAH, 12, -144, "Enable Chat Price Check ('? [item]')",
+        "Automatically answer queries from other players using '? [Item Link]'.",
+        "EnableChatPriceCheck", true, nil)
+
+    -- ================================================================
+    -- CARD 4: AUDIO & NOTIFICATIONS
+    -- ================================================================
+    local cardAudio = CreateCard(565, 155, cardAH, -10)
+
+    local hAudio = cardAudio:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hAudio:SetPoint("TOPLEFT", 12, -10)
+    hAudio:SetText("|cffffd700Audio & Notifications|r")
+
+    local sAudio = cardAudio:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    sAudio:SetPoint("TOPLEFT", hAudio, "BOTTOMLEFT", 0, -3)
+    sAudio:SetText("Audible alert triggers and visual deal notifications.")
+
+    CreateOptCheckbox(cardAudio, 12, -38, "Enable Notification Sounds",
+        "Play a sound when a tracked notification request triggers.",
+        "EnableNotificationSounds", true, nil)
+
+    -- Sound Dropdown
+    local soundDropdown = CreateFrame("Frame", "MarketSyncAddonSoundDropdown", cardAudio, "UIDropDownMenuTemplate")
+    soundDropdown:SetPoint("TOPLEFT", 10, -64)
+    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(soundDropdown, 120) end
+
+    local function PlaySelectedSound()
+        local soundID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
+        if MarketSync.PlayNotificationSound then MarketSync.PlayNotificationSound(soundID, true) end
+    end
+
+    local function OnSoundSelect(self)
+        if MarketSyncDB then MarketSyncDB.NotificationSoundID = self.arg1 end
+        if UIDropDownMenu_SetText then UIDropDownMenu_SetText(soundDropdown, self.value) end
+        if CloseDropDownMenus then CloseDropDownMenus() end
+    end
+
+    if UIDropDownMenu_Initialize then
+        UIDropDownMenu_Initialize(soundDropdown, function()
+            local info = UIDropDownMenu_CreateInfo and UIDropDownMenu_CreateInfo()
+            if info then
+                for _, s in ipairs(MarketSync.StandardSounds or {}) do
+                    info.text = s.name
+                    info.value = s.name
+                    info.arg1 = s.id
+                    info.func = OnSoundSelect
+                    info.checked = (MarketSyncDB and MarketSyncDB.NotificationSoundID == s.id)
+                    if UIDropDownMenu_AddButton then UIDropDownMenu_AddButton(info) end
+                end
+            end
+        end)
+    end
+
+    local btnPlaySound = CreateFrame("Button", nil, cardAudio, "UIPanelButtonTemplate")
+    btnPlaySound:SetSize(22, 22)
+    btnPlaySound:SetPoint("LEFT", soundDropdown, "RIGHT", -10, 2)
+    btnPlaySound:SetText(">")
+    btnPlaySound:SetScript("OnClick", PlaySelectedSound)
+    AttachTooltip(btnPlaySound, "Preview selected alert sound.")
+
+    -- Volume Slider
+    local volSlider = CreateFrame("Slider", "MarketSyncAddonVolSlider", cardAudio, "OptionsSliderTemplate")
+    volSlider:SetPoint("TOPLEFT", 18, -108)
+    volSlider:SetWidth(125)
+    volSlider:SetMinMaxValues(0, 100)
+    volSlider:SetValueStep(5)
+    if volSlider.SetObeyStepOnDrag then volSlider:SetObeyStepOnDrag(true) end
+    if volSlider.Low then volSlider.Low:SetText("0%") end
+    if volSlider.High then volSlider.High:SetText("100%") end
+    if volSlider.Text then volSlider.Text:SetText("Alert Volume") end
+
+    volSlider:SetScript("OnValueChanged", function(self, value)
+        local val = math.floor(value + 0.5)
+        if MarketSyncDB then MarketSyncDB.NotificationVolume = val / 100 end
+    end)
+    local function RefreshVolume()
+        local vol = (MarketSyncDB and MarketSyncDB.NotificationVolume or 1) * 100
+        volSlider:SetValue(vol)
+        local currentID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
+        for _, s in ipairs(MarketSync.StandardSounds or {}) do
+            if s.id == currentID then
+                if UIDropDownMenu_SetText then UIDropDownMenu_SetText(soundDropdown, s.name) end
+                break
+            end
+        end
+    end
+    table.insert(refreshControls, RefreshVolume)
+
+    -- Undercut Slider
+    local undercutSlider = CreateFrame("Slider", "MarketSyncAddonUndercutSlider", cardAudio, "OptionsSliderTemplate")
+    undercutSlider:SetPoint("LEFT", volSlider, "RIGHT", 40, 0)
+    undercutSlider:SetWidth(120)
+    undercutSlider:SetMinMaxValues(1, 50)
+    undercutSlider:SetValueStep(1)
+    if undercutSlider.SetObeyStepOnDrag then undercutSlider:SetObeyStepOnDrag(true) end
+    if undercutSlider.Low then undercutSlider.Low:SetText("1%") end
+    if undercutSlider.High then undercutSlider.High:SetText("50%") end
+    if undercutSlider.Text then undercutSlider.Text:SetText("Undercut %") end
+
+    undercutSlider:SetScript("OnValueChanged", function(self, value)
+        local val = math.floor(value + 0.5)
+        if MarketSyncDB then MarketSyncDB.AlertUndercutPct = val end
+        if self.Text then self.Text:SetText(string.format("%d%%", val)) end
+    end)
+    local function RefreshUndercut()
+        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        undercutSlider:SetValue(val)
+        if undercutSlider.Text then undercutSlider.Text:SetText(string.format("%d%%", val)) end
+    end
+    table.insert(refreshControls, RefreshUndercut)
+
+    -- Visual Alerts on right side of Card 4
+    CreateOptCheckbox(cardAudio, 360, -38, "Flash Minimap for Alerts",
+        "Flash the MarketSync minimap button until notifications are acknowledged.",
+        "EnableMinimapAlerts", true, function(val)
+            if not val and MarketSync.StopMinimapFlash then MarketSync.StopMinimapFlash() end
+        end)
+
+    CreateOptCheckbox(cardAudio, 360, -64, "Show On-Screen Alert Banner",
+        "Display triggered notifications in the on-screen raid-warning banner.",
+        "EnableRaidWarningAlerts", true, nil)
+
+    local chkPeriodicAlerts = CreateOptCheckbox(cardAudio, 360, -90, "Periodic Tracked Checks",
+        "Recheck tracked notification items once per minute in addition to scan-time checks.",
+        nil, false, function(val)
+            if MarketSyncDB then MarketSyncDB.NotificationMode = val and "both" or "on_scan" end
+        end)
+    table.insert(refreshControls, function()
+        if MarketSyncDB and chkPeriodicAlerts then
+            chkPeriodicAlerts:SetChecked(MarketSyncDB.NotificationMode == "periodic" or MarketSyncDB.NotificationMode == "both")
+        end
+    end)
+
+    -- ================================================================
+    -- CARD 5: DATA SYNC & SWARM
+    -- ================================================================
+    local cardSwarm = CreateCard(565, 140, cardAudio, -10)
+
+    local hSwarm = cardSwarm:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hSwarm:SetPoint("TOPLEFT", 12, -10)
+    hSwarm:SetText("|cffffd700Data Sync & Swarm|r")
+
+    local sSwarm = cardSwarm:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    sSwarm:SetPoint("TOPLEFT", hSwarm, "BOTTOMLEFT", 0, -3)
+    sSwarm:SetText("Peer-to-peer guild network synchronization, privacy, and latency management.")
+
+    CreateOptCheckbox(cardSwarm, 12, -38, "Enable Guild Sync",
+        "Enable or disable guild data syncing. When disabled, the Guild Sync tab is hidden and swarm status shows as 'Disabled'.",
+        "PassiveSync", true, function(val)
+            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), val and nil or "Disabled") end
+            if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        end)
+
+    CreateOptCheckbox(cardSwarm, 12, -64, "Enable Neutral AH Sync",
+        "Enable or disable Neutral AH data syncing.",
+        "EnableNeutralSync", true, function(val)
+            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), val and nil or "Disabled") end
+            if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        end)
+
+    local chkLockMinimap = CreateOptCheckbox(cardSwarm, 12, -90, "Lock Minimap Button",
+        "Prevent the minimap button from being dragged.",
+        nil, false, function(val)
+            if MarketSyncDB then
+                if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = {} end
+                MarketSyncDB.MinimapIcon.locked = val
+            end
+        end)
+    table.insert(refreshControls, function()
+        if MarketSyncDB and MarketSyncDB.MinimapIcon and chkLockMinimap then
+            chkLockMinimap:SetChecked(MarketSyncDB.MinimapIcon.locked == true)
+        end
+    end)
+
+    -- Swarm Action Buttons
+    local btnManageUsers = CreateFrame("Button", nil, cardSwarm, "UIPanelButtonTemplate")
+    btnManageUsers:SetSize(130, 22)
+    btnManageUsers:SetPoint("TOPLEFT", 280, -38)
+    btnManageUsers:SetText("Manage Users")
+    AttachTooltip(btnManageUsers, "Block or unblock sync partners.")
+    btnManageUsers:SetScript("OnClick", function()
+        if MarketSync.ShowUserManagementDialog then MarketSync.ShowUserManagementDialog() end
+    end)
+
+    local btnSmartBandwidth = CreateFrame("Button", nil, cardSwarm, "UIPanelButtonTemplate")
+    btnSmartBandwidth:SetSize(130, 22)
+    btnSmartBandwidth:SetPoint("LEFT", btnManageUsers, "RIGHT", 10, 0)
+    btnSmartBandwidth:SetText("Smart Rules")
+    AttachTooltip(btnSmartBandwidth, "Configure where background sync and cache indexing are allowed.")
+    btnSmartBandwidth:SetScript("OnClick", function()
+        if MarketSync.ShowSmartRulesDialog then MarketSync.ShowSmartRulesDialog() end
+    end)
+
+    local btnConsole = CreateFrame("Button", nil, cardSwarm, "UIPanelButtonTemplate")
+    btnConsole:SetSize(130, 22)
+    btnConsole:SetPoint("TOPLEFT", 280, -68)
+    btnConsole:SetText("Sync Console")
+    AttachTooltip(btnConsole, "View network stream and cache logs.")
+    btnConsole:SetScript("OnClick", function()
+        if MarketSync.ToggleNetworkMonitor then MarketSync.ToggleNetworkMonitor() end
+    end)
+
+    local btnResetData = CreateFrame("Button", nil, cardSwarm, "UIPanelButtonTemplate")
+    btnResetData:SetSize(130, 22)
+    btnResetData:SetPoint("LEFT", btnConsole, "RIGHT", 10, 0)
+    btnResetData:SetText("Reset Sync Data")
+    AttachTooltip(btnResetData, "|cffff4444Wipe sync data and create a new personal snapshot.|r")
+    btnResetData:SetScript("OnClick", function()
+        if StaticPopup_Show then
+            StaticPopup_Show("MarketSync_CONFIRM_RESET")
+        end
+    end)
+
+    -- ================================================================
+    -- CARD 6: BETA & EXPERIMENTAL FEATURES
+    -- ================================================================
+    local cardBeta = CreateCard(565, 90, cardSwarm, -10)
+
+    local hBeta = cardBeta:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hBeta:SetPoint("TOPLEFT", 12, -10)
+    hBeta:SetText("|cffffaa00Beta & Experimental Features|r")
+
+    local sBeta = cardBeta:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    sBeta:SetPoint("TOPLEFT", hBeta, "BOTTOMLEFT", 0, -3)
+    sBeta:SetText("Modules currently under active development.")
+
+    CreateOptCheckbox(cardBeta, 12, -38, "|cffff6600[BETA]|r Enable Price Alerts Tab",
+        "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both portable window and Auction House.",
+        "EnableAlertsTab", false, function(val)
+            if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+        end)
+
+    CreateOptCheckbox(cardBeta, 12, -64, "Enable Debug Diagnostics",
+        "Print verbose synchronization, retention, and scanning diagnostics in chat.",
+        "DebugMode", false, nil)
+
+    function panel.RefreshSettingsValues()
+        for _, refresh in ipairs(refreshControls) do
+            refresh()
+        end
+    end
+end
+
+panel:SetScript("OnShow", function(self)
+    PopulateAddonSettings(self)
+    if self.RefreshSettingsValues then
+        self.RefreshSettingsValues()
+    end
+end)
 
 -- ================================================================
 -- STAGED INITIALIZATION

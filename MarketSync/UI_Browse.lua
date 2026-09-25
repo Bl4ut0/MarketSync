@@ -1460,6 +1460,30 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.noResultsText:SetText("Search for items using the box above.")
     panel.noResultsText:Show()
 
+    -- Low RAM notice box (shown when cache is generating on-demand or empty state)
+    local lowRamNotice = CreateFrame("Frame", nil, panel)
+    lowRamNotice:SetSize(520, 68)
+    lowRamNotice:SetPoint("TOP", panel.noResultsText, "BOTTOM", 0, -10)
+
+    local lowRamText = lowRamNotice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    lowRamText:SetPoint("TOP", lowRamNotice, "TOP", 0, 0)
+    lowRamText:SetWidth(500)
+    lowRamText:SetJustifyH("CENTER")
+    lowRamNotice.text = lowRamText
+
+    local btnLowRamSettings = CreateFrame("Button", nil, lowRamNotice, "UIPanelButtonTemplate")
+    btnLowRamSettings:SetSize(120, 22)
+    btnLowRamSettings:SetPoint("TOP", lowRamText, "BOTTOM", 0, -8)
+    btnLowRamSettings:SetText("Open Settings")
+    btnLowRamSettings:SetScript("OnClick", function()
+        if MarketSync.OpenSettings then
+            MarketSync.OpenSettings()
+        end
+    end)
+    lowRamNotice.btnSettings = btnLowRamSettings
+    lowRamNotice:Hide()
+    panel.lowRamNotice = lowRamNotice
+
     -- --- STATUS TEXT (inside the bottom gold bar, left side, centered vertically) ---
     panel.statusText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     panel.statusText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 28, 16)
@@ -1918,6 +1942,21 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         end
         if self.tableScrollBar then
             self.tableScrollBar:Update(self.page, maxPage)
+        end
+        if self.lowRamNotice then
+            if total == 0 and MarketSyncDB and MarketSyncDB.LowRamMode and self.noResultsText and self.noResultsText:IsShown() then
+                local estMB, totalStored = 0, 0
+                if MarketSync.GetEstimatedRAMUsage then
+                    estMB, totalStored = MarketSync.GetEstimatedRAMUsage()
+                end
+                self.lowRamNotice.text:SetText(string.format(
+                    "|cffffcc00Notice:|r Low RAM Mode is active (cache generates on-demand).\n|cffaaaaaaYou can disable Low RAM Mode in Settings for instant pre-cached searches.\nEstimated memory impact: ~%.1f MB (based on %d stored items).|r",
+                    estMB, totalStored
+                ))
+                self.lowRamNotice:Show()
+            else
+                self.lowRamNotice:Hide()
+            end
         end
     end
 

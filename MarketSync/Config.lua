@@ -282,11 +282,11 @@ function MarketSync.InitializeDB()
             DebugMode = false,
             EnableChatPriceCheck = true,
             EnableNotificationSounds = true,
-            BuildCacheOnStartup = true,
-            LowRamMode = false,
-            OnDemandPersonal = false,
-            OnDemandGuild = false,
-            OnDemandNeutral = false,
+            BuildCacheOnStartup = false,
+            LowRamMode = true,
+            OnDemandPersonal = true,
+            OnDemandGuild = true,
+            OnDemandNeutral = true,
             CacheSpeed = 2,
             ItemMetadata = {},
             HistoryLog = {},
@@ -315,7 +315,11 @@ function MarketSync.InitializeDB()
         MarketSyncDB.UseAuctionatorScanner = Auctionator ~= nil and Auctionator.Database ~= nil
     end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
-    if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = true end
+    if MarketSyncDB.LowRamMode == nil then MarketSyncDB.LowRamMode = true end
+    if MarketSyncDB.OnDemandPersonal == nil then MarketSyncDB.OnDemandPersonal = true end
+    if MarketSyncDB.OnDemandGuild == nil then MarketSyncDB.OnDemandGuild = true end
+    if MarketSyncDB.OnDemandNeutral == nil then MarketSyncDB.OnDemandNeutral = true end
+    if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = false end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
     if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 3.75 } end
     if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
@@ -464,6 +468,65 @@ MarketSync.CacheSpeedPresets = {
     [3] = { name = "Aggressive",    batchSize = 100, interval = 0.5,  requests = 12,   yieldEvery = 100, resolveDelay = 0.3,  desc = "|cff888888Faster indexing with potential minor stutter.\\nUse if you have a high-end CPU.|r" },
     [4] = { name = "Maximum",       batchSize = 200, interval = 0.25, requests = 20,   yieldEvery = 200, resolveDelay = 0.1,  desc = "|cffff8800Fastest possible. Will likely cause frame drops.\\nOnly use if you want it done NOW.|r" },
 }
+
+-- ================================================================
+-- ESTIMATED RAM USAGE
+-- ================================================================
+function MarketSync.GetEstimatedRAMUsage()
+    local personalCount = 0
+    local guildCount = 0
+    local neutralCount = 0
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and realmDB.PersonalData then
+        for _ in pairs(realmDB.PersonalData) do personalCount = personalCount + 1 end
+    end
+    local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+        or (Auctionator and Auctionator.Database and Auctionator.Database.db)
+    if liveStore then
+        for _ in pairs(liveStore) do guildCount = guildCount + 1 end
+    end
+    if realmDB and realmDB.NeutralData then
+        for _ in pairs(realmDB.NeutralData) do neutralCount = neutralCount + 1 end
+    end
+    local totalItems = personalCount + guildCount + neutralCount
+    -- Lua search index table overhead is ~0.95 KB per fully resolved entry
+    local estMB = math.max(0.5, (totalItems * 0.95) / 1024)
+    return estMB, totalItems, personalCount, guildCount, neutralCount
+end
+
+-- ================================================================
+-- SETTINGS NAVIGATION HELPER
+-- ================================================================
+function MarketSync.OpenSettings()
+    local opened = false
+    if Settings and Settings.OpenToCategory and MarketSync.SettingsCategory then
+        local id = type(MarketSync.SettingsCategory) == "table" and MarketSync.SettingsCategory.GetID and MarketSync.SettingsCategory:GetID() or MarketSync.SettingsCategory
+        local ok = pcall(Settings.OpenToCategory, id)
+        if ok then opened = true end
+    end
+    if not opened and InterfaceOptionsFrame_OpenToCategory then
+        local ok = pcall(InterfaceOptionsFrame_OpenToCategory, "MarketSync")
+        if not ok and MarketSync.SettingsPanel then
+            pcall(InterfaceOptionsFrame_OpenToCategory, MarketSync.SettingsPanel)
+        else
+            pcall(InterfaceOptionsFrame_OpenToCategory, "MarketSync")
+        end
+        opened = true
+    end
+    -- Fallback: if options window didn't open (e.g. in combat or unhooked), open Tab 7 on MainFrame
+    if not opened or (InterfaceOptionsFrame and not InterfaceOptionsFrame:IsShown() and (not SettingsPanel or not SettingsPanel:IsShown())) then
+        if MarketSync_ToggleUI then
+            if not MarketSyncMainFrame or not MarketSyncMainFrame:IsShown() then
+                MarketSync_ToggleUI()
+            end
+            if MarketSync.SelectMainFrameTab then
+                MarketSync.SelectMainFrameTab(7)
+            elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[7] then
+                MarketSyncMainFrame.tabs[7]:Click()
+            end
+        end
+    end
+end
 
 -- ================================================================
 -- BLOCK / TRACK FUNCTIONS

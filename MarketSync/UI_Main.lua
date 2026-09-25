@@ -601,36 +601,26 @@ local function CreateMainFrame()
         return MarketSync.CreateModernInset(parent, x, y, w, h)
     end
 
-    -- Column layout: four columns
-    local TOP_Y   = -70
-    local COL1_X  = 18
-    local COL2_X  = 204 -- Expanded 5px left (from 209)
-    local COL3_X  = 400 -- Memory Saver Box
-    local COL4_X  = 587
+    -- Four categorized columns
+    local TOP_Y     = -70
     local CONTENT_H = 338
+    local COL1_X    = 18
+    local COL2_X    = 210
+    local COL3_X    = 410
+    local COL4_X    = 600
 
-    -- Box Widths (186 for first 3 to perfectly span 18 to 587 with 5px gaps)
-    local COL1_W  = 186
-    local COL2_W  = 196 -- Expanded by 10px total (5px left, 5px right)
-    local COL3_W  = 187
-    local COL4_W  = 237
+    local COL1_W    = 188 -- Column 1: Performance & Memory
+    local COL2_W    = 196 -- Column 2: Professions & AH
+    local COL3_W    = 186 -- Column 3: Audio & Notifications
+    local COL4_W    = 218 -- Column 4: Sync & Swarm + Beta
 
-    -- Column 1: Global Settings
-    local leftGlobalBox   = CreateBox(SettingsContent, COL1_W, CONTENT_H, COL1_X, TOP_Y)
-    
-    -- Column 2: Toggle Features
-    local leftFeaturesBox = CreateBox(SettingsContent, COL2_W, CONTENT_H, COL2_X, TOP_Y)
-
-    -- Column 3: Memory Saver
-    local middleMemoryBox = CreateBox(SettingsContent, COL3_W, CONTENT_H, COL3_X, TOP_Y)
-
-    -- Column 4: Quick Info
-    local rightInfoBox    = CreateBox(SettingsContent, COL4_W, 285, COL4_X, TOP_Y)
-
-    -- Labels invisible boundary removed. Labels now dynamically attach to buttons.
+    local boxMemory = CreateBox(SettingsContent, COL1_W, CONTENT_H, COL1_X, TOP_Y)
+    local boxAH     = CreateBox(SettingsContent, COL2_W, CONTENT_H, COL2_X, TOP_Y)
+    local boxAudio  = CreateBox(SettingsContent, COL3_W, CONTENT_H, COL3_X, TOP_Y)
+    local boxSwarm  = CreateBox(SettingsContent, COL4_W, CONTENT_H, COL4_X, TOP_Y)
 
     -- ================================================================
-    -- HELPER: AttachTooltip
+    -- HELPER: AttachTooltip & CreateCheckbox
     -- ================================================================
     local function AttachTooltip(frame, text)
         if not text or text == "" then return end
@@ -639,51 +629,262 @@ local function CreateMainFrame()
             GameTooltip:SetText(text, nil, nil, nil, nil, true)
             GameTooltip:Show()
         end)
-        frame:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
+        frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
     local function CreateCheckbox(parent, anchor, anchorPoint, label, tooltipText)
         local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-        cb:SetSize(24, 24) -- Make checkbox smaller
+        cb:SetSize(22, 22)
         if anchorPoint then
-            cb:SetPoint("TOPLEFT", anchor, anchorPoint, 0, -8) -- Restored to 0 X-offset to prevent staggering
+            cb:SetPoint("TOPLEFT", anchor, anchorPoint, 0, -6)
         else
-            cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
+            cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6)
         end
         cb.text:SetText(label)
-        cb.text:SetFontObject("GameFontHighlightSmall") -- Make text smaller
-        cb.text:SetWidth(150) -- Adjusted for tighter columns
+        cb.text:SetFontObject("GameFontHighlightSmall")
+        cb.text:SetWidth(152)
         cb.text:SetJustifyH("LEFT")
         cb.text:ClearAllPoints()
-        cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0) -- Bring text closer to box
+        cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
         AttachTooltip(cb, tooltipText)
         return cb
     end
 
     -- ================================================================
-    -- COLUMN 1: GLOBAL SETTINGS
+    -- COLUMN 1: PERFORMANCE & MEMORY MANAGEMENT
     -- ================================================================
     local header1 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    header1:SetPoint("TOP", leftGlobalBox, "TOP", 0, 16) -- Perfectly centered above the box
+    header1:SetPoint("TOP", boxMemory, "TOP", 0, 16)
     header1:SetTextColor(1, 0.82, 0)
-    header1:SetText("Global Settings")
+    header1:SetText("Performance & Memory")
 
-    local chkLock = CreateCheckbox(leftGlobalBox, leftGlobalBox, "TOPLEFT",
-        "Lock Minimap Button", "Prevent the minimap button from being dragged.")
-    chkLock:ClearAllPoints()
-    chkLock:SetPoint("TOPLEFT", leftGlobalBox, "TOPLEFT", 10, -12)
-    chkLock:SetScript("OnClick", function(self)
-        if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = {} end
-        MarketSyncDB.MinimapIcon.locked = self:GetChecked()
+    local chkLowRam = CreateCheckbox(boxMemory, boxMemory, "TOPLEFT",
+        "Enable Low RAM Mode", "Wipe search caches and run Lua garbage collection when windows are closed. Recommended on by default.")
+    chkLowRam:ClearAllPoints()
+    chkLowRam:SetPoint("TOPLEFT", boxMemory, "TOPLEFT", 12, -10)
+
+    local subToggles = {}
+    local function UpdateSubTogglesState()
+        local masterEnabled = chkLowRam:GetChecked()
+        for _, cb in ipairs(subToggles) do
+            if masterEnabled then
+                cb:Enable()
+                cb.text:SetTextColor(1, 1, 1)
+            else
+                cb:Disable()
+                cb.text:SetTextColor(0.5, 0.5, 0.5)
+            end
+        end
+    end
+
+    chkLowRam:SetScript("OnClick", function(self)
+        MarketSyncDB.LowRamMode = self:GetChecked()
+        UpdateSubTogglesState()
+        if not self:GetChecked() then
+            if MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
+                MarketSync.BuildSearchIndex()
+            end
+        end
     end)
-    chkLock:SetScript("OnShow", function(self)
-        if MarketSyncDB and MarketSyncDB.MinimapIcon then self:SetChecked(MarketSyncDB.MinimapIcon.locked) end
+    chkLowRam:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.LowRamMode) end
+        UpdateSubTogglesState()
     end)
 
-    local chkNotifSound = CreateCheckbox(leftGlobalBox, chkLock, "BOTTOMLEFT",
-        "Enable Notification Sounds", "Play a sound when a tracked notification request triggers.")
+    local function CreateSubToggle(label, key, anchor)
+        local cb = CreateCheckbox(boxMemory, anchor, "BOTTOMLEFT", label, "Only load and index this data when its specific tab is clicked.")
+        cb.text:SetWidth(125)
+        cb:SetScript("OnClick", function(self)
+            MarketSyncDB[key] = self:GetChecked()
+            if self:GetChecked() and MarketSync.InvalidateIndexCache then
+                MarketSync.InvalidateIndexCache()
+            end
+        end)
+        cb:SetScript("OnShow", function(self)
+            if MarketSyncDB then self:SetChecked(MarketSyncDB[key]) end
+        end)
+        table.insert(subToggles, cb)
+        return cb
+    end
+
+    local chkODP = CreateSubToggle("Personal: Demand", "OnDemandPersonal", chkLowRam)
+    local chkODG = CreateSubToggle("Guild: Demand", "OnDemandGuild", chkODP)
+    local chkODN = CreateSubToggle("Neutral: Demand", "OnDemandNeutral", chkODG)
+
+    local chkCache = CreateCheckbox(boxMemory, chkODN, "BOTTOMLEFT",
+        "Pre-Build on Startup", "Pre-load and index item data shortly after login (disabled by default in Low RAM mode).")
+    chkCache:SetScript("OnClick", function(self)
+        MarketSyncDB.BuildCacheOnStartup = self:GetChecked()
+    end)
+    chkCache:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.BuildCacheOnStartup) end
+    end)
+
+    -- Cache Build Speed Slider
+    local speedHeader = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    speedHeader:SetPoint("TOPLEFT", chkCache, "BOTTOMLEFT", 4, -10)
+    speedHeader:SetText("Cache Build Speed")
+    speedHeader:SetTextColor(1, 0.82, 0)
+
+    local speedSlider = CreateFrame("Slider", "MarketSyncMainCacheSpeedSlider", boxMemory, "OptionsSliderTemplate")
+    speedSlider:SetPoint("TOPLEFT", speedHeader, "BOTTOMLEFT", 6, -14)
+    speedSlider:SetWidth(110)
+    speedSlider:SetMinMaxValues(1, 4)
+    speedSlider:SetValueStep(1)
+    speedSlider:SetObeyStepOnDrag(true)
+    speedSlider.Low:SetText("1")
+    speedSlider.High:SetText("4")
+
+    local sliderTrack = speedSlider:CreateTexture(nil, "BACKGROUND")
+    sliderTrack:SetColorTexture(0.2, 0.2, 0.2, 0.8)
+    sliderTrack:SetHeight(4)
+    sliderTrack:SetPoint("LEFT", speedSlider, "LEFT", 4, 0)
+    sliderTrack:SetPoint("RIGHT", speedSlider, "RIGHT", -4, 0)
+
+    local sliderTrackBorder = CreateFrame("Frame", nil, speedSlider, "BackdropTemplate")
+    sliderTrackBorder:SetPoint("TOPLEFT", sliderTrack, "TOPLEFT", -1, 1)
+    sliderTrackBorder:SetPoint("BOTTOMRIGHT", sliderTrack, "BOTTOMRIGHT", 1, -1)
+    sliderTrackBorder:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    sliderTrackBorder:SetBackdropBorderColor(0, 0, 0, 1)
+
+    local speedLabel = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    speedLabel:SetPoint("LEFT", speedSlider, "RIGHT", 8, 0)
+    speedLabel:SetWidth(50)
+    speedLabel:SetJustifyH("LEFT")
+
+    local speedDesc = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    speedDesc:SetPoint("TOPLEFT", speedSlider, "BOTTOMLEFT", -6, -8)
+    speedDesc:SetWidth(168)
+    speedDesc:SetJustifyH("LEFT")
+
+    local function UpdateSpeedDisplay(val)
+        local preset = MarketSync.CacheSpeedPresets and MarketSync.CacheSpeedPresets[val]
+        if preset then
+            speedLabel:SetText("|cffffd700" .. preset.name .. "|r")
+            speedDesc:SetText(preset.desc)
+        end
+        speedSlider.Text:SetText("")
+    end
+
+    speedSlider:SetScript("OnValueChanged", function(self, val)
+        val = math.floor(val + 0.5)
+        MarketSyncDB.CacheSpeed = val
+        UpdateSpeedDisplay(val)
+    end)
+    speedSlider:SetScript("OnShow", function(self)
+        local val = (MarketSyncDB and MarketSyncDB.CacheSpeed) or 2
+        self:SetValue(val)
+        UpdateSpeedDisplay(val)
+    end)
+    AttachTooltip(speedSlider, "Controls background indexing yield rate and batch size when building search caches or resolving item data.")
+
+    local ramText = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    ramText:SetPoint("BOTTOMLEFT", boxMemory, "BOTTOMLEFT", 10, 8)
+    ramText:SetWidth(168)
+    ramText:SetJustifyH("LEFT")
+    SettingsContent.ramText = ramText
+
+    -- ================================================================
+    -- COLUMN 2: PROFESSIONS & AUCTION HOUSE
+    -- ================================================================
+    local header2 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    header2:SetPoint("TOP", boxAH, "TOP", 0, 16)
+    header2:SetTextColor(1, 0.82, 0)
+    header2:SetText("Professions & AH")
+
+    local chkTradeSkill = CreateCheckbox(boxAH, boxAH, "TOPLEFT",
+        "TradeSkill Costs", "Show crafting costs, profit margins, vendor pricing, and materials tree drawer inside TradeSkill window.")
+    chkTradeSkill:ClearAllPoints()
+    chkTradeSkill:SetPoint("TOPLEFT", boxAH, "TOPLEFT", 12, -10)
+    chkTradeSkill:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableProfessionCraftInfo = self:GetChecked()
+        print("|cFF00FF00[MarketSync]|r TradeSkill Costs " .. (self:GetChecked() and "Enabled" or "Disabled"))
+        if MarketSync.RefreshCraftingInfoUI then MarketSync.RefreshCraftingInfoUI() end
+    end)
+    chkTradeSkill:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableProfessionCraftInfo ~= false) end
+    end)
+
+    local chkAnalytics = CreateCheckbox(boxAH, chkTradeSkill, "BOTTOMLEFT",
+        "Enable Analytics Tab", "Show price history charts, volume trends, and item stats on both portable window and Auction House.")
+    chkAnalytics:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableAnalyticsTab = self:GetChecked()
+        print("|cFF00FF00[MarketSync]|r Analytics " .. (self:GetChecked() and "Enabled" or "Disabled"))
+        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+    end)
+    chkAnalytics:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableAnalyticsTab ~= false) end
+    end)
+
+    local chkProcessing = CreateCheckbox(boxAH, chkAnalytics, "BOTTOMLEFT",
+        "Enable Processing Tab", "Show the Processing tab (materials solver, arbitrage, and batch crafting) on portable window and Auction House.")
+    chkProcessing:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableProcessingTab = self:GetChecked()
+        print("|cFF00FF00[MarketSync]|r Processing " .. (self:GetChecked() and "Enabled" or "Disabled"))
+        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
+    end)
+    chkProcessing:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableProcessingTab == true) end
+    end)
+
+    local chkAuctionatorScan = CreateCheckbox(boxAH, chkProcessing, "BOTTOMLEFT",
+        "Auctionator Scanning", "Let Auctionator perform AH scans and import its price database. Disable to use MarketSync's native scanner.")
+    chkAuctionatorScan:SetScript("OnClick", function(self)
+        local isChecked = self:GetChecked()
+        MarketSyncDB.UseAuctionatorScanner = isChecked
+        MarketSyncDB.AuctionatorScannerUserChoice = true
+        if isChecked and MarketSync.Scanner and MarketSync.Scanner.Active then
+            MarketSync.Scanner.Cancel("Auctionator scanning enabled")
+        end
+        if MarketSync.Provider then MarketSync.Provider.Select() end
+        if isChecked and MarketSync.RegisterAuctionatorHooks then MarketSync.RegisterAuctionatorHooks() end
+        print("|cFF00FF00[MarketSync]|r Auctionator Scanning " .. (isChecked and "Enabled" or "Disabled"))
+    end)
+    chkAuctionatorScan:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.UseAuctionatorScanner ~= false) end
+    end)
+
+    local chkTooltipPrice = CreateCheckbox(boxAH, chkAuctionatorScan, "BOTTOMLEFT",
+        "Tooltip Auction Prices", "Show buyout prices, stack totals, and scan freshness directly on item tooltips.")
+    chkTooltipPrice:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableTooltipAuctionPrice = self:GetChecked()
+    end)
+    chkTooltipPrice:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableTooltipAuctionPrice ~= false) end
+    end)
+
+    local chkTooltip = CreateCheckbox(boxAH, chkTooltipPrice, "BOTTOMLEFT",
+        "Tooltip Probabilities", "Show expected yields and EV values for Prospecting, Milling, and Disenchanting on item tooltips.")
+    chkTooltip:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableTooltipProb = self:GetChecked()
+    end)
+    chkTooltip:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableTooltipProb ~= false) end
+    end)
+
+    local chkPriceCheck = CreateCheckbox(boxAH, chkTooltip, "BOTTOMLEFT",
+        "Chat Price Check '?'", "Answer queries from other players using '? [Item Link]'.")
+    chkPriceCheck:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableChatPriceCheck = self:GetChecked()
+    end)
+    chkPriceCheck:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableChatPriceCheck ~= false) end
+    end)
+
+    -- ================================================================
+    -- COLUMN 3: AUDIO & NOTIFICATIONS
+    -- ================================================================
+    local header3 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    header3:SetPoint("TOP", boxAudio, "TOP", 0, 16)
+    header3:SetTextColor(1, 0.82, 0)
+    header3:SetText("Audio & Alerts")
+
+    local chkNotifSound = CreateCheckbox(boxAudio, boxAudio, "TOPLEFT",
+        "Enable Sound Alerts", "Play a sound when a tracked notification request triggers.")
+    chkNotifSound:ClearAllPoints()
+    chkNotifSound:SetPoint("TOPLEFT", boxAudio, "TOPLEFT", 10, -10)
     chkNotifSound:SetScript("OnClick", function(self)
         MarketSyncDB.EnableNotificationSounds = self:GetChecked()
     end)
@@ -691,182 +892,19 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableNotificationSounds == true) end
     end)
 
-    local chkMinimapAlerts = CreateCheckbox(leftGlobalBox, chkNotifSound, "BOTTOMLEFT",
-        "Flash Minimap for Alerts", "Flash the MarketSync minimap button until notifications are acknowledged.")
-    chkMinimapAlerts:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableMinimapAlerts = self:GetChecked() and true or false
-        if not MarketSyncDB.EnableMinimapAlerts and MarketSync.StopMinimapFlash then
-            -- Disabling this visual channel must not erase unseen notification
-            -- context. Viewing the Notifications tab performs acknowledgement.
-            MarketSync.StopMinimapFlash()
-        elseif MarketSyncDB.EnableMinimapAlerts
-            and (tonumber(MarketSync.NotificationUnreadCount) or 0) > 0
-            and MarketSync.StartMinimapFlash then
-            MarketSync.StartMinimapFlash()
-        end
-    end)
-    chkMinimapAlerts:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableMinimapAlerts ~= false) end
-    end)
-
-    local chkRaidAlerts = CreateCheckbox(leftGlobalBox, chkMinimapAlerts, "BOTTOMLEFT",
-        "Show Alert Banner", "Display triggered notifications in the on-screen raid-warning banner.")
-    chkRaidAlerts:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableRaidWarningAlerts = self:GetChecked() and true or false
-    end)
-    chkRaidAlerts:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableRaidWarningAlerts ~= false) end
-    end)
-
-    local chkPeriodicAlerts = CreateCheckbox(leftGlobalBox, chkRaidAlerts, "BOTTOMLEFT",
-        "Periodic Tracked Checks", "Recheck only tracked notification items once per minute in addition to scan-time checks.")
-    chkPeriodicAlerts:SetScript("OnClick", function(self)
-        MarketSyncDB.NotificationMode = self:GetChecked() and "both" or "on_scan"
-    end)
-    chkPeriodicAlerts:SetScript("OnShow", function(self)
-        if MarketSyncDB then
-            self:SetChecked(MarketSyncDB.NotificationMode == "periodic" or MarketSyncDB.NotificationMode == "both")
-        end
-    end)
-
-    local chkCache = CreateCheckbox(leftGlobalBox, chkPeriodicAlerts, "BOTTOMLEFT",
-        "Build Item Cache on Startup", "Pre-load item data shortly after login.")
-    chkCache:SetScript("OnClick", function(self)
-        MarketSyncDB.BuildCacheOnStartup = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Startup Cache " .. (MarketSyncDB.BuildCacheOnStartup and "Enabled" or "Disabled"))
-    end)
-    chkCache:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.BuildCacheOnStartup) end
-    end)
-
-    local chkDebug = CreateCheckbox(leftGlobalBox, chkCache, "BOTTOMLEFT",
-        "Enable Debug Messages", "Print additional diagnostics in chat.")
-    chkDebug:SetScript("OnClick", function(self)
-        MarketSyncDB.DebugMode = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Debug Mode " .. (MarketSyncDB.DebugMode and "Enabled" or "Disabled"))
-    end)
-    chkDebug:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.DebugMode) end
-    end)
-
-    local undercutHeader = leftGlobalBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    undercutHeader:SetPoint("TOPLEFT", chkDebug, "BOTTOMLEFT", 6, -10)
-    undercutHeader:SetText("Alert Undercut (%)")
-    undercutHeader:SetTextColor(1, 0.82, 0)
-
-    local undercutSlider = CreateFrame("Slider", "MarketSyncAlertUndercutSlider", leftGlobalBox, "OptionsSliderTemplate")
-    undercutSlider:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", 4, -14)
-    undercutSlider:SetWidth(140)
-    undercutSlider:SetMinMaxValues(1, 50)
-    undercutSlider:SetValueStep(1)
-    undercutSlider:SetObeyStepOnDrag(true)
-    undercutSlider.Low:SetText("1%")
-    undercutSlider.High:SetText("50%")
-    undercutSlider.Text:SetText("10%")
-
-    undercutSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value + 0.5)
-        MarketSyncDB.AlertUndercutPct = val
-        self.Text:SetText(string.format("%d%%", val))
-    end)
-    undercutSlider:SetScript("OnShow", function(self)
-        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        self:SetValue(val)
-        self.Text:SetText(string.format("%d%%", val))
-    end)
-    AttachTooltip(undercutSlider, "Configure the default undercut percentage for quick alert buttons and preferred list imports (1% to 50%).")
-
-    -- ================================================================
-    -- COLUMN 2: TOGGLE FEATURES
-    -- ================================================================
-    local header2 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    header2:SetPoint("TOP", leftFeaturesBox, "TOP", 0, 16) -- Perfectly centered above the box
-    header2:SetTextColor(1, 0.82, 0)
-    header2:SetText("Toggle Features")
-
-    local chkGuild = CreateCheckbox(leftFeaturesBox, leftFeaturesBox, "TOPLEFT",
-        "Enable Guild Sync",
-        "Enable or disable guild data syncing. When disabled, the Guild Sync tab will be hidden and your swarm status will show as 'Disabled'.")
-    chkGuild:ClearAllPoints()
-    chkGuild:SetPoint("TOPLEFT", leftFeaturesBox, "TOPLEFT", 15, -12)
-    chkGuild:SetScript("OnClick", function(self)
-        MarketSyncDB.PassiveSync = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Guild Sync " .. (MarketSyncDB.PassiveSync and "Enabled" or "Disabled"))
-        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
-        if MarketSync.UpdateSwarmUI then
-            MarketSync.UpdateSwarmUI(UnitName("player"), self:GetChecked() and nil or "Disabled")
-        end
-        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-    end)
-    chkGuild:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.PassiveSync) end
-    end)
-
-    local chkNeutral = CreateCheckbox(leftFeaturesBox, chkGuild, "BOTTOMLEFT",
-        "Enable Neutral AH Sync",
-        "Enable or disable Neutral Auction House syncing. When disabled, the Neutral AH tab will be hidden and your swarm status will show as 'Disabled'.")
-    chkNeutral:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableNeutralSync = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Neutral Sync " .. (MarketSyncDB.EnableNeutralSync and "Enabled" or "Disabled"))
-        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
-        if MarketSync.UpdateSwarmUI then
-            MarketSync.UpdateSwarmUI(UnitName("player"), self:GetChecked() and nil or "Disabled")
-        end
-        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-    end)
-    chkNeutral:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableNeutralSync ~= false) end
-    end)
-
-    local chkPriceCheck = CreateCheckbox(leftFeaturesBox, chkNeutral, "BOTTOMLEFT",
-        "Enable Chat Price Check '?'",
-        "Answer queries from other players using '? [Item Link]'.")
-    chkPriceCheck:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableChatPriceCheck = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Chat Price Check " .. (MarketSyncDB.EnableChatPriceCheck and "Enabled" or "Disabled"))
-    end)
-    chkPriceCheck:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableChatPriceCheck ~= false) end
-    end)
-
-    local chkTooltip = CreateCheckbox(leftFeaturesBox, chkPriceCheck, "BOTTOMLEFT",
-        "Enable Tooltip Probabilities",
-        "Show expected yields and EV values for Prospecting, Milling, and Disenchanting on item tooltips.")
-    chkTooltip:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableTooltipProb = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Tooltip Probabilities " .. (MarketSyncDB.EnableTooltipProb and "Enabled" or "Disabled"))
-    end)
-    chkTooltip:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableTooltipProb ~= false) end
-    end)
-
-    local chkTooltipPrice = CreateCheckbox(leftFeaturesBox, chkTooltip, "BOTTOMLEFT",
-        "Enable Tooltip Auction Prices",
-        "Show buyout prices, stack totals, and scan freshness directly on item tooltips (standalone mode).")
-    chkTooltipPrice:SetScript("OnClick", function(self)
-        MarketSyncDB.EnableTooltipAuctionPrice = self:GetChecked()
-        print("|cFF00FF00[MarketSync]|r Tooltip Auction Prices " .. (MarketSyncDB.EnableTooltipAuctionPrice and "Enabled" or "Disabled"))
-    end)
-    chkTooltipPrice:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableTooltipAuctionPrice ~= false) end
-    end)
-
-    -- --- SOUND CONTROLS ---
-    local soundHeader = leftFeaturesBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    soundHeader:SetPoint("TOPLEFT", chkTooltipPrice, "BOTTOMLEFT", 6, -10)
+    -- Sound controls
+    local soundHeader = boxAudio:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    soundHeader:SetPoint("TOPLEFT", chkNotifSound, "BOTTOMLEFT", 6, -6)
     soundHeader:SetText("Notification Sound")
     soundHeader:SetTextColor(1, 0.82, 0)
 
-    -- Dropdown
-    local soundDropdown = CreateFrame("Frame", "MarketSyncSoundDropdown", leftFeaturesBox, "UIDropDownMenuTemplate")
-    soundDropdown:SetPoint("TOPLEFT", soundHeader, "BOTTOMLEFT", -15, -5)
+    local soundDropdown = CreateFrame("Frame", "MarketSyncMainSoundDropdown", boxAudio, "UIDropDownMenuTemplate")
+    soundDropdown:SetPoint("TOPLEFT", soundHeader, "BOTTOMLEFT", -15, -4)
     UIDropDownMenu_SetWidth(soundDropdown, 110)
 
     local function PlaySelectedSound()
         local soundID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
-        if MarketSync.PlayNotificationSound then
-            MarketSync.PlayNotificationSound(soundID, true)
-        end
+        if MarketSync.PlayNotificationSound then MarketSync.PlayNotificationSound(soundID, true) end
     end
 
     local function OnSoundSelect(self)
@@ -897,18 +935,16 @@ local function CreateMainFrame()
         end
     end)
 
-    -- Play Button
-    local btnPlaySound = CreateFrame("Button", nil, leftFeaturesBox, "UIPanelButtonTemplate")
+    local btnPlaySound = CreateFrame("Button", nil, boxAudio, "UIPanelButtonTemplate")
     btnPlaySound:SetSize(22, 22)
     btnPlaySound:SetPoint("LEFT", soundDropdown, "RIGHT", -5, 2)
     btnPlaySound:SetText(">")
     btnPlaySound:SetScript("OnClick", PlaySelectedSound)
     AttachTooltip(btnPlaySound, "Preview selected sound.")
 
-    -- Volume Slider
-    local volSlider = CreateFrame("Slider", "MarketSyncVolumeSlider", leftFeaturesBox, "OptionsSliderTemplate")
-    volSlider:SetPoint("TOPLEFT", soundDropdown, "BOTTOMLEFT", 20, -15)
-    volSlider:SetWidth(140)
+    local volSlider = CreateFrame("Slider", "MarketSyncMainVolSlider", boxAudio, "OptionsSliderTemplate")
+    volSlider:SetPoint("TOPLEFT", soundDropdown, "BOTTOMLEFT", 20, -12)
+    volSlider:SetWidth(135)
     volSlider:SetMinMaxValues(0, 100)
     volSlider:SetValueStep(5)
     volSlider:SetObeyStepOnDrag(true)
@@ -919,89 +955,147 @@ local function CreateMainFrame()
     volSlider:SetScript("OnValueChanged", function(self, value)
         local val = math.floor(value + 0.5)
         MarketSyncDB.NotificationVolume = val / 100
-        -- TBC's PlaySound API has no per-sound gain. Zero is a hard mute;
-        -- non-zero values are retained for clients that gain volume support.
     end)
     volSlider:SetScript("OnShow", function(self)
         self:SetValue((MarketSyncDB and MarketSyncDB.NotificationVolume or 1) * 100)
     end)
-    AttachTooltip(volSlider, "TBC uses the game's Master volume for alert loudness. Setting this to 0 mutes MarketSync; non-zero alerts follow the WoW Master volume.")
+    AttachTooltip(volSlider, "Setting this to 0 mutes MarketSync; non-zero alerts follow WoW Master volume.")
 
-    local syncDisabledNote = leftFeaturesBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    syncDisabledNote:SetPoint("BOTTOMLEFT", leftFeaturesBox, "BOTTOMLEFT", 15, 10)
-    syncDisabledNote:SetWidth(170)
-    syncDisabledNote:SetJustifyH("LEFT")
-    syncDisabledNote:SetTextColor(1, 0.4, 0.4)
-    syncDisabledNote:SetText("Disabling Sync will hide the Guild/Neutral tabs.")
+    local undercutHeader = boxAudio:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    undercutHeader:SetPoint("TOPLEFT", volSlider, "BOTTOMLEFT", -14, -12)
+    undercutHeader:SetText("Alert Undercut (%)")
+    undercutHeader:SetTextColor(1, 0.82, 0)
 
-    -- ================================================================
-    -- COLUMN 3: MEMORY SAVER
-    -- ================================================================
-    local header3 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    header3:SetPoint("TOP", middleMemoryBox, "TOP", 0, 16) -- Perfectly centered above the box
-    header3:SetTextColor(1, 0.82, 0)
-    header3:SetText("Memory Saver")
+    local undercutSlider = CreateFrame("Slider", "MarketSyncMainUndercutSlider", boxAudio, "OptionsSliderTemplate")
+    undercutSlider:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", 4, -12)
+    undercutSlider:SetWidth(135)
+    undercutSlider:SetMinMaxValues(1, 50)
+    undercutSlider:SetValueStep(1)
+    undercutSlider:SetObeyStepOnDrag(true)
+    undercutSlider.Low:SetText("1%")
+    undercutSlider.High:SetText("50%")
+    undercutSlider.Text:SetText("10%")
 
-    local chkLowRam = CreateCheckbox(middleMemoryBox, middleMemoryBox, "TOPLEFT",
-        "Enable Low RAM Mode", "Wipe caches and run GC when the UI is closed.")
-    chkLowRam:ClearAllPoints()
-    chkLowRam:SetPoint("TOPLEFT", middleMemoryBox, "TOPLEFT", 18, -12) -- Master explicitly centered
-    
-    local subToggles = {}
-    local function UpdateSubTogglesState()
-        local masterEnabled = chkLowRam:GetChecked()
-        for _, cb in ipairs(subToggles) do
-            if masterEnabled then
-                cb:Enable()
-                cb.text:SetTextColor(1, 1, 1)
-            else
-                cb:Disable()
-                cb.text:SetTextColor(0.5, 0.5, 0.5)
-            end
-        end
-    end
-
-    chkLowRam:SetScript("OnClick", function(self)
-        MarketSyncDB.LowRamMode = self:GetChecked()
-        UpdateSubTogglesState()
-        if not self:GetChecked() then
-            -- If turning off, may need to trigger a background rebuild if enabled
-            if MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
-                MarketSync.BuildSearchIndex()
-            end
-        end
+    undercutSlider:SetScript("OnValueChanged", function(self, value)
+        local val = math.floor(value + 0.5)
+        MarketSyncDB.AlertUndercutPct = val
+        self.Text:SetText(string.format("%d%%", val))
     end)
-    chkLowRam:SetScript("OnShow", function(self)
-        if MarketSyncDB then self:SetChecked(MarketSyncDB.LowRamMode) end
-        UpdateSubTogglesState()
+    undercutSlider:SetScript("OnShow", function(self)
+        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        self:SetValue(val)
+        self.Text:SetText(string.format("%d%%", val))
     end)
 
-    local function CreateSubToggle(label, key, anchor)
-        local cb = CreateCheckbox(middleMemoryBox, anchor, "BOTTOMLEFT", label, "Only load this data when the tab is clicked.")
-        cb.text:SetWidth(110)
-        cb:SetScript("OnClick", function(self)
-            MarketSyncDB[key] = self:GetChecked()
-            if self:GetChecked() and MarketSync.InvalidateIndexCache then
-                MarketSync.InvalidateIndexCache() -- Immediate wipe to start on-demand cycle
-            end
-        end)
-        cb:SetScript("OnShow", function(self)
-            if MarketSyncDB then self:SetChecked(MarketSyncDB[key]) end
-        end)
-        table.insert(subToggles, cb)
-        return cb
-    end
+    local chkMinimapAlerts = CreateCheckbox(boxAudio, undercutSlider, "BOTTOMLEFT",
+        "Flash Minimap Button", "Flash the MarketSync minimap button until notifications are acknowledged.")
+    chkMinimapAlerts:ClearAllPoints()
+    chkMinimapAlerts:SetPoint("TOPLEFT", undercutSlider, "BOTTOMLEFT", -4, -10)
+    chkMinimapAlerts:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableMinimapAlerts = self:GetChecked() and true or false
+        if not MarketSyncDB.EnableMinimapAlerts and MarketSync.StopMinimapFlash then MarketSync.StopMinimapFlash() end
+    end)
+    chkMinimapAlerts:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableMinimapAlerts ~= false) end
+    end)
 
-    local chkODP = CreateSubToggle("Personal: Demand", "OnDemandPersonal", chkLowRam)
-    local chkODG = CreateSubToggle("Guild: Demand", "OnDemandGuild", chkODP)
-    local chkODN = CreateSubToggle("Neutral: Demand", "OnDemandNeutral", chkODG)
+    local chkRaidAlerts = CreateCheckbox(boxAudio, chkMinimapAlerts, "BOTTOMLEFT",
+        "Show Alert Banner", "Display triggered notifications in the on-screen raid-warning banner.")
+    chkRaidAlerts:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableRaidWarningAlerts = self:GetChecked() and true or false
+    end)
+    chkRaidAlerts:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableRaidWarningAlerts ~= false) end
+    end)
+
+    local chkPeriodicAlerts = CreateCheckbox(boxAudio, chkRaidAlerts, "BOTTOMLEFT",
+        "Periodic Tracked Checks", "Recheck only tracked notification items once per minute in addition to scan-time checks.")
+    chkPeriodicAlerts:SetScript("OnClick", function(self)
+        MarketSyncDB.NotificationMode = self:GetChecked() and "both" or "on_scan"
+    end)
+    chkPeriodicAlerts:SetScript("OnShow", function(self)
+        if MarketSyncDB then
+            self:SetChecked(MarketSyncDB.NotificationMode == "periodic" or MarketSyncDB.NotificationMode == "both")
+        end
+    end)
 
     -- ================================================================
-    -- BETA FEATURES SUBSECTION
+    -- COLUMN 4: SYNC & SWARM + BETA
     -- ================================================================
-    local betaBox = CreateFrame("Frame", nil, middleMemoryBox, "BackdropTemplate")
-    betaBox:SetPoint("TOPLEFT", middleMemoryBox, "TOPLEFT", 8, -138)
-    betaBox:SetPoint("BOTTOMRIGHT", middleMemoryBox, "BOTTOMRIGHT", -8, 8)
+    local header4 = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    header4:SetPoint("TOP", boxSwarm, "TOP", 0, 16)
+    header4:SetTextColor(1, 0.82, 0)
+    header4:SetText("Sync & Swarm")
+
+    local chkGuild = CreateCheckbox(boxSwarm, boxSwarm, "TOPLEFT",
+        "Enable Guild Sync", "Enable or disable guild data syncing.")
+    chkGuild:ClearAllPoints()
+    chkGuild:SetPoint("TOPLEFT", boxSwarm, "TOPLEFT", 12, -10)
+    chkGuild:SetScript("OnClick", function(self)
+        MarketSyncDB.PassiveSync = self:GetChecked()
+        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), self:GetChecked() and nil or "Disabled") end
+        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+    end)
+    chkGuild:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.PassiveSync) end
+    end)
+
+    local chkNeutral = CreateCheckbox(boxSwarm, chkGuild, "BOTTOMLEFT",
+        "Enable Neutral AH Sync", "Enable or disable Neutral Auction House syncing.")
+    chkNeutral:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableNeutralSync = self:GetChecked()
+        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), self:GetChecked() and nil or "Disabled") end
+        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+    end)
+    chkNeutral:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableNeutralSync ~= false) end
+    end)
+
+    local chkLock = CreateCheckbox(boxSwarm, chkNeutral, "BOTTOMLEFT",
+        "Lock Minimap Button", "Prevent the minimap button from being dragged.")
+    chkLock:SetScript("OnClick", function(self)
+        if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = {} end
+        MarketSyncDB.MinimapIcon.locked = self:GetChecked()
+    end)
+    chkLock:SetScript("OnShow", function(self)
+        if MarketSyncDB and MarketSyncDB.MinimapIcon then self:SetChecked(MarketSyncDB.MinimapIcon.locked) end
+    end)
+
+    local rightStatsText = boxSwarm:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    rightStatsText:SetPoint("TOPLEFT", chkLock, "BOTTOMLEFT", 4, -8)
+    rightStatsText:SetWidth(200)
+    rightStatsText:SetJustifyH("LEFT")
+    rightStatsText:SetSpacing(2)
+    SettingsContent.rightStatsText = rightStatsText
+
+    local btnManageUsers = CreateFrame("Button", nil, boxSwarm, "UIPanelButtonTemplate")
+    btnManageUsers:SetSize(96, 20)
+    btnManageUsers:SetPoint("TOPLEFT", rightStatsText, "BOTTOMLEFT", 0, -8)
+    btnManageUsers:SetText("Manage Users")
+    AttachTooltip(btnManageUsers, "Block or unblock sync partners.")
+
+    local btnSmartBandwidth = CreateFrame("Button", nil, boxSwarm, "UIPanelButtonTemplate")
+    btnSmartBandwidth:SetSize(96, 20)
+    btnSmartBandwidth:SetPoint("LEFT", btnManageUsers, "RIGHT", 8, 0)
+    btnSmartBandwidth:SetText("Smart Rules")
+    AttachTooltip(btnSmartBandwidth, "Configure where background sync and cache indexing are allowed.")
+
+    -- Open AddOn Settings shortcut button
+    local btnOpenBlizzSettings = CreateFrame("Button", nil, boxSwarm, "UIPanelButtonTemplate")
+    btnOpenBlizzSettings:SetSize(200, 22)
+    btnOpenBlizzSettings:SetPoint("TOPLEFT", btnManageUsers, "BOTTOMLEFT", 0, -8)
+    btnOpenBlizzSettings:SetText("Open AddOn Settings")
+    AttachTooltip(btnOpenBlizzSettings, "Open Blizzard's AddOn Settings menu for full categorized configuration.")
+    btnOpenBlizzSettings:SetScript("OnClick", function()
+        if MarketSync.OpenSettings then MarketSync.OpenSettings() end
+    end)
+
+    -- BETA FEATURES SUBSECTION (at bottom of Box 4)
+    local betaBox = CreateFrame("Frame", nil, boxSwarm, "BackdropTemplate")
+    betaBox:SetPoint("TOPLEFT", btnOpenBlizzSettings, "BOTTOMLEFT", -2, -8)
+    betaBox:SetPoint("BOTTOMRIGHT", boxSwarm, "BOTTOMRIGHT", -8, 8)
     betaBox:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -1018,185 +1112,34 @@ local function CreateMainFrame()
     betaTopHighlight:SetColorTexture(0.70, 0.50, 0.15, 0.40)
 
     local betaHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    betaHeader:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 10, -9)
+    betaHeader:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 8, -6)
     betaHeader:SetText("|cffffaa00Beta Features|r")
 
     local betaBadge = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     betaBadge:SetPoint("LEFT", betaHeader, "RIGHT", 4, 0)
     betaBadge:SetText("|cffff6600[BETA]|r")
 
-    local betaSub = betaBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    betaSub:SetPoint("TOPLEFT", betaHeader, "BOTTOMLEFT", 0, -3)
-    betaSub:SetText("Experimental modules:")
-
-    local function CreateBetaToggle(label, key, defaultVal, tooltipText, prevAnchor)
-        local cb = CreateCheckbox(betaBox, prevAnchor or betaBox, prevAnchor and "BOTTOMLEFT" or "TOPLEFT", label, tooltipText)
-        cb.text:SetWidth(130)
-        if not prevAnchor then
-            cb:ClearAllPoints()
-            cb:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 8, -36)
-        end
-        cb:SetScript("OnClick", function(self)
-            local isChecked = self:GetChecked()
-            MarketSyncDB[key] = isChecked
-            if key == "UseAuctionatorScanner" then
-                MarketSyncDB.AuctionatorScannerUserChoice = true
-                if isChecked and MarketSync.Scanner and MarketSync.Scanner.Active then
-                    MarketSync.Scanner.Cancel("Auctionator scanning enabled")
-                end
-            end
-            print(string.format("|cFF00FF00[MarketSync]|r %s %s", label, isChecked and "Enabled" or "Disabled"))
-            if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
-            if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then
-                MarketSync.AuctionHouse.RefreshTabVisibility()
-            end
-            if key == "UseAuctionatorScanner" and MarketSync.Provider then
-                MarketSync.Provider.Select()
-                if isChecked and MarketSync.RegisterAuctionatorHooks then
-                    MarketSync.RegisterAuctionatorHooks()
-                end
-            end
-            if key == "EnableProfessionCraftInfo" and MarketSync.RefreshCraftingInfoUI then
-                MarketSync.RefreshCraftingInfoUI()
-            end
-        end)
-        cb:SetScript("OnShow", function(self)
-            if MarketSyncDB then
-                if defaultVal == false then
-                    self:SetChecked(MarketSyncDB[key] == true)
-                else
-                    self:SetChecked(MarketSyncDB[key] ~= false)
-                end
-            end
-        end)
-        return cb
-    end
-
-    local chkBetaProcessing = CreateBetaToggle(
-        "Enable Processing",
-        "EnableProcessingTab",
-        false,
-        "Show the Processing tab (crafting costs, reagent tree solver, and profitability) on both the portable window and Auction House.",
-        nil
-    )
-
-    local chkBetaAlerts = CreateBetaToggle(
-        "Enable Alerts",
-        "EnableAlertsTab",
-        false,
-        "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both the portable window and Auction House.",
-        chkBetaProcessing
-    )
-
-    local chkBetaAnalytics = CreateBetaToggle(
-        "Enable Analytics",
-        "EnableAnalyticsTab",
-        true,
-        "Show the Analytics tab (price history charts, volume trends, and item stats) on both the portable window and Auction House.",
-        chkBetaAlerts
-    )
-
-    local chkAuctionatorScan = CreateBetaToggle(
-        "Use Auctionator scanning",
-        "UseAuctionatorScanner",
-        Auctionator ~= nil and Auctionator.Database ~= nil,
-        "Let Auctionator perform Auction House scans and keep its price database. MarketSync imports completed Auctionator full scans, protects neutral-AH prices, and hides its duplicate Scanner tab. Disable this to use MarketSync's native scanner instead.",
-        chkBetaAnalytics
-    )
-
-    local chkBetaProf = CreateBetaToggle(
-        "TradeSkill Costs",
-        "EnableProfessionCraftInfo",
-        true,
-        "Show crafting costs, profit calculation, and recursive materials tree drawer directly inside the Blizzard TradeSkill window.",
-        chkAuctionatorScan
-    )
-
-    -- ================================================================
-    -- RIGHT: Quick Info + Cache Speed + Manage Users / Smart Rules
-    -- ================================================================
-    local rightHeader = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    rightHeader:SetPoint("BOTTOMLEFT", rightInfoBox, "TOPLEFT", 80, 2) -- Centered
-    rightHeader:SetText("|cffffd700Quick Info|r")
-
-    local rightStatsText = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    rightStatsText:SetPoint("TOPLEFT", rightInfoBox, "TOPLEFT", 15, -12)
-    rightStatsText:SetWidth(207)
-    rightStatsText:SetJustifyH("LEFT")
-    rightStatsText:SetSpacing(3)
-    SettingsContent.rightStatsText = rightStatsText
-
-    -- Cache Build Speed
-    local speedHeader = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    speedHeader:SetPoint("TOPLEFT", rightStatsText, "BOTTOMLEFT", -2, -14)
-    speedHeader:SetText("|cffffd700Cache Build Speed|r")
-
-    local speedSlider = CreateFrame("Slider", nil, rightInfoBox, "OptionsSliderTemplate")
-    speedSlider:SetPoint("TOPLEFT", speedHeader, "BOTTOMLEFT", 10, -14)
-    speedSlider:SetWidth(100)
-    speedSlider:SetMinMaxValues(1, 4)
-    speedSlider:SetValueStep(1)
-    speedSlider:SetObeyStepOnDrag(true)
-    speedSlider.Low:SetText("1")
-    speedSlider.High:SetText("4")
-
-    local sliderTrack = speedSlider:CreateTexture(nil, "BACKGROUND")
-    sliderTrack:SetColorTexture(0.2, 0.2, 0.2, 0.8)
-    sliderTrack:SetHeight(4)
-    sliderTrack:SetPoint("LEFT", speedSlider, "LEFT", 4, 0)
-    sliderTrack:SetPoint("RIGHT", speedSlider, "RIGHT", -4, 0)
-
-    local sliderTrackBorder = CreateFrame("Frame", nil, speedSlider, "BackdropTemplate")
-    sliderTrackBorder:SetPoint("TOPLEFT", sliderTrack, "TOPLEFT", -1, 1)
-    sliderTrackBorder:SetPoint("BOTTOMRIGHT", sliderTrack, "BOTTOMRIGHT", 1, -1)
-    sliderTrackBorder:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    sliderTrackBorder:SetBackdropBorderColor(0, 0, 0, 1)
-
-    local speedLabel = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    speedLabel:SetPoint("LEFT", speedSlider, "RIGHT", 10, 0)
-    speedLabel:SetWidth(85)
-    speedLabel:SetJustifyH("LEFT")
-
-    local speedDesc = rightInfoBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    speedDesc:SetPoint("TOPLEFT", speedSlider, "BOTTOMLEFT", -10, -10)
-    speedDesc:SetWidth(165)
-    speedDesc:SetJustifyH("LEFT")
-
-    local function UpdateSpeedDisplay(val)
-        local preset = MarketSync.CacheSpeedPresets[val]
-        if preset then
-            speedLabel:SetText("|cffffd700" .. preset.name .. "|r")
-            speedDesc:SetText(preset.desc)
-        end
-        speedSlider.Text:SetText("")
-    end
-
-    speedSlider:SetScript("OnValueChanged", function(self, val)
-        val = math.floor(val + 0.5)
-        MarketSyncDB.CacheSpeed = val
-        UpdateSpeedDisplay(val)
+    local chkBetaAlerts = CreateCheckbox(betaBox, betaHeader, "BOTTOMLEFT",
+        "Enable Alerts", "Show the Alerts tab (price alerts, watchlist, and deal triggers) on both the portable window and Auction House.")
+    chkBetaAlerts:ClearAllPoints()
+    chkBetaAlerts:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 6, -24)
+    chkBetaAlerts:SetScript("OnClick", function(self)
+        MarketSyncDB.EnableAlertsTab = self:GetChecked()
+        if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
     end)
-    speedSlider:SetScript("OnShow", function(self)
-        local val = (MarketSyncDB and MarketSyncDB.CacheSpeed) or 2
-        self:SetValue(val)
-        UpdateSpeedDisplay(val)
+    chkBetaAlerts:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableAlertsTab == true) end
     end)
 
-    -- Manage Users + Smart Rules at bottom of Quick Info box
-    local btnManageUsers = CreateFrame("Button", nil, rightInfoBox, "UIPanelButtonTemplate")
-    btnManageUsers:SetSize(100, 22)
-    btnManageUsers:SetPoint("BOTTOMLEFT", rightInfoBox, "BOTTOMLEFT", 15, 12)
-    btnManageUsers:SetText("Manage Users")
-    AttachTooltip(btnManageUsers, "Block or unblock sync partners.")
-
-    local btnSmartBandwidth = CreateFrame("Button", nil, rightInfoBox, "UIPanelButtonTemplate")
-    btnSmartBandwidth:SetSize(100, 22)
-    btnSmartBandwidth:SetPoint("LEFT", btnManageUsers, "RIGHT", 7, 0)
-    btnSmartBandwidth:SetText("Smart Rules")
-    AttachTooltip(btnSmartBandwidth, "Configure where background sync and cache indexing are allowed.")
+    local chkDebug = CreateCheckbox(betaBox, chkBetaAlerts, "BOTTOMLEFT",
+        "Debug Messages", "Print verbose synchronization and scanner diagnostics in chat.")
+    chkDebug:SetScript("OnClick", function(self)
+        MarketSyncDB.DebugMode = self:GetChecked()
+    end)
+    chkDebug:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.DebugMode == true) end
+    end)
 
     -- ================================================================
     -- Gold Bar Buttons & Labels
@@ -1287,8 +1230,14 @@ local function CreateMainFrame()
     btnCloseRules:SetText("Close")
     btnCloseRules:SetScript("OnClick", function() smartRulesFrame:Hide() end)
 
-    btnSmartBandwidth:SetScript("OnClick", function()
+    MarketSync.SmartRulesFrame = smartRulesFrame
+    function MarketSync.ShowSmartRulesDialog()
+        if not smartRulesFrame then return end
         if smartRulesFrame:IsShown() then smartRulesFrame:Hide() else smartRulesFrame:Show() end
+    end
+
+    btnSmartBandwidth:SetScript("OnClick", function()
+        MarketSync.ShowSmartRulesDialog()
     end)
 
     btnNetworkMonitor:SetScript("OnClick", function()
@@ -1501,13 +1450,19 @@ local function CreateMainFrame()
     addBtn:SetScript("OnClick", DoManualBlock)
     addBox:SetScript("OnEnterPressed", DoManualBlock)
 
-    btnManageUsers:SetScript("OnClick", function()
+    MarketSync.UserMgmtFrame = userMgmtFrame
+    function MarketSync.ShowUserManagementDialog()
+        if not userMgmtFrame then return end
         if userMgmtFrame:IsShown() then
             userMgmtFrame:Hide()
         else
             RefreshUserList()
             userMgmtFrame:Show()
         end
+    end
+
+    btnManageUsers:SetScript("OnClick", function()
+        MarketSync.ShowUserManagementDialog()
     end)
 
     -- ================================================================
@@ -1608,6 +1563,10 @@ local function CreateMainFrame()
             "|cff00ccffNeutral cache:|r " .. neutralCache ..
             syncActiveStr
         )
+        if SettingsContent.ramText and MarketSync.GetEstimatedRAMUsage then
+            local estMB, totalStored = MarketSync.GetEstimatedRAMUsage()
+            SettingsContent.ramText:SetText(string.format("|cff888888Est. Index RAM:|r |cffffffff~%.1f MB|r\n|cff888888(%d stored items)|r", estMB, totalStored))
+        end
     end
     MainFrame.UpdateRightStats = UpdateSettingsStats
 

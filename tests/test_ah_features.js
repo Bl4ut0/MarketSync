@@ -5,7 +5,6 @@ const path = require('path');
 const candidateDeps = [
   path.resolve(__dirname, '../node_modules'),
   path.resolve(__dirname, '../../ItemRack-Forever/node_modules'),
-  'C:/Users/bl4ut/Documents/Codex/2026-09-16/ok-x20/ItemRack-Forever/node_modules'
 ];
 const deps = candidateDeps.find(p => fs.existsSync(p)) || candidateDeps[0];
 const luaparse = require(path.join(deps, 'luaparse'));
@@ -1356,7 +1355,9 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
         CreateMaskTexture = function(self)
           return { SetTexture = function() end, SetSize = function() end, SetPoint = function() end }
         end,
-        AddMaskTexture = function(self) end,
+        GetName = function(self) return name or "" end,
+        GetChildren = function() return {} end,
+        EnableMouseWheel = function() end,
         SetChecked = function(self, val) self.checked = val end,
         GetChecked = function(self) return self.checked end,
         SetAutoFocus = function() end,
@@ -1370,6 +1371,8 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
         GetValue = function(self) return self.val or 0 end,
         SetValueStep = function() end,
         SetObeyStepOnDrag = function() end,
+        SetClampedToScreen = function() end,
+        SetMovable = function() end,
         SetScrollChild = function() end,
         GetVerticalScroll = function() return 0 end,
         SetVerticalScroll = function() end,
@@ -1411,6 +1414,7 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     end
 
     GameTooltip = { SetOwner = function() end, Hide = function() end, Show = function() end, SetText = function() end, AddLine = function() end }
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
     UIDropDownMenu_SetWidth = function() end
     UIDropDownMenu_Initialize = function() end
     UIDropDownMenu_SetText = function() end
@@ -1455,6 +1459,11 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     MarketSync.GetAddOnMetadata = function() return "1.0" end
   `;
   lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== 0) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
 
   const mainLua = fs.readFileSync(path.join(marketSyncDir, 'UI_Main.lua'), 'utf8');
   if (lauxlib.luaL_dostring(L, to_luastring(mainLua)) !== 0) {
@@ -1521,6 +1530,17 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     MarketSync.ShowItemHistory("4471", "item:4471", "Tin Bar", nil, 500)
     assert(analyticsCalledWith ~= nil, "ShowItemHistory must delegate to MarketSync.ShowAnalytics")
     assert(analyticsCalledWith.key == "4471", "Analytics received key 4471")
+
+    -- Test Settings helpers
+    assert(type(MarketSync.OpenSettings) == "function", "OpenSettings should be exposed")
+    assert(type(MarketSync.GetEstimatedRAMUsage) == "function", "GetEstimatedRAMUsage should be exposed")
+    local estMB, totalItems = MarketSync.GetEstimatedRAMUsage()
+    assert(type(estMB) == "number" and estMB >= 0.5, "Estimated RAM should be a positive number >= 0.5 MB")
+    assert(type(MarketSync.ShowSmartRulesDialog) == "function", "ShowSmartRulesDialog should be exposed")
+    assert(type(MarketSync.ShowUserManagementDialog) == "function", "ShowUserManagementDialog should be exposed")
+    -- Call them to verify safety without crashing
+    MarketSync.ShowSmartRulesDialog()
+    MarketSync.ShowUserManagementDialog()
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('MainFrame 7-tab check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
@@ -1824,6 +1844,151 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Responsive layout check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
+test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings panel', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    MarketSync = MarketSync or {}
+    _G = _G or {}
+    local framesCreated = {}
+    function CreateFrame(frameType, name, parent, template)
+      local f = {
+        name = name,
+        type = frameType,
+        parent = parent,
+        shown = true,
+        scripts = {},
+        Show = function(self) self.shown = true end,
+        Hide = function(self) self.shown = false end,
+        IsShown = function(self) return self.shown end,
+        SetSize = function(self, w, h) self.width = w; self.height = h end,
+        SetWidth = function(self, w) self.width = w end,
+        SetHeight = function(self, h) self.height = h end,
+        GetWidth = function(self) return self.width or 100 end,
+        GetHeight = function(self) return self.height or 100 end,
+        SetPoint = function() end,
+        ClearAllPoints = function() end,
+        SetBackdrop = function() end,
+        SetBackdropColor = function() end,
+        SetBackdropBorderColor = function() end,
+        SetScript = function(self, ev, fn) self.scripts[ev] = fn end,
+        GetScript = function(self, ev) return self.scripts[ev] end,
+        SetText = function(self, t) self.text = t end,
+        GetText = function(self) return self.text or "" end,
+        CreateTexture = function() return { SetHeight = function() end, SetPoint = function() end, SetColorTexture = function() end, SetTexture = function() end } end,
+        CreateFontString = function()
+          local fs = {
+            text = "",
+            SetPoint = function() end,
+            ClearAllPoints = function() end,
+            SetText = function(self, t) self.text = t end,
+            GetText = function(self) return self.text or "" end,
+            SetFontObject = function() end,
+            SetTextColor = function() end,
+            SetJustifyH = function() end,
+            SetWidth = function() end,
+            SetSpacing = function() end,
+            Show = function() end,
+            Hide = function() end,
+            IsShown = function() return true end,
+          }
+          return fs
+        end,
+        GetName = function(self) return name or "" end,
+        GetChildren = function() return {} end,
+        EnableMouseWheel = function() end,
+        SetChecked = function(self, val) self.checked = val end,
+        GetChecked = function(self) return self.checked end,
+        SetAutoFocus = function() end,
+        SetNumeric = function() end,
+        SetNumber = function() end,
+        SetMaxLetters = function() end,
+        ClearFocus = function() end,
+        HighlightText = function() end,
+        SetMinMaxValues = function() end,
+        SetValue = function(self, v) self.val = v end,
+        GetValue = function(self) return self.val or 0 end,
+        SetValueStep = function() end,
+        SetObeyStepOnDrag = function() end,
+        SetClampedToScreen = function() end,
+        SetMovable = function() end,
+        SetScrollChild = function(self, ch) self.child = ch end,
+        GetVerticalScroll = function() return 0 end,
+        SetVerticalScroll = function() end,
+        GetVerticalScrollRange = function() return 0 end,
+        SetEnabled = function() end,
+      }
+      if frameType == "CheckButton" or (template and type(template) == "string" and template:find("CheckButton")) then
+        f.text = f:CreateFontString()
+      end
+      if frameType == "Slider" or (template and type(template) == "string" and template:find("Slider")) then
+        f.Low = f:CreateFontString()
+        f.High = f:CreateFontString()
+        f.Text = f:CreateFontString()
+        if name then
+          _G[name .. "Low"] = f.Low
+          _G[name .. "High"] = f.High
+          _G[name .. "Text"] = f.Text
+        end
+      end
+      if name then _G[name] = f end
+      table.insert(framesCreated, f)
+      return f
+    end
+
+    GameTooltip = { SetOwner = function() end, Hide = function() end, Show = function() end, SetText = function() end, AddLine = function() end }
+    C_ChatInfo = { RegisterAddonMessagePrefix = function() end }
+    GetNormalizedRealmName = function() return "TestRealm" end
+    GetRealmName = function() return "TestRealm" end
+    UIDropDownMenu_SetWidth = function() end
+    UIDropDownMenu_Initialize = function() end
+    UIDropDownMenu_SetText = function() end
+    UIDropDownMenu_CreateInfo = function() return {} end
+    UIDropDownMenu_AddButton = function() end
+    UIParent = CreateFrame("Frame", "UIParent")
+    InterfaceOptions_AddCategory = function(panel) return panel end
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  lauxlib.luaL_dostring(L, to_luastring(configLua));
+
+  const coreLua = fs.readFileSync(path.join(marketSyncDir, 'Core.lua'), 'utf8');
+  lauxlib.luaL_dostring(L, to_luastring(coreLua));
+
+  const check = `
+    -- 1. Verify default Low RAM settings
+    MarketSyncDB = nil
+    MarketSync.InitializeDB()
+    assert(MarketSyncDB.LowRamMode == true, "LowRamMode must default to true")
+    assert(MarketSyncDB.OnDemandPersonal == true, "OnDemandPersonal must default to true")
+    assert(MarketSyncDB.OnDemandGuild == true, "OnDemandGuild must default to true")
+    assert(MarketSyncDB.OnDemandNeutral == true, "OnDemandNeutral must default to true")
+    assert(MarketSyncDB.BuildCacheOnStartup == false, "BuildCacheOnStartup must default to false")
+    assert(MarketSyncDB.EnableProfessionCraftInfo ~= false, "Trade skill costs must default to enabled")
+
+    -- 2. Verify RAM usage estimator
+    local realmDB = MarketSync.GetRealmDB()
+    realmDB.PersonalData = { ["item:1001"] = { h = {} }, ["item:1002"] = { h = {} } }
+    realmDB.NeutralData = { ["item:1003"] = { h = {} } }
+    local estMB, totalItems, pCount, gCount, nCount = MarketSync.GetEstimatedRAMUsage()
+    assert(totalItems >= 3, "totalItems should be at least 3, got: " .. tostring(totalItems))
+    assert(estMB >= 0.5, "Estimated RAM should be >= 0.5 MB, got: " .. tostring(estMB))
+
+    -- 3. Verify OpenSettings and Core settings panel
+    assert(type(MarketSync.OpenSettings) == "function", "MarketSync.OpenSettings should exist")
+    assert(MarketSync.SettingsPanel ~= nil, "MarketSync.SettingsPanel should be registered")
+    if MarketSync.SettingsPanel.GetScript and MarketSync.SettingsPanel:GetScript("OnShow") then
+      MarketSync.SettingsPanel:GetScript("OnShow")(MarketSync.SettingsPanel)
+    end
+    assert(MarketSync.SettingsPanel.initialized == true, "SettingsPanel should initialize controls on show")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
+    throw new Error('Low RAM & Settings check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
 });
 

@@ -104,7 +104,29 @@ To eliminate login screen lag and avoid competition with other addons during the
 
 ---
 
-## 5. In-Memory Observation API & Companion Addons
+## 5. Memory Modes & Cache Build Speed (Performance Tuning)
+
+### Low RAM Mode (Default: Enabled)
+At scale (30,000+ items), storing pre-resolved search index tables across Personal, Guild, and Neutral databases simultaneously requires ~15–28 MB of Lua table overhead. To prioritize game client performance:
+* **Default Configuration**: `LowRamMode = true`, `OnDemandPersonal = true`, `OnDemandGuild = true`, `OnDemandNeutral = true`, `BuildCacheOnStartup = false`.
+* **On-Demand Indexing**: Search indices are only built for a specific tab when the player actively clicks into that tab.
+* **Garbage Collection**: When browse windows close, intermediate indices are dropped and garbage collection runs, keeping idle memory low (~1–5 MB).
+* **In-Game Notice & RAM Estimator**: When Low RAM Mode is active on the Browse panel, an informational notice displays:
+  `Low RAM Mode Active: Generating cache on-demand to save memory.`
+  `Disable Low RAM Mode in Settings to pre-cache all tabs for instant searching (Est. RAM: ~X.X MB based on Y stored items). [Open Settings]`
+
+### Cache Build Speed Slider (1 to 4)
+The Cache Build Speed slider controls how aggressively the background indexer yields during cache construction and async item resolution:
+* **1 - Conservative** (Batch 25, Yield every 25, 0.5s interval): Safest, zero dropped frames. Ideal for lower-end machines.
+* **2 - Balanced** (Batch 50, Yield every 50, 0.5s interval): Default setting. Delivers good indexing throughput with unnoticeable framerate impact.
+* **3 - Aggressive** (Batch 100, Yield every 100, 0.35s interval): High indexing throughput. May produce brief micro-stutters during heavy combat or raids.
+* **4 - Maximum** (Batch 200, Yield every 200, 0.25s interval): Full-speed build. Finishes indexing fastest, but will cause visible framerate drops while running.
+
+The slider directly governs performance during manual rebuilds (`Rebuild Cache`), startup pre-caching (if enabled), and whenever unindexed on-demand slices are queried.
+
+---
+
+## 6. In-Memory Observation API & Companion Addons
 
 When 30,000 items are scanned, `MarketSync.ObservationAPI.v1` emits observations to registered companion addons (e.g. ForeverLedgerSync, external uploaders).
 
@@ -116,7 +138,7 @@ When 30,000 items are scanned, `MarketSync.ObservationAPI.v1` emits observations
 
 ---
 
-## 6. External Data Extraction (30,000-Item Reality)
+## 7. External Data Extraction (30,000-Item Reality)
 
 For external web dashboards, discord bots, or pricing sites:
 * **Clipboard Copying is Impossible**: 30,000 items with history requires **~5 to 12 MB of text** (~250,000+ lines in `SavedVariables/MarketSync.lua`). World of Warcraft's in-game `EditBox` is safely capped at ~12 KB. Manually copying would require **over 400 separate copy-paste operations**.
