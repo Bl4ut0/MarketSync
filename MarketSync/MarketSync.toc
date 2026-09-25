@@ -18,7 +18,6 @@ Providers\ForeverProvider.lua
 
 # Config: shared globals, DB init, helpers
 Config.lua
-Export.lua
 
 # Favorites & Preferred Lists
 Favorites.lua

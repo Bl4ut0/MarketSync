@@ -968,9 +968,7 @@ SlashCmdList["MarketSync"] = function(msg)
     local cmd, arg = msg:match("^(%S*)%s*(.*)$")
     cmd = cmd:lower()
 
-    if cmd == "export" then
-        if MarketSync.OpenDatabaseExport then MarketSync.OpenDatabaseExport() end
-    elseif cmd == "search" or cmd == "browse" or cmd == "ui" then
+    if cmd == "search" or cmd == "browse" or cmd == "ui" then
         if MarketSync_ToggleUI then
             MarketSync_ToggleUI()
         end
@@ -987,7 +985,6 @@ SlashCmdList["MarketSync"] = function(msg)
     else
         print("|cFF00FF00[MarketSync]|r Commands:")
         print("  /ms search - Open the browse window.")
-        print("  /ms export - Copy the local price database in numbered parts.")
         print("  /ms config - Open settings panel.")
         print("  /ms block [name] - Block a sender.")
     end

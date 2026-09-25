@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.0] - 2026-09-25
 
 ### Added
+- External Data Extraction & Web Import Guide (`DATA_EXTRACTION_GUIDE.md`) documenting how web services, dashboards, and bots can directly import scan data without desktop software or in-game copy limitations.
 - Forever-first native Auction House scanning with optional Auctionator coexistence. MarketSync's scanner is disabled by default when Auctionator is detected and can be re-enabled in Settings.
 - Exact random-suffix item capture from full scans, with separate variant prices, history, and guild-sync keys.
 - Analytics for recent scans, saved shopping lists, and tiered price history. Processing and Alerts are opt-in beta tabs.

@@ -21,7 +21,7 @@ class PackageTests(unittest.TestCase):
                 names = archive.namelist()
                 self.assertTrue(all(n.startswith("MarketSync/") for n in names))
                 self.assertIn("MarketSync/MarketSync.toc", names)
-                self.assertIn("MarketSync/Export.lua", names)
+                self.assertIn("MarketSync/DATA_EXTRACTION_GUIDE.md", names)
                 self.assertIn("MarketSync/Scanner.lua", names)
                 self.assertIn("MarketSync/Favorites.lua", names)
                 self.assertIn("MarketSync/AuctionHouse.lua", names)
