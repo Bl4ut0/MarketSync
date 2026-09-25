@@ -203,6 +203,68 @@ end
 -- ================================================================
 -- DATABASE INITIALIZATION
 -- ================================================================
+local ITEM_INFO_CACHE_SCHEMA = 1
+local itemInfoValidationRunning = false
+
+function MarketSync.IsValidItemInfoCacheEntry(entry)
+    return type(entry) == "table"
+        and type(entry.n) == "string" and entry.n ~= ""
+        and type(entry.r) == "number" and entry.r >= 0 and entry.r <= 8
+        and type(entry.i) == "number" and entry.i >= 0
+        and type(entry.m) == "number" and entry.m >= 0
+        and type(entry.ic) == "number" and entry.ic > 0
+        and type(entry.c) == "number" and entry.c >= 0
+        and type(entry.s) == "number" and entry.s >= 0
+end
+
+function MarketSync.GetValidatedItemInfoCacheEntry(itemID)
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    if type(cache) ~= "table" then return nil end
+    local entry = cache[itemID]
+    if entry and not MarketSync.IsValidItemInfoCacheEntry(entry) then
+        cache[itemID] = nil
+        return nil
+    end
+    return entry
+end
+
+-- Validate the existing metadata cache in bounded slices. Invalid rows are
+-- refetched on demand; price snapshots and history are never touched.
+function MarketSync.ValidateItemInfoCacheAsync()
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    if type(cache) ~= "table" or itemInfoValidationRunning
+        or MarketSyncDB.ItemInfoCacheSchema == ITEM_INFO_CACHE_SCHEMA then return end
+    itemInfoValidationRunning = true
+    local cursor, removed = next(cache), 0
+    local function Step()
+        local processed = 0
+        while processed < 200 do
+            if cursor == nil then
+                itemInfoValidationRunning = false
+                MarketSyncDB.ItemInfoCacheSchema = ITEM_INFO_CACHE_SCHEMA
+                if removed > 0 and MarketSync.Debug then
+                    MarketSync.Debug("Removed " .. removed .. " invalid item-info cache rows; they will be refetched as needed")
+                end
+                return
+            end
+            local itemID = cursor
+            local entry = cache[itemID]
+            cursor = next(cache, itemID)
+            if type(itemID) ~= "number" or itemID <= 0 or not MarketSync.IsValidItemInfoCacheEntry(entry) then
+                cache[itemID] = nil
+                removed = removed + 1
+            end
+            processed = processed + 1
+        end
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, Step)
+        else
+            itemInfoValidationRunning = false
+        end
+    end
+    Step()
+end
+
 function MarketSync.InitializeDB()
     if not MarketSyncDB then
         MarketSyncDB = {
@@ -257,7 +319,7 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.RetentionVersion == nil then MarketSyncDB.RetentionVersion = 1 end
     -- Persistent item info cache (global, not per-realm — item metadata is universal)
     -- Stores name/icon/rarity/classID so items only need to be fetched from WoW server once
-    if not MarketSyncDB.ItemInfoCache then MarketSyncDB.ItemInfoCache = {} end
+    if type(MarketSyncDB.ItemInfoCache) ~= "table" then MarketSyncDB.ItemInfoCache = {} end
 
     if MarketSyncDB.AllowSyncInCombat == nil then MarketSyncDB.AllowSyncInCombat = true end
     if MarketSyncDB.AllowSyncInRaid == nil then MarketSyncDB.AllowSyncInRaid = false end

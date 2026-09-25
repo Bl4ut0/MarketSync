@@ -125,6 +125,9 @@ local IndexCallbacks = {}
 
 -- Tracking for background resolution
 local PersonalPending = {}    -- { dbKey = itemID }
+local PersonalDirtyKeys = {}
+local personalRefreshScheduled = false
+local browsePanels = setmetatable({}, { __mode = "k" })
 local GuildPending = {}       -- { dbKey = itemID }
 local NeutralPending = {}     -- { dbKey = itemID }
 local PersonalTotal = 0
@@ -171,7 +174,12 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
     end
 
     -- 1. Try in-memory / SavedVariables cache first (instant, zero lag)
-    local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID]
+    local cached
+    if MarketSync.GetValidatedItemInfoCacheEntry then
+        cached = MarketSync.GetValidatedItemInfoCacheEntry(itemID)
+    elseif MarketSyncDB and type(MarketSyncDB.ItemInfoCache) == "table" then
+        cached = MarketSyncDB.ItemInfoCache[itemID]
+    end
     if cached and cached.n then
         name = cached.n
         rarity = cached.r or 1
@@ -206,10 +214,13 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
             if not MarketSyncDB.ItemInfoCache then
                 MarketSyncDB.ItemInfoCache = {}
             end
-            MarketSyncDB.ItemInfoCache[itemID] = {
+            local cacheEntry = {
                 n = name, r = rarity, i = ilvl, m = minLevel,
                 ic = icon, c = classID, s = subClassID,
             }
+            if not MarketSync.IsValidItemInfoCacheEntry or MarketSync.IsValidItemInfoCacheEntry(cacheEntry) then
+                MarketSyncDB.ItemInfoCache[itemID] = cacheEntry
+            end
         end
     end
 
@@ -343,6 +354,8 @@ function MarketSync.InvalidateIndexCache()
     wipe(GuildIncomingBuffer)
     wipe(NeutralIncomingBuffer)
     wipe(PersonalPending)
+    wipe(PersonalDirtyKeys)
+    personalRefreshScheduled = false
     wipe(GuildPending)
     wipe(NeutralPending)
     PersonalTotal = 0
@@ -364,6 +377,56 @@ function MarketSync.InvalidateIndexCache()
         activeRetryFrame:SetScript("OnEvent", nil)
         activeRetryFrame = nil
     end
+end
+
+-- Auctionator provides the exact keys changed by a scan. Refresh only those
+-- personal rows; guild and neutral indices are independent of that source.
+local function ProcessPersonalDirtyKeys()
+    if PersonalIndexBuilding then
+        personalRefreshScheduled = false
+        return
+    end
+    local store = MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalData or {}
+    local processed = 0
+    while processed < 50 do
+        local dbKey = next(PersonalDirtyKeys)
+        if not dbKey then break end
+        PersonalDirtyKeys[dbKey] = nil
+        local itemID = ParseItemID(dbKey)
+        local wasKnown = PersonalIndex[dbKey] ~= nil or PersonalPending[dbKey] ~= nil
+        local wasResolved = PersonalIndex[dbKey] ~= nil
+        local data = store[dbKey]
+        local entry = data and itemID and BuildIndexEntry(dbKey, itemID, data, "personal") or nil
+        PersonalIndex[dbKey] = entry
+        PersonalPending[dbKey] = data and itemID and not entry and itemID or nil
+        local isKnown = PersonalIndex[dbKey] ~= nil or PersonalPending[dbKey] ~= nil
+        if isKnown ~= wasKnown then PersonalTotal = PersonalTotal + (isKnown and 1 or -1) end
+        if (entry ~= nil) ~= wasResolved then PersonalResolved = PersonalResolved + (entry and 1 or -1) end
+        processed = processed + 1
+    end
+    if next(PersonalDirtyKeys) then
+        if C_Timer and C_Timer.After then C_Timer.After(0, ProcessPersonalDirtyKeys)
+        else ProcessPersonalDirtyKeys() end
+        return
+    end
+    personalRefreshScheduled = false
+    for panel in pairs(browsePanels) do
+        if panel.dataSource == "personal" and panel.IsShown and panel:IsShown() and panel.RunSearch then
+            panel:RunSearch()
+        end
+    end
+end
+
+function MarketSync.RefreshPersonalBrowseIndexKeys(keys)
+    if type(keys) ~= "table" then return false end
+    if not PersonalIndexReady and not PersonalIndexBuilding then return true end
+    for dbKey in pairs(keys) do PersonalDirtyKeys[dbKey] = true end
+    if PersonalIndexReady and not PersonalIndexBuilding and not personalRefreshScheduled and next(PersonalDirtyKeys) then
+        personalRefreshScheduled = true
+        if C_Timer and C_Timer.After then C_Timer.After(0, ProcessPersonalDirtyKeys)
+        else ProcessPersonalDirtyKeys() end
+    end
+    return true
 end
 
 -- ================================================================
@@ -537,6 +600,10 @@ local function BuildSearchIndex(callback)
 
         -- Final pass complete
         PersonalIndexBuilding = false
+        if PersonalIndexReady and next(PersonalDirtyKeys) and not personalRefreshScheduled then
+            personalRefreshScheduled = true
+            C_Timer.After(0, ProcessPersonalDirtyKeys)
+        end
         local pPending, gPending, nPending = 0, 0, 0
         for _ in pairs(PersonalPending) do pPending = pPending + 1 end
         for _ in pairs(GuildPending) do gPending = gPending + 1 end
@@ -943,6 +1010,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     panel.dataSource = dataSourceName
+    browsePanels[panel] = true
 
     -- --- Search Bar (matches native AH search bar alignment) ---
     local searchBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")

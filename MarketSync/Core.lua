@@ -211,7 +211,9 @@ local function RegisterAuctionatorHooks()
             MarketSync.Debug("Auctionator database snapshot failed: " .. tostring(count))
             return false
         end
-        if (tonumber(changedCount) or 0) > 0 and MarketSync.InvalidateIndexCache then
+        if exactKeys and MarketSync.RefreshPersonalBrowseIndexKeys then
+            MarketSync.RefreshPersonalBrowseIndexKeys(exactKeys)
+        elseif (tonumber(changedCount) or 0) > 0 and MarketSync.InvalidateIndexCache then
             MarketSync.InvalidateIndexCache()
         end
         return true, count, todayCount, changedCount
@@ -275,7 +277,6 @@ local function RegisterAuctionatorHooks()
             realmDB.LastCountDay = today
             realmDB.LastTodayCount = tonumber(todayCount) or 0
         end
-        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
         if C_Timer and C_Timer.After then
             if MarketSync.BuildSearchIndex then
                 C_Timer.After(1, function()
@@ -650,6 +651,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         C_Timer.After(60, function()
             if MarketSync.PruneMetadata then
                 MarketSync.PruneMetadata()
+            end
+            if MarketSync.ValidateItemInfoCacheAsync then
+                MarketSync.ValidateItemInfoCacheAsync()
             end
         end)
 
