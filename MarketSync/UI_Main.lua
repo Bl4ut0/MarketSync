@@ -351,11 +351,11 @@ local function CreateMainFrame()
 
         -- LOW RAM MODE: Load caches on demand
         if MarketSyncDB and MarketSyncDB.LowRamMode then
-            if id == 1 and MarketSyncDB.OnDemandPersonal and MarketSync.LoadPersonalCache then
+            if id == 1 and MarketSync.LoadPersonalCache then
                 MarketSync.LoadPersonalCache()
-            elseif id == 2 and MarketSyncDB.OnDemandGuild and MarketSync.LoadGuildCache then
+            elseif id == 2 and MarketSync.LoadGuildCache then
                 MarketSync.LoadGuildCache()
-            elseif id == 3 and MarketSyncDB.OnDemandNeutral and MarketSync.LoadNeutralCache then
+            elseif id == 3 and MarketSync.LoadNeutralCache then
                 MarketSync.LoadNeutralCache()
             end
         end
@@ -665,24 +665,8 @@ local function CreateMainFrame()
         "Enable Low RAM Mode", "Wipe search caches and run Lua garbage collection when windows are closed. Recommended on by default.")
     chkLowRam:ClearAllPoints()
     chkLowRam:SetPoint("TOPLEFT", boxMemory, "TOPLEFT", 12, -10)
-
-    local subToggles = {}
-    local function UpdateSubTogglesState()
-        local masterEnabled = chkLowRam:GetChecked()
-        for _, cb in ipairs(subToggles) do
-            if masterEnabled then
-                cb:Enable()
-                cb.text:SetTextColor(1, 1, 1)
-            else
-                cb:Disable()
-                cb.text:SetTextColor(0.5, 0.5, 0.5)
-            end
-        end
-    end
-
     chkLowRam:SetScript("OnClick", function(self)
         MarketSyncDB.LowRamMode = self:GetChecked()
-        UpdateSubTogglesState()
         if not self:GetChecked() then
             if MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
                 MarketSync.BuildSearchIndex()
@@ -691,30 +675,9 @@ local function CreateMainFrame()
     end)
     chkLowRam:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.LowRamMode) end
-        UpdateSubTogglesState()
     end)
 
-    local function CreateSubToggle(label, key, anchor)
-        local cb = CreateCheckbox(boxMemory, anchor, "BOTTOMLEFT", label, "Only load and index this data when its specific tab is clicked.")
-        cb.text:SetWidth(125)
-        cb:SetScript("OnClick", function(self)
-            MarketSyncDB[key] = self:GetChecked()
-            if self:GetChecked() and MarketSync.InvalidateIndexCache then
-                MarketSync.InvalidateIndexCache()
-            end
-        end)
-        cb:SetScript("OnShow", function(self)
-            if MarketSyncDB then self:SetChecked(MarketSyncDB[key]) end
-        end)
-        table.insert(subToggles, cb)
-        return cb
-    end
-
-    local chkODP = CreateSubToggle("Personal: Demand", "OnDemandPersonal", chkLowRam)
-    local chkODG = CreateSubToggle("Guild: Demand", "OnDemandGuild", chkODP)
-    local chkODN = CreateSubToggle("Neutral: Demand", "OnDemandNeutral", chkODG)
-
-    local chkCache = CreateCheckbox(boxMemory, chkODN, "BOTTOMLEFT",
+    local chkCache = CreateCheckbox(boxMemory, chkLowRam, "BOTTOMLEFT",
         "Pre-Build on Startup", "Pre-load and index item data shortly after login (disabled by default in Low RAM mode).")
     chkCache:SetScript("OnClick", function(self)
         MarketSyncDB.BuildCacheOnStartup = self:GetChecked()
@@ -952,36 +915,10 @@ local function CreateMainFrame()
     end)
     AttachTooltip(volSlider, "Setting this to 0 mutes MarketSync; non-zero alerts follow WoW Master volume.")
 
-    local undercutHeader = boxAudio:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    undercutHeader:SetPoint("TOPLEFT", volSlider, "BOTTOMLEFT", -14, -12)
-    undercutHeader:SetText("Alert Undercut (%)")
-    undercutHeader:SetTextColor(1, 0.82, 0)
-
-    local undercutSlider = CreateFrame("Slider", "MarketSyncMainUndercutSlider", boxAudio, "OptionsSliderTemplate")
-    undercutSlider:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", 4, -12)
-    undercutSlider:SetWidth(135)
-    undercutSlider:SetMinMaxValues(1, 50)
-    undercutSlider:SetValueStep(1)
-    undercutSlider:SetObeyStepOnDrag(true)
-    undercutSlider.Low:SetText("1%")
-    undercutSlider.High:SetText("50%")
-    undercutSlider.Text:SetText("10%")
-
-    undercutSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value + 0.5)
-        MarketSyncDB.AlertUndercutPct = val
-        self.Text:SetText(string.format("%d%%", val))
-    end)
-    undercutSlider:SetScript("OnShow", function(self)
-        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        self:SetValue(val)
-        self.Text:SetText(string.format("%d%%", val))
-    end)
-
-    local chkMinimapAlerts = CreateCheckbox(boxAudio, undercutSlider, "BOTTOMLEFT",
+    local chkMinimapAlerts = CreateCheckbox(boxAudio, volSlider, "BOTTOMLEFT",
         "Flash Minimap Button", "Flash the MarketSync minimap button until notifications are acknowledged.")
     chkMinimapAlerts:ClearAllPoints()
-    chkMinimapAlerts:SetPoint("TOPLEFT", undercutSlider, "BOTTOMLEFT", -4, -10)
+    chkMinimapAlerts:SetPoint("TOPLEFT", volSlider, "BOTTOMLEFT", -14, -14)
     chkMinimapAlerts:SetScript("OnClick", function(self)
         MarketSyncDB.EnableMinimapAlerts = self:GetChecked() and true or false
         if not MarketSyncDB.EnableMinimapAlerts and MarketSync.StopMinimapFlash then MarketSync.StopMinimapFlash() end
@@ -997,17 +934,6 @@ local function CreateMainFrame()
     end)
     chkRaidAlerts:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableRaidWarningAlerts ~= false) end
-    end)
-
-    local chkPeriodicAlerts = CreateCheckbox(boxAudio, chkRaidAlerts, "BOTTOMLEFT",
-        "Periodic Tracked Checks", "Recheck only tracked notification items once per minute in addition to scan-time checks.")
-    chkPeriodicAlerts:SetScript("OnClick", function(self)
-        MarketSyncDB.NotificationMode = self:GetChecked() and "both" or "on_scan"
-    end)
-    chkPeriodicAlerts:SetScript("OnShow", function(self)
-        if MarketSyncDB then
-            self:SetChecked(MarketSyncDB.NotificationMode == "periodic" or MarketSyncDB.NotificationMode == "both")
-        end
     end)
 
     -- ================================================================
@@ -1136,8 +1062,37 @@ local function CreateMainFrame()
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableAlertsTab == true) end
     end)
 
-    local chkDebug = CreateCheckbox(betaBox, chkBetaAlerts, "BOTTOMLEFT",
+    local undercutHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    undercutHeader:SetPoint("TOPLEFT", chkBetaAlerts, "BOTTOMLEFT", 6, -4)
+    undercutHeader:SetText("Alert Undercut:")
+
+    local undercutSlider = CreateFrame("Slider", "MarketSyncMainUndercutSlider", betaBox, "OptionsSliderTemplate")
+    undercutSlider:SetPoint("LEFT", undercutHeader, "RIGHT", 6, 0)
+    undercutSlider:SetWidth(80)
+    undercutSlider:SetHeight(14)
+    undercutSlider:SetMinMaxValues(1, 50)
+    undercutSlider:SetValueStep(1)
+    undercutSlider:SetObeyStepOnDrag(true)
+    undercutSlider.Low:SetText("1%")
+    undercutSlider.High:SetText("50%")
+    undercutSlider.Text:SetText("10%")
+
+    undercutSlider:SetScript("OnValueChanged", function(self, value)
+        local val = math.floor(value + 0.5)
+        MarketSyncDB.AlertUndercutPct = val
+        self.Text:SetText(string.format("%d%%", val))
+        if MarketSync.RefreshNotificationUndercutButtons then MarketSync.RefreshNotificationUndercutButtons() end
+    end)
+    undercutSlider:SetScript("OnShow", function(self)
+        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        self:SetValue(val)
+        self.Text:SetText(string.format("%d%%", val))
+    end)
+
+    local chkDebug = CreateCheckbox(betaBox, undercutHeader, "BOTTOMLEFT",
         "Debug Messages", "Print verbose synchronization and scanner diagnostics in chat.")
+    chkDebug:ClearAllPoints()
+    chkDebug:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", -6, -8)
     chkDebug:SetScript("OnClick", function(self)
         MarketSyncDB.DebugMode = self:GetChecked()
     end)

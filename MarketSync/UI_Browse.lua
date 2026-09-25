@@ -488,9 +488,9 @@ local function BuildSearchIndex(callback)
 
         -- 1. BUILD PERSONAL CACHE
         if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
-            if MarketSyncDB.LowRamMode and MarketSyncDB.OnDemandPersonal and not PersonalIndexReady and not MarketSync.ForcePersonal then
+            if MarketSyncDB.LowRamMode and not PersonalIndexReady and not MarketSync.ForcePersonal then
                 if MarketSync.LogCacheEvent then
-                    MarketSync.LogCacheEvent("|cffffff00[Personal]|r On-Demand enabled. Skipping Personal index build.")
+                    MarketSync.LogCacheEvent("|cffffff00[Personal]|r On-Demand enabled (Low RAM). Skipping Personal index build.")
                 end
             else
                 for dbKey, data in pairs(MarketSync.GetRealmDB().PersonalData) do
@@ -528,9 +528,9 @@ local function BuildSearchIndex(callback)
         end
 
         -- 2. BUILD GUILD SYNC CACHE
-        if MarketSyncDB.LowRamMode and MarketSyncDB.OnDemandGuild and not GuildIndexReady and not MarketSync.ForceGuild then
+        if MarketSyncDB.LowRamMode and not GuildIndexReady and not MarketSync.ForceGuild then
             if MarketSync.LogCacheEvent then
-                MarketSync.LogCacheEvent("|cff88aaff[Guild]|r On-Demand enabled. Skipping Guild index build.")
+                MarketSync.LogCacheEvent("|cff88aaff[Guild]|r On-Demand enabled (Low RAM). Skipping Guild index build.")
             end
         elseif liveStore then
             for dbKey, data in pairs(liveStore) do
@@ -564,9 +564,9 @@ local function BuildSearchIndex(callback)
         end
 
         -- 3. BUILD NEUTRAL CACHE
-        if MarketSyncDB.LowRamMode and MarketSyncDB.OnDemandNeutral and not NeutralIndexReady and not MarketSync.ForceNeutral then
+        if MarketSyncDB.LowRamMode and not NeutralIndexReady and not MarketSync.ForceNeutral then
             if MarketSync.LogCacheEvent then
-                MarketSync.LogCacheEvent("|cff00ccff[Neutral]|r On-Demand enabled. Skipping Neutral index build.")
+                MarketSync.LogCacheEvent("|cff00ccff[Neutral]|r On-Demand enabled (Low RAM). Skipping Neutral index build.")
             end
         else
             if MarketSyncDB and MarketSync.GetRealmDB().NeutralData then

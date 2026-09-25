@@ -254,7 +254,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 1: PERFORMANCE & MEMORY MANAGEMENT
     -- ================================================================
-    local cardMemory = CreateCard(565, 210, nil, 0)
+    local cardMemory = CreateCard(565, 175, nil, 0)
 
     local hMemory = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hMemory:SetPoint("TOPLEFT", 12, -10)
@@ -264,50 +264,15 @@ local function PopulateAddonSettings(panel)
     sMemory:SetPoint("TOPLEFT", hMemory, "BOTTOMLEFT", 0, -3)
     sMemory:SetText("Configure RAM conservation, on-demand loading, and background caching rate.")
 
-    local subToggles = {}
-    local function UpdateSubToggles(enabled)
-        for _, sub in ipairs(subToggles) do
-            if enabled then
-                if sub.Enable then sub:Enable() end
-                if sub.text and sub.text.SetTextColor then sub.text:SetTextColor(1, 1, 1) end
-            else
-                if sub.Disable then sub:Disable() end
-                if sub.text and sub.text.SetTextColor then sub.text:SetTextColor(0.5, 0.5, 0.5) end
-            end
-        end
-    end
-
     local chkLowRam = CreateOptCheckbox(cardMemory, 12, -42, "Enable Low RAM Mode (Default: ON)",
-        "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Highly recommended to minimize addon memory footprint.",
+        "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Automatically loads caches on demand.",
         "LowRamMode", true, function(val)
-            UpdateSubToggles(val)
             if not val and MarketSyncDB and MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
                 MarketSync.BuildSearchIndex()
             end
         end)
 
-    local chkODP = CreateOptCheckbox(cardMemory, 30, -66, "Personal Scan: On-Demand",
-        "Only loads and indexes personal auction data when the tab is clicked.",
-        "OnDemandPersonal", true, function(val)
-            if val and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-        end)
-    table.insert(subToggles, chkODP)
-
-    local chkODG = CreateOptCheckbox(cardMemory, 210, -66, "Guild Sync: On-Demand",
-        "Only loads and indexes guild sync data when the tab is clicked.",
-        "OnDemandGuild", true, function(val)
-            if val and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-        end)
-    table.insert(subToggles, chkODG)
-
-    local chkODN = CreateOptCheckbox(cardMemory, 385, -66, "Neutral AH: On-Demand",
-        "Only loads and indexes neutral auction data when the tab is clicked.",
-        "OnDemandNeutral", true, function(val)
-            if val and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-        end)
-    table.insert(subToggles, chkODN)
-
-    local chkStartup = CreateOptCheckbox(cardMemory, 12, -92, "Pre-Build Search Index on Startup",
+    local chkStartup = CreateOptCheckbox(cardMemory, 12, -68, "Pre-Build Search Index on Startup",
         "Pre-indexes stored auction data shortly after login. When Low RAM mode is enabled, on-demand indexing is recommended instead.",
         "BuildCacheOnStartup", false, function(val)
             if val and MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
@@ -315,7 +280,7 @@ local function PopulateAddonSettings(panel)
 
     -- Cache Build Speed Slider
     local speedHeader = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    speedHeader:SetPoint("TOPLEFT", 12, -122)
+    speedHeader:SetPoint("TOPLEFT", 12, -96)
     speedHeader:SetText("|cffffd700Cache Build Speed:|r")
 
     local speedSlider = CreateFrame("Slider", "MarketSyncAddonSpeedSlider", cardMemory, "OptionsSliderTemplate")
@@ -331,7 +296,7 @@ local function PopulateAddonSettings(panel)
     speedNameText:SetPoint("LEFT", speedSlider, "RIGHT", 10, 0)
 
     local speedDescText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    speedDescText:SetPoint("TOPLEFT", 12, -145)
+    speedDescText:SetPoint("TOPLEFT", 12, -118)
     speedDescText:SetWidth(540)
     speedDescText:SetJustifyH("LEFT")
 
@@ -353,19 +318,18 @@ local function PopulateAddonSettings(panel)
         local val = (MarketSyncDB and MarketSyncDB.CacheSpeed) or 2
         speedSlider:SetValue(val)
         UpdateSpeedDisplay(val)
-        UpdateSubToggles(chkLowRam:GetChecked())
     end
     table.insert(refreshControls, RefreshSpeed)
 
     -- Live RAM Estimation
     local ramText = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    ramText:SetPoint("TOPLEFT", 12, -178)
+    ramText:SetPoint("TOPLEFT", 12, -146)
     ramText:SetWidth(400)
     ramText:SetJustifyH("LEFT")
 
     local btnRebuildCache = CreateFrame("Button", nil, cardMemory, "UIPanelButtonTemplate")
     btnRebuildCache:SetSize(130, 20)
-    btnRebuildCache:SetPoint("TOPRIGHT", cardMemory, "TOPRIGHT", -12, -174)
+    btnRebuildCache:SetPoint("TOPRIGHT", cardMemory, "TOPRIGHT", -12, -142)
     btnRebuildCache:SetText("Rebuild Cache")
     AttachTooltip(btnRebuildCache, "Manually rebuild personal, guild, and neutral browse index caches.")
     btnRebuildCache:SetScript("OnClick", function()
@@ -447,7 +411,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 4: AUDIO & NOTIFICATIONS
     -- ================================================================
-    local cardAudio = CreateCard(565, 155, cardAH, -10)
+    local cardAudio = CreateCard(565, 140, cardAH, -10)
 
     local hAudio = cardAudio:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hAudio:SetPoint("TOPLEFT", 12, -10)
@@ -528,29 +492,6 @@ local function PopulateAddonSettings(panel)
     end
     table.insert(refreshControls, RefreshVolume)
 
-    -- Undercut Slider
-    local undercutSlider = CreateFrame("Slider", "MarketSyncAddonUndercutSlider", cardAudio, "OptionsSliderTemplate")
-    undercutSlider:SetPoint("LEFT", volSlider, "RIGHT", 40, 0)
-    undercutSlider:SetWidth(120)
-    undercutSlider:SetMinMaxValues(1, 50)
-    undercutSlider:SetValueStep(1)
-    if undercutSlider.SetObeyStepOnDrag then undercutSlider:SetObeyStepOnDrag(true) end
-    if undercutSlider.Low then undercutSlider.Low:SetText("1%") end
-    if undercutSlider.High then undercutSlider.High:SetText("50%") end
-    if undercutSlider.Text then undercutSlider.Text:SetText("Undercut %") end
-
-    undercutSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value + 0.5)
-        if MarketSyncDB then MarketSyncDB.AlertUndercutPct = val end
-        if self.Text then self.Text:SetText(string.format("%d%%", val)) end
-    end)
-    local function RefreshUndercut()
-        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        undercutSlider:SetValue(val)
-        if undercutSlider.Text then undercutSlider.Text:SetText(string.format("%d%%", val)) end
-    end
-    table.insert(refreshControls, RefreshUndercut)
-
     -- Visual Alerts on right side of Card 4
     CreateOptCheckbox(cardAudio, 360, -38, "Flash Minimap for Alerts",
         "Flash the MarketSync minimap button until notifications are acknowledged.",
@@ -561,17 +502,6 @@ local function PopulateAddonSettings(panel)
     CreateOptCheckbox(cardAudio, 360, -64, "Show On-Screen Alert Banner",
         "Display triggered notifications in the on-screen raid-warning banner.",
         "EnableRaidWarningAlerts", true, nil)
-
-    local chkPeriodicAlerts = CreateOptCheckbox(cardAudio, 360, -90, "Periodic Tracked Checks",
-        "Recheck tracked notification items once per minute in addition to scan-time checks.",
-        nil, false, function(val)
-            if MarketSyncDB then MarketSyncDB.NotificationMode = val and "both" or "on_scan" end
-        end)
-    table.insert(refreshControls, function()
-        if MarketSyncDB and chkPeriodicAlerts then
-            chkPeriodicAlerts:SetChecked(MarketSyncDB.NotificationMode == "periodic" or MarketSyncDB.NotificationMode == "both")
-        end
-    end)
 
     -- ================================================================
     -- CARD 5: DATA SYNC & SWARM
@@ -681,6 +611,30 @@ local function PopulateAddonSettings(panel)
             if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
         end)
+
+    -- Default Undercut Slider (for Price Alerts)
+    local undercutSlider = CreateFrame("Slider", "MarketSyncAddonUndercutSlider", cardBeta, "OptionsSliderTemplate")
+    undercutSlider:SetPoint("TOPLEFT", 320, -64)
+    undercutSlider:SetWidth(130)
+    undercutSlider:SetMinMaxValues(1, 50)
+    undercutSlider:SetValueStep(1)
+    if undercutSlider.SetObeyStepOnDrag then undercutSlider:SetObeyStepOnDrag(true) end
+    if undercutSlider.Low then undercutSlider.Low:SetText("1%") end
+    if undercutSlider.High then undercutSlider.High:SetText("50%") end
+    if undercutSlider.Text then undercutSlider.Text:SetText("Default Undercut %") end
+
+    undercutSlider:SetScript("OnValueChanged", function(self, value)
+        local val = math.floor(value + 0.5)
+        if MarketSyncDB then MarketSyncDB.AlertUndercutPct = val end
+        if self.Text then self.Text:SetText(string.format("Default Undercut: %d%%", val)) end
+        if MarketSync.RefreshNotificationUndercutButtons then MarketSync.RefreshNotificationUndercutButtons() end
+    end)
+    local function RefreshUndercut()
+        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        undercutSlider:SetValue(val)
+        if undercutSlider.Text then undercutSlider.Text:SetText(string.format("Default Undercut: %d%%", val)) end
+    end
+    table.insert(refreshControls, RefreshUndercut)
 
     CreateOptCheckbox(cardBeta, 12, -90, "Enable Debug Diagnostics",
         "Print verbose synchronization, retention, and scanning diagnostics in chat.",

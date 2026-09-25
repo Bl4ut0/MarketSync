@@ -441,6 +441,15 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
     panel.RefreshUndercutButtons = RefreshUndercutButtons
 
+    btnUndercut:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        GameTooltip:SetText(string.format("Set threshold to %d%% below market price.", pct), 1, 1, 1)
+        GameTooltip:AddLine("Configure default percentage in Settings (Beta section).", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    btnUndercut:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     btnUndercut:SetScript("OnClick", function()
         local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
         ApplyThresholdPreset(math.max(0, 1 - (pct / 100)))
@@ -551,6 +560,15 @@ function MarketSync.CreateNotificationsPanel(parent)
         impBtnUndercut:SetText("-" .. tostring(userPct) .. "%")
     end
     panel.RefreshImportUndercutButton = RefreshImportUndercutButton
+
+    impBtnUndercut:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
+        GameTooltip:SetText(string.format("Import with %d%% discount below market price.", pct), 1, 1, 1)
+        GameTooltip:AddLine("Configure default percentage in Settings (Beta section).", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    impBtnUndercut:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     impBtnUndercut:SetScript("OnClick", function()
         local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
@@ -1542,5 +1560,12 @@ function MarketSync.ToggleNotificationsManager()
         MarketSyncMainFrame.tabs[6]:Click()
     elseif MarketSync_ToggleUI then
         MarketSync_ToggleUI()
+    end
+end
+
+function MarketSync.RefreshNotificationUndercutButtons()
+    for _, p in ipairs(registeredNotificationPanels) do
+        if p.RefreshUndercutButtons then p.RefreshUndercutButtons() end
+        if p.RefreshImportUndercutButton then p.RefreshImportUndercutButton() end
     end
 end

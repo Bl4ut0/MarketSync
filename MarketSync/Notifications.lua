@@ -376,8 +376,6 @@ end
 
 function MarketSync.EvaluateNotificationsForRecord(dbKey, price, eventScope, sourceName, explicitName, explicitItemID)
     if MarketSync.NotificationsMuted then return 0 end
-    local mode = MarketSyncDB and MarketSyncDB.NotificationMode or "on_scan"
-    if mode ~= "on_scan" and mode ~= "both" then return 0 end
     local realmDB = MarketSync.GetRealmDB()
     if not realmDB or not realmDB.NotificationRequests then return 0 end
     if not price or price <= 0 then return 0 end
@@ -485,13 +483,6 @@ end
 function MarketSync.EvaluateTrackedNotifications(eventScope, sourceName)
     if MarketSync.NotificationsMuted then return 0 end
     local scope = NormalizeScope(eventScope)
-    local mode = MarketSyncDB and MarketSyncDB.NotificationMode or "on_scan"
-    local isPeriodic = sourceName == "Periodic"
-    if isPeriodic then
-        if mode ~= "periodic" and mode ~= "both" then return 0 end
-    elseif mode ~= "on_scan" and mode ~= "both" then
-        return 0
-    end
     local realmDB = MarketSync.GetRealmDB()
     local alerted = 0
     local now = time()
@@ -523,15 +514,6 @@ function MarketSync.EvaluateTrackedNotifications(eventScope, sourceName)
     return alerted
 end
 
-local notificationTicker = C_Timer.NewTicker(60, function()
-    local mode = MarketSyncDB and MarketSyncDB.NotificationMode or "on_scan"
-    if mode ~= "periodic" and mode ~= "both" then return end
-    MarketSync.EvaluateTrackedNotifications("main", "Periodic")
-    if MarketSyncDB and MarketSyncDB.EnableNeutralSync ~= false then
-        MarketSync.EvaluateTrackedNotifications("neutral", "Periodic")
-    end
-end)
-MarketSync.NotificationTicker = notificationTicker
 
 function MarketSync.GetImportableListNames()
     local lists = {}
