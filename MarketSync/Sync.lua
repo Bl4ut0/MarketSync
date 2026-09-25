@@ -980,6 +980,7 @@ function MarketSync.SnapshotPersonalScan(options)
         or (type(options) == "table" and options.onPriceChanged)
     local exactKeys = type(options) == "table" and options.exactKeys == true
         and type(options.keys) == "table"
+    local observationScanID = type(options) == "table" and options.observationScanID
     local source = exactKeys and options.keys or liveStore
     
     local today = MarketSync.GetCurrentScanDay()
@@ -1029,6 +1030,15 @@ function MarketSync.SnapshotPersonalScan(options)
                 if lastSeenDay == today then
                     local qty = 0
                     if data.a and data.a[todayStr] then qty = tonumber(data.a[todayStr]) or 0 end
+                    if observationScanID and MarketSync.ObservationAPI then
+                        local itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(tostring(dbKey))
+                        local seenAt = data.latest and tonumber(data.latest.seenAt) or nil
+                        MarketSync.ObservationAPI.v1.Emit({ event = "observation",
+                            scanId = observationScanID, source = "local", scope = "main",
+                            key = tostring(dbKey), itemID = itemID, itemSuffix = itemSuffix,
+                            unitPrice = observedPrice, quantity = qty > 0 and qty or nil,
+                            observedAt = seenAt, timePrecision = seenAt and "exact" or "unknown" })
+                    end
                     
                     local histStr, historyChanged, accepted = MergeTimeseriesPoint(
                         entry.h[todayStr], bucketOffset, observedPrice, qty, true)

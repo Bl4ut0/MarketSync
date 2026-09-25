@@ -189,6 +189,11 @@ function S.KeyID(key)
 end
 
 function S.Cancel(reason)
+    if S.Active and S.ObservationScanID and MarketSync.ObservationAPI then
+        MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = S.ObservationScanID,
+            source = "local", scope = "main", reason = reason or "cancelled" })
+    end
+    S.ObservationScanID = nil
     S.Generation = S.Generation + 1
     S.Active = false
     StopDebugProgressTicker()
@@ -244,6 +249,15 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         lastScanObservations[dbKey] = { time = now, price = unitPrice, available = available or 0 }
     end
 
+    local observationAPI = MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
+    if observationAPI and not observationAPI.HasListeners() then observationAPI = nil end
+    local standaloneScanID = not S.ObservationScanID and observationAPI
+        and observationAPI.NewScanID("local") or nil
+    if standaloneScanID then
+        observationAPI.Emit({ event = "start", scanId = standaloneScanID,
+            source = "local", scope = "main" })
+    end
+
     local realmDB = MarketSync.GetRealmDB()
     if not realmDB.PersonalData then realmDB.PersonalData = {} end
     local pData = realmDB.PersonalData
@@ -276,6 +290,18 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         realmDB.PartialScanTime = now
     end
     realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
+    if observationAPI then
+        observationAPI.Emit({ event = "observation",
+            scanId = S.ObservationScanID or standaloneScanID,
+            source = "local", scope = "main", key = dbKey, itemID = itemID,
+            itemSuffix = normalizedKey.itemSuffix, unitPrice = unitPrice,
+            quantity = tonumber(available) and available > 0 and available or nil,
+            observedAt = now, timePrecision = "exact" })
+        if standaloneScanID then
+            observationAPI.Emit({ event = "finish", scanId = standaloneScanID,
+                source = "local", scope = "main" })
+        end
+    end
 
     -- Metadata is stable per item ID. A full replicate can contain many variants
     -- of the same item, so resolve it at most once and reuse the persistent cache.
@@ -447,6 +473,11 @@ function S.ScheduleNext()
 
         if #S.Queue == 0 then
             S.Active = false
+            if S.ObservationScanID and MarketSync.ObservationAPI then
+                MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = S.ObservationScanID,
+                    source = "local", scope = "main" })
+                S.ObservationScanID = nil
+            end
             StopDebugProgressTicker()
             S.Pending = nil
             S.Status = "Scan Complete"
@@ -492,6 +523,7 @@ function S.ScheduleNext()
 end
 
 function S.StartScan(itemsOrKeys, label)
+    if S.Active then S.Cancel("replaced by new scan") end
     if BlockNativeScan() then return false end
     if not S.IsAvailable() then
         S.Status = "Auctioneer must be open to scan"
@@ -527,6 +559,11 @@ function S.StartScan(itemsOrKeys, label)
     end
 
     S.Progress.total = #S.Queue
+    if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
+        S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
+        MarketSync.ObservationAPI.v1.Emit({ event = "start", scanId = S.ObservationScanID,
+            source = "local", scope = "main" })
+    end
     S.Progress.current = 0
     S.Status = label or string.format("Starting scan of %d items...", S.Progress.total)
     S.NextRequestAt = GetTime()
@@ -607,6 +644,7 @@ function S.ScanMultipleLists(listNames)
 end
 
 function S.StartFullScan()
+    if S.Active then S.Cancel("replaced by new scan") end
     if BlockNativeScan() then return false end
     if not S.IsAvailable() then
         S.Status = "Auctioneer must be open to scan"
@@ -648,11 +686,21 @@ function S.StartFullScan()
     S.Progress.total = 0
     S.Progress.current = 0
     S.Status = "Requesting full AH snapshot from server..."
+    if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
+        S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
+        MarketSync.ObservationAPI.v1.Emit({ event = "start", scanId = S.ObservationScanID,
+            source = "local", scope = "main" })
+    end
     StartDebugProgressTicker()
     S.Notify()
 
     local ok, requestResult = pcall(replFunc)
     if not ok or requestResult == false then
+        if S.ObservationScanID and MarketSync.ObservationAPI then
+            MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = S.ObservationScanID,
+                source = "local", scope = "main", reason = "request failed" })
+            S.ObservationScanID = nil
+        end
         S.Active = false
         StopDebugProgressTicker()
         S.Status = "ReplicateItems request failed"
@@ -733,6 +781,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         local scanGeneration = S.Generation
 
         local function FinishFullScan()
+            if S.ObservationScanID and MarketSync.ObservationAPI then
+                MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = S.ObservationScanID,
+                    source = "local", scope = "main" })
+                S.ObservationScanID = nil
+            end
             MarketSyncDB.LastFullScanAt = time()
             local realmDB = MarketSync.GetRealmDB()
             if realmDB then

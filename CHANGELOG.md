@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-09-25
+
+### Added
+- Versioned `MarketSync.ObservationAPI.v1` callback for ForeverLedgerSync and other companion addons. Native, Auctionator-backed, and verified guild-sync paths identify local versus synced observations and emit scan start/finish/cancel lifecycle events. See `FOREVERLEDGER_INTEGRATION.md` for timestamp and quantity precision limits.
+
 ## [0.9.0] - 2026-09-25
 
 ### Added

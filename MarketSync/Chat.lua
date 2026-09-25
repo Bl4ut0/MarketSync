@@ -745,6 +745,37 @@ local function CommitStagedSession(session, finalSequence, expectedRecords)
         return false, "apply failed and was rolled back: " .. tostring(applyError)
     end
 
+    -- Publish only after the verified transaction is committed. The wire
+    -- carries 30-minute buckets, not per-auction timestamps; never substitute
+    -- receive time or the session's advertised scan time for observation time.
+    local observationAPI = MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
+    if observationAPI and observationAPI.HasListeners() then
+        local scanId = "sync-" .. tostring(session.id)
+        local scope = session.scope == "N" and "neutral" or "main"
+        for _, operation in ipairs(operations) do
+            local itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(tostring(operation.key))
+            if session.scope == "N" then
+                observationAPI.Emit({ event = "observation", scanId = scanId,
+                    source = "synced", scope = scope, key = operation.key,
+                    itemID = itemID, itemSuffix = itemSuffix, unitPrice = operation.price,
+                    quantity = operation.quantity and operation.quantity > 0 and operation.quantity or nil,
+                    observedAt = nil, observedDay = operation.day, timePrecision = "day" })
+            else
+                for offset, priceText, qtyText in string.gmatch(operation.history, "(%d+):([%w%-]+):([%w%-]+)") do
+                    local quantity = MarketSync.FromBase36(qtyText)
+                    observationAPI.Emit({ event = "observation", scanId = scanId,
+                        source = "synced", scope = scope, key = operation.key,
+                        itemID = itemID, itemSuffix = itemSuffix,
+                        unitPrice = MarketSync.FromBase36(priceText),
+                        quantity = quantity and quantity > 0 and quantity or nil,
+                        observedAt = nil, observedDay = operation.day,
+                        observedBucketOffset = tonumber(offset), timePrecision = "30m" })
+                end
+            end
+        end
+        observationAPI.Emit({ event = "finish", scanId = scanId, source = "synced", scope = scope })
+    end
+
     -- A complete zero-record delta is valid: END still advances the verified
     -- source timestamp.  Never move freshness backwards after an older dump.
     if revision > oldRevision or (revision == oldRevision and scanTime >= oldScanTime) then
@@ -780,6 +811,11 @@ function MarketSync.DiscardInboundSyncSession(scope, sessionId, reason)
     local session = rxSessions[scope]
     if not session or (sessionId and session.id ~= sessionId) then return false end
     rxSessions[scope] = nil
+    if session.observationStarted and MarketSync.ObservationAPI then
+        MarketSync.ObservationAPI.v1.Emit({ event = "cancel",
+            scanId = "sync-" .. tostring(session.id), source = "synced",
+            scope = scope == "N" and "neutral" or "main", reason = reason or "discarded" })
+    end
     if session.applyEligible or session.invalidReason then
         rejectedSessions[scope] = {
             revision = tonumber(session.revision) or 0,
@@ -968,6 +1004,11 @@ local function HandleProtocol2Message(msgType, p1, p2, p3, p4, p5, p6, p7, p8,
                 localRevision, localScanTime, revision, scanTime)
         end
 
+        if existing and existing.observationStarted and MarketSync.ObservationAPI then
+            MarketSync.ObservationAPI.v1.Emit({ event = "cancel",
+                scanId = "sync-" .. tostring(existing.id), source = "synced",
+                scope = scope == "N" and "neutral" or "main", reason = "replaced by new transfer" })
+        end
         rxSessions[scope] = {
             id = sessionId,
             scope = scope,
@@ -977,10 +1018,16 @@ local function HandleProtocol2Message(msgType, p1, p2, p3, p4, p5, p6, p7, p8,
             revision = revision,
             scanTime = scanTime,
             applyEligible = applyEligible,
+            observationStarted = applyEligible,
             skipReason = skipReason,
             chunks = {},
             chunkCount = 0,
         }
+        if applyEligible and MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
+            MarketSync.ObservationAPI.v1.Emit({ event = "start",
+                scanId = "sync-" .. tostring(sessionId), source = "synced",
+                scope = scope == "N" and "neutral" or "main" })
+        end
         MarketSync.RxCount = 0
         if MarketSync.UpdateSwarmUI then
             MarketSync.UpdateSwarmUI(UnitName("player"), applyEligible
@@ -1065,6 +1112,11 @@ local function HandleProtocol2Message(msgType, p1, p2, p3, p4, p5, p6, p7, p8,
             end
         end
         if session then
+            if not complete and session.observationStarted and MarketSync.ObservationAPI then
+                MarketSync.ObservationAPI.v1.Emit({ event = "cancel",
+                    scanId = "sync-" .. tostring(session.id), source = "synced",
+                    scope = scope == "N" and "neutral" or "main", reason = tostring(result) })
+            end
             if complete then
                 rejectedSessions[scope] = nil
             elseif not skipped then

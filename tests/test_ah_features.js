@@ -1084,6 +1084,11 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
 
+  const observationLua = fs.readFileSync(path.join(marketSyncDir, 'ObservationAPI.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(observationLua)) !== 0) {
+    throw new Error('Failed to load ObservationAPI.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
   const scannerLua = fs.readFileSync(path.join(marketSyncDir, 'Scanner.lua'), 'utf8');
   if (lauxlib.luaL_dostring(L, to_luastring(scannerLua)) !== 0) {
     throw new Error('Failed to load Scanner.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
@@ -1114,11 +1119,20 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     -- 2. Test RecordScanObservation and immediate callback
     MarketSync.InitializeDB()
     local callbackFired = false
+    local observationEvents = {}
+    MarketSync.ObservationAPI.v1.Register(function(event)
+      observationEvents[#observationEvents + 1] = event
+    end)
     MarketSync.Scanner.RegisterCallback(function()
       callbackFired = true
     end)
 
     MarketSync.RecordScanObservation(4471, 25000, 5, true, false)
+    assert(#observationEvents == 3, "Manual observation needs start, data, finish")
+    assert(observationEvents[1].event == "start" and observationEvents[3].event == "finish")
+    assert(observationEvents[2].scanId == observationEvents[1].scanId)
+    assert(observationEvents[2].key == "4471" and observationEvents[2].quantity == 5)
+    assert(observationEvents[2].observedAt == time() and observationEvents[2].source == "local")
 
     -- Assert callback fired immediately (for sidecar shopping list update)
     assert(callbackFired == true, "Scanner.RegisterCallback should fire immediately upon scan observation")

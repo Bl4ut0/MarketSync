@@ -28,6 +28,8 @@ def build(output, interface=None):
         files[ADDON + "/README.md"] = (ROOT / "README.md").read_bytes()
     if (ROOT / "DATA_EXTRACTION_GUIDE.md").exists():
         files[ADDON + "/DATA_EXTRACTION_GUIDE.md"] = (ROOT / "DATA_EXTRACTION_GUIDE.md").read_bytes()
+    if (ROOT / "FOREVERLEDGER_INTEGRATION.md").exists():
+        files[ADDON + "/FOREVERLEDGER_INTEGRATION.md"] = (ROOT / "FOREVERLEDGER_INTEGRATION.md").read_bytes()
     if (ROOT / "LICENSE").exists():
         files[ADDON + "/LICENSE"] = (ROOT / "LICENSE").read_bytes()
 
@@ -46,7 +48,7 @@ def build(output, interface=None):
 
     manifest = {
         "addon": "MarketSync",
-        "version": "0.9.0",
+        "version": "0.9.1",
         "targetVersion": "1.60.1",
         "targetBuild": "69893",
         "interface": interface,
