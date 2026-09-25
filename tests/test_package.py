@@ -23,6 +23,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("MarketSync/MarketSync.toc", names)
                 self.assertIn("MarketSync/DATA_EXTRACTION_GUIDE.md", names)
                 self.assertIn("MarketSync/OBSERVATION_API.md", names)
+                self.assertIn("MarketSync/PERFORMANCE_AND_SCALE.md", names)
                 self.assertIn("MarketSync/Scanner.lua", names)
                 self.assertIn("MarketSync/Favorites.lua", names)
                 self.assertIn("MarketSync/AuctionHouse.lua", names)

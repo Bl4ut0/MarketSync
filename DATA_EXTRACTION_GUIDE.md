@@ -6,8 +6,8 @@ This guide explains how external web services, websites, and browser extensions 
 
 ## 1. Why Avoid In-Game Clipboard Copying?
 
-In World of Warcraft, an active Auction House database with 2,000+ items and price history easily reaches **1.2 MB – 3 MB** of data (75,000+ lines in `MarketSync.lua`). 
-WoW's native `EditBox` is safely limited to ~12 KB per frame to avoid client freezes and clipboard buffer truncation. Copying a full database would require **over 100 manual copy-paste cycles**.
+In World of Warcraft, an active Auction House catalog with 2,000 to 30,000+ item variants and price history reaches **1.5 MB – 12 MB** of structured Lua data (75,000 to 250,000+ lines in `MarketSyncDB.lua`). 
+WoW's native `EditBox` is safely limited to ~12 KB per frame to avoid client freezes and clipboard buffer truncation. Attempting to copy a mature database would require **between 120 and over 400 manual copy-paste cycles**.
 
 Instead, MarketSync automatically persists its complete, high-fidelity database to disk in the game's `SavedVariables` directory. External systems can read this file directly.
 

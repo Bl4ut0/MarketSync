@@ -2,9 +2,11 @@
 
 MarketSync is a Forever-first Auction House addon for scans, price history, guild and neutral-AH synchronization, saved shopping lists, and item analytics. Auctionator is optional. If it is installed, MarketSync uses its scan updates by default and its own scanner can be re-enabled in Settings. Processing and Alerts are opt-in beta tabs; Analytics is enabled by default.
 
-For external price sites, web dashboards, or Discord bots, see the **[Data Extraction & Web Import Guide](DATA_EXTRACTION_GUIDE.md)** for importing the complete scan database (2,000+ items and history) directly from the game's SavedVariables file with zero software downloads via the browser File System Access API, drag-and-drop, or lightweight scripts.
+For external price sites, web dashboards, or Discord bots, see the **[Data Extraction & Web Import Guide](DATA_EXTRACTION_GUIDE.md)** for importing the complete scan database (2,000 to 30,000+ items and history) directly from the game's SavedVariables file with zero software downloads via the browser File System Access API, drag-and-drop, or lightweight scripts.
 
 Companion addons (ledgers, uploaders, and external trackers) can subscribe to real-time scan observations directly in memory. See the [MarketSync Observation API Guide](OBSERVATION_API.md) for the event schema, lifecycle states, and timestamp precision rules.
+
+For architecture, benchmarks, and safeguards scaling to 30,000+ items (frame-sliced batching, network bandwidth throttling, and tiered retention downsampling), see the **[Performance, Scaling & Architecture Guide](PERFORMANCE_AND_SCALE.md)**.
 
 Install the packaged `MarketSync` folder under the Forever client's `Interface/AddOns` directory. Open an auctioneer to scan, or use the MarketSync tabs to browse saved prices and history. Open each profession window once before expecting its known recipes to appear in Processing. The current release targets Forever 1.60.1 (build 69893); other game versions have not been validated for this release.
 

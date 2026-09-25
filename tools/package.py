@@ -30,6 +30,8 @@ def build(output, interface=None):
         files[ADDON + "/DATA_EXTRACTION_GUIDE.md"] = (ROOT / "DATA_EXTRACTION_GUIDE.md").read_bytes()
     if (ROOT / "OBSERVATION_API.md").exists():
         files[ADDON + "/OBSERVATION_API.md"] = (ROOT / "OBSERVATION_API.md").read_bytes()
+    if (ROOT / "PERFORMANCE_AND_SCALE.md").exists():
+        files[ADDON + "/PERFORMANCE_AND_SCALE.md"] = (ROOT / "PERFORMANCE_AND_SCALE.md").read_bytes()
     if (ROOT / "LICENSE").exists():
         files[ADDON + "/LICENSE"] = (ROOT / "LICENSE").read_bytes()
 
