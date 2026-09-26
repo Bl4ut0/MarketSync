@@ -567,11 +567,29 @@ function MarketSync.CreateAnalyticsPanel(parent)
                         if suffix and suffix ~= 0 and name and cached and name == cached.n then
                             name = name .. " (Variant " .. tostring(suffix) .. ")"
                         end
+                        if not icon and id then
+                            if MarketSync.GetItemIcon then
+                                icon = MarketSync.GetItemIcon(id)
+                            end
+                            if not icon and MarketSync.GetItemInfoInstant then
+                                icon = select(5, MarketSync.GetItemInfoInstant(id))
+                            end
+                        end
+                        local realName = (name and not name:find("^Item #") and name)
+                            or (r and r.name and not r.name:find("^Item #") and r.name)
+                            or name
+                            or (r and r.name)
+                            or ("Item #" .. id)
+                        local realIcon = (icon and icon ~= 134400 and icon)
+                            or (r and r.icon and r.icon ~= 134400 and r.icon)
+                            or icon
+                            or (r and r.icon)
+                            or 134400
                         table.insert(itemsList, {
                             dbKey = k,
                             itemID = id,
-                            name = (r and r.name) or name or ("Item #" .. id),
-                            icon = (r and r.icon) or icon or 134400,
+                            name = realName,
+                            icon = realIcon,
                             quality = (r and r.quality) or qual or 1,
                             price = candidate.price or 0,
                             sourceText = r and "Live Scan Feed" or "AH Scan Database",

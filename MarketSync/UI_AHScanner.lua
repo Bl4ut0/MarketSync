@@ -725,6 +725,41 @@ function MarketSync.CreateAHScannerPanel(parent)
                     row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
                 end
 
+                -- Dynamically resolve item name and icon if missing or fallback
+                if not data.resolved or not data.icon or data.icon == 134400 or (data.name and data.name:find("^Item #")) then
+                    local itemID = data.itemID or (data.itemKey and data.itemKey.itemID)
+                    local query = (data.itemKey and data.itemKey.itemLink) or itemID
+                    if query then
+                        local rName, rLink, rQuality, _, _, _, _, _, _, rIcon = SafeGetItemInfo(query)
+                        if not rName and itemID then
+                            rName, rLink, rQuality, _, _, _, _, _, _, rIcon = SafeGetItemInfo(itemID)
+                        end
+                        if not rIcon and itemID then
+                            rIcon = MarketSync.GetItemIcon and MarketSync.GetItemIcon(itemID)
+                            if not rIcon and MarketSync.GetItemInfoInstant then
+                                rIcon = select(5, MarketSync.GetItemInfoInstant(itemID))
+                            end
+                        end
+                        if rName then
+                            data.name = rName
+                            data.quality = rQuality or data.quality
+                            data.resolved = true
+                            if MarketSyncDB and MarketSyncDB.ItemInfoCache and itemID then
+                                local c = MarketSyncDB.ItemInfoCache[itemID] or {}
+                                c.n = rName
+                                c.r = rQuality or c.r
+                                c.ic = rIcon or c.ic
+                                MarketSyncDB.ItemInfoCache[itemID] = c
+                            end
+                        elseif itemID and C_Item and C_Item.RequestLoadItemDataByID then
+                            pcall(C_Item.RequestLoadItemDataByID, itemID)
+                        end
+                        if rIcon and rIcon ~= 134400 then
+                            data.icon = rIcon
+                        end
+                    end
+                end
+
                 row.icon:SetTexture(data.icon)
                 row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(data.name, data.quality) or data.name)
                 row.price:SetText(MarketSync.FormatMoney and MarketSync.FormatMoney(data.unitPrice) or tostring(data.unitPrice))
@@ -743,6 +778,21 @@ function MarketSync.CreateAHScannerPanel(parent)
                         end
                     else
                         GameTooltip:SetText(data.name, 1, 1, 1)
+                    end
+                    if not data.resolved or (data.name and data.name:find("^Item #")) then
+                        local itemID = data.itemID or (data.itemKey and data.itemKey.itemID)
+                        local query = (data.itemKey and data.itemKey.itemLink) or itemID
+                        local rName, _, rQuality, _, _, _, _, _, _, rIcon = SafeGetItemInfo(query or itemID)
+                        if rName then
+                            data.name = rName
+                            data.quality = rQuality or data.quality
+                            data.resolved = true
+                            row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(data.name, data.quality) or data.name)
+                            if rIcon and rIcon ~= 134400 then
+                                data.icon = rIcon
+                                row.icon:SetTexture(data.icon)
+                            end
+                        end
                     end
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddLine("|cFF00FF00Left-Click|r: Search in Auction House", 0.8, 0.8, 0.8)
@@ -896,10 +946,25 @@ function MarketSync.CreateAHScannerPanel(parent)
         end
     end)
 
+    local itemInfoThrottleTimer
+    local itemInfoFrame = CreateFrame("Frame", nil, panel)
+    pcall(itemInfoFrame.RegisterEvent, itemInfoFrame, "GET_ITEM_INFO_RECEIVED")
+    itemInfoFrame:SetScript("OnEvent", function(self, event, itemID)
+        if panel:IsShown() and not itemInfoThrottleTimer then
+            itemInfoThrottleTimer = C_Timer.NewTimer(0.2, function()
+                itemInfoThrottleTimer = nil
+                if panel:IsShown() then
+                    UpdateResultsTable()
+                end
+            end)
+        end
+    end)
+
     panel.OnShow = function()
         RefreshListsView()
         RefreshActiveItemsView()
         UpdateScannerState()
+        UpdateResultsTable()
     end
 
     RefreshListsView()

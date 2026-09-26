@@ -226,7 +226,15 @@ local function NormalizeItemKey(itemKey)
     end
     if not itemID or itemID <= 0 then return nil, nil, nil end
     local dbKey = (itemSuffix and itemSuffix ~= 0) and string.format("p:%d:%d", itemID, itemSuffix) or tostring(itemID)
-    local normalizedKey = { itemID = itemID, itemLevel = 0, itemSuffix = itemSuffix, battlePetSpeciesID = 0 }
+    local normalizedKey = {
+        itemID = itemID,
+        itemLevel = (type(itemKey) == "table" and itemKey.itemLevel) or 0,
+        itemSuffix = itemSuffix,
+        battlePetSpeciesID = 0,
+        name = type(itemKey) == "table" and itemKey.name or nil,
+        icon = type(itemKey) == "table" and itemKey.icon or nil,
+        quality = type(itemKey) == "table" and itemKey.quality or nil,
+    }
     return dbKey, itemID, normalizedKey
 end
 MarketSync.NormalizeItemKey = NormalizeItemKey
@@ -316,6 +324,10 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         name, quality, ilvl, minLevel = cached.n, cached.r, cached.i, cached.m
         icon, classID, subClassID = cached.ic, cached.c, cached.s
     end
+    name = name or normalizedKey.name
+    icon = icon or normalizedKey.icon
+    quality = quality or normalizedKey.quality
+    ilvl = ilvl or normalizedKey.itemLevel
     local completeMetadata = name and quality ~= nil and ilvl ~= nil and classID ~= nil and icon ~= nil
     local attempted = isFullScan and S.FullScanMetadataAttempted
     local metadataFetched = false
@@ -338,16 +350,31 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         quality, ilvl, minLevel = resolvedQuality or quality, resolvedIlvl or ilvl, resolvedMinLevel or minLevel
         icon, classID, subClassID = resolvedIcon or icon, resolvedClassID or classID, resolvedSubClassID or subClassID
     end
-    if metadataFetched and name and MarketSyncDB then
+    if not icon and itemID then
+        if MarketSync.GetItemIcon then
+            icon = MarketSync.GetItemIcon(itemID)
+        end
+        if not icon and MarketSync.GetItemInfoInstant then
+            local _, _, _, _, instantIcon = MarketSync.GetItemInfoInstant(itemID)
+            icon = instantIcon
+        end
+        if not icon and GetItemIcon then
+            icon = GetItemIcon(itemID)
+        end
+    end
+    if not name and itemID and C_Item and C_Item.RequestLoadItemDataByID then
+        pcall(C_Item.RequestLoadItemDataByID, itemID)
+    end
+    if (metadataFetched or name or icon) and MarketSyncDB then
         MarketSyncDB.ItemInfoCache = cache or {}
         cached = cached or {}
-        cached.n = name
-        cached.r = quality or cached.r
-        cached.i = ilvl or cached.i
-        cached.m = minLevel or cached.m
-        cached.ic = icon or cached.ic
-        cached.c = classID or cached.c
-        cached.s = subClassID or cached.s
+        if name then cached.n = name end
+        if quality then cached.r = quality end
+        if ilvl then cached.i = ilvl end
+        if minLevel then cached.m = minLevel end
+        if icon then cached.ic = icon end
+        if classID then cached.c = classID end
+        if subClassID then cached.s = subClassID end
         MarketSyncDB.ItemInfoCache[itemID] = cached
     end
     local displayName = name
@@ -422,6 +449,53 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     end
 end
 MarketSync.RecordScanObservation = RecordScanObservation
+
+local function ResolveRecentResultsItem(targetItemID)
+    local updated = false
+    for _, res in ipairs(S.RecentResults) do
+        local id = res.itemID or (res.itemKey and res.itemKey.itemID)
+        if not targetItemID or id == targetItemID then
+            local lookup = (res.itemKey and res.itemKey.itemLink) or id
+            local rName, rLink, rQuality, _, _, _, _, _, _, rIcon
+            if MarketSync.GetItemInfo and lookup then
+                rName, rLink, rQuality, _, _, _, _, _, _, rIcon = MarketSync.GetItemInfo(lookup)
+            end
+            if not rName and MarketSync.GetItemInfo and id then
+                rName, rLink, rQuality, _, _, _, _, _, _, rIcon = MarketSync.GetItemInfo(id)
+            end
+            if not rIcon and id then
+                if MarketSync.GetItemIcon then
+                    rIcon = MarketSync.GetItemIcon(id)
+                end
+                if not rIcon and MarketSync.GetItemInfoInstant then
+                    rIcon = select(5, MarketSync.GetItemInfoInstant(id))
+                end
+            end
+            if rName and (not res.name or res.name:find("^Item #") or res.name ~= rName) then
+                res.name = rName
+                res.quality = rQuality or res.quality
+                updated = true
+            end
+            if rIcon and rIcon ~= 134400 and (not res.icon or res.icon == 134400 or res.icon ~= rIcon) then
+                res.icon = rIcon
+                updated = true
+            end
+            if rName and id and MarketSyncDB and MarketSyncDB.ItemInfoCache then
+                local c = MarketSyncDB.ItemInfoCache[id] or {}
+                c.n = rName
+                c.r = rQuality or c.r
+                c.ic = rIcon or c.ic
+                MarketSyncDB.ItemInfoCache[id] = c
+            end
+        end
+    end
+    if updated then
+        S.ResultsRevision = (S.ResultsRevision or 0) + 1
+        S.Notify()
+    end
+    return updated
+end
+S.ResolveRecentResultsItem = ResolveRecentResultsItem
 
 local function SummarizeSearchResults(key, isCommodityHint)
     local tries = isCommodityHint and { true, false } or { false, true }
@@ -750,8 +824,17 @@ pcall(eventFrame.RegisterEvent, eventFrame, "COMMODITY_SEARCH_RESULTS_ADDED")
 pcall(eventFrame.RegisterEvent, eventFrame, "AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 pcall(eventFrame.RegisterEvent, eventFrame, "REPLICATE_ITEM_LIST_UPDATE")
 pcall(eventFrame.RegisterEvent, eventFrame, "AUCTION_HOUSE_CLOSED")
+pcall(eventFrame.RegisterEvent, eventFrame, "GET_ITEM_INFO_RECEIVED")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "GET_ITEM_INFO_RECEIVED" then
+        local itemID = tonumber(arg1)
+        if itemID and S.ResolveRecentResultsItem then
+            S.ResolveRecentResultsItem(itemID)
+        end
+        return
+    end
+
     if event == "AUCTION_HOUSE_CLOSED" then
         if S.Active then
             S.Cancel("Auctioneer closed")
@@ -815,7 +898,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
                 C_Timer.After(1, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
             end
-            MarketSync.Debug("Scanner complete: " .. S.Status)
+            if S.ResolveRecentResultsItem then
+                S.ResolveRecentResultsItem()
+            end
             S.Notify()
         end
 
@@ -850,14 +935,17 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 local name, texture, count, qualityID, canUse, level, levelColHeader, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, bidderFullName, owner, ownerFullName, saleStatus, itemID = getInfoFunc(idx - 1)
                 local itemSuffix = 0
                 local itemLink
+                local itemName = (type(name) == "string" and name ~= "") and name or nil
                 if not itemID and type(name) == "table" and name.itemID then
                     local info = name
                     itemID = info.itemID
                     count = info.quantity or 1
                     buyoutPrice = info.buyoutAmount or 0
                     itemSuffix = tonumber(info.itemSuffix) or 0
+                    itemName = (type(info.name) == "string" and info.name ~= "") and info.name or nil
                 elseif type(name) == "table" then
                     itemSuffix = tonumber(name.itemSuffix) or 0
+                    itemName = (type(name.name) == "string" and name.name ~= "") and name.name or nil
                 end
 
                 if getLinkFunc then
@@ -882,7 +970,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                                 itemID = itemID,
                                 itemKey = {
                                     itemID = itemID,
-                                    itemLevel = 0,
+                                    name = itemName,
+                                    icon = texture,
+                                    quality = qualityID,
+                                    itemLevel = level or 0,
                                     itemSuffix = itemSuffix,
                                     battlePetSpeciesID = 0,
                                     itemLink = itemLink or GetVariantItemLink(itemID, itemSuffix),
@@ -892,6 +983,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                             }
                         else
                             existing.available = existing.available + count
+                            if not existing.itemKey.name and itemName then
+                                existing.itemKey.name = itemName
+                            end
+                            if not existing.itemKey.icon and texture then
+                                existing.itemKey.icon = texture
+                            end
+                            if (not existing.itemKey.quality or existing.itemKey.quality < 0) and qualityID then
+                                existing.itemKey.quality = qualityID
+                            end
                             if unitPrice < existing.unitPrice then
                                 existing.unitPrice = unitPrice
                                 existing.itemKey.itemLink = itemLink or existing.itemKey.itemLink

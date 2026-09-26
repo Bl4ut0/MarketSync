@@ -1190,6 +1190,27 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     local repaired = MarketSync.UpsertScanBucket("0:2s:1,0:3c:2", 0, 150, 3)
     assert(repaired == "0:" .. MarketSync.ToBase36(150) .. ":3",
       "Existing duplicate buckets must collapse to the latest point")
+
+    -- Test metadata preservation and dynamic resolution in RecentResults
+    local normKey = select(3, MarketSync.NormalizeItemKey({ itemID = 14568, name = "Bristlebark Boots", icon = 132219, quality = 2 }))
+    assert(normKey.name == "Bristlebark Boots", "NormalizeItemKey must preserve item name")
+    assert(normKey.icon == 132219, "NormalizeItemKey must preserve icon")
+    assert(normKey.quality == 2, "NormalizeItemKey must preserve quality")
+
+    -- Test S.ResolveRecentResultsItem
+    MarketSync.Scanner.RecentResults = {
+      { itemID = 14568, name = "Item #14568", icon = 134400, quality = 1, unitPrice = 10000, available = 1, time = time() }
+    }
+    MarketSyncDB.ItemInfoCache = { [14568] = { n = "Bristlebark Boots", ic = 132219, r = 2 } }
+    MarketSync.GetItemInfo = function(id)
+      if id == 14568 or id == "14568" then return "Bristlebark Boots", "link", 2, 23, 18, nil, nil, nil, nil, 132219 end
+      return nil
+    end
+    local resolved = MarketSync.Scanner.ResolveRecentResultsItem(14568)
+    assert(resolved == true, "ResolveRecentResultsItem should return true when updated")
+    assert(MarketSync.Scanner.RecentResults[1].name == "Bristlebark Boots", "RecentResults name should update from fallback to real name")
+    assert(MarketSync.Scanner.RecentResults[1].icon == 132219, "RecentResults icon should update from fallback to real icon")
+    assert(MarketSync.Scanner.RecentResults[1].quality == 2, "RecentResults quality should update to real quality")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Individual scan observation test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
