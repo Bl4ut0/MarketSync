@@ -364,6 +364,9 @@ test('UI_Main: Title Bar Sync Status renders clean dot indicators and updates sy
     assert(mf ~= nil, "MainFrame must be created")
     assert(mf.syncMonitor ~= nil, "MainFrame.syncMonitor must exist")
     assert(mf.syncButton ~= nil, "MainFrame.syncButton must exist")
+    assert(mf.syncButton.points[1][1] == "TOPRIGHT"
+      and mf.syncButton.points[1][3] == "TOPRIGHT",
+      "Network status must anchor in the title bar rather than to the template close button")
 
     -- Test Idle Status
     MarketSync.UpdateNetworkUI(0, 0, nil, 0, {})

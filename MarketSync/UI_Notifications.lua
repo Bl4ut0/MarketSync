@@ -135,131 +135,37 @@ local function StripBlizzardTextures(btn)
 end
 
 local function BuildScopeDropdown(frameName, parent, width, getValue, setValue)
-    local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate,BackdropTemplate")
-    local ddWidth = width or 100
-    local innerWidth = math.max(40, ddWidth - 36)
-    UIDropDownMenu_SetWidth(dd, innerWidth)
-
-    local left = _G[frameName.."Left"]
-    local mid = _G[frameName.."Middle"]
-    local right = _G[frameName.."Right"]
-    if left then left:Hide() end
-    if mid then mid:Hide() end
-    if right then right:Hide() end
-
-    dd:SetSize(ddWidth, 22)
-    dd:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    dd:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-    dd:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
-
-    local btn = _G[frameName.."Button"]
-    if btn then
-        btn:ClearAllPoints()
-        btn:SetPoint("RIGHT", dd, "RIGHT", -2, 0)
-    end
-    local txt = _G[frameName.."Text"]
-    if txt then
-        txt:ClearAllPoints()
-        txt:SetPoint("LEFT", dd, "LEFT", 8, 0)
-        txt:SetPoint("RIGHT", dd, "RIGHT", -22, 0)
-        txt:SetJustifyH("LEFT")
-        txt:SetTextColor(0.90, 0.85, 0.75)
-    end
-
-    UIDropDownMenu_Initialize(dd, function(self, level)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width or 100, 22)
+    local menu = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate")
+    menu:Hide()
+    button._menu = menu
+    UIDropDownMenu_Initialize(menu, function(self, level)
         for _, opt in ipairs(SCOPE_OPTIONS) do
             local info = UIDropDownMenu_CreateInfo()
             info.text = opt.label
             info.func = function()
                 setValue(opt.value)
-                UIDropDownMenu_SetText(dd, opt.label)
+                button:SetText(opt.label .. "  |cffffd700v|r")
             end
             UIDropDownMenu_AddButton(info, level)
         end
     end)
-    UIDropDownMenu_SetText(dd, ScopeLabel(getValue()))
-    return dd
+    button:SetText(ScopeLabel(getValue()) .. "  |cffffd700v|r")
+    button:SetScript("OnClick", function(self)
+        ToggleDropDownMenu(1, nil, menu, self, 0, 0)
+    end)
+    return button
+end
+
+local function SetDropdownLabel(button, label)
+    button:SetText(tostring(label or "") .. "  |cffffd700v|r")
 end
 
 local function StyleModernPillButton(btn, text, isGold)
     if not btn then return btn end
-    if type(text) == "boolean" and isGold == nil then
-        isGold = text
-        text = nil
-    end
-    StripBlizzardTextures(btn)
-    btn._isGold = isGold
-    if btn.SetBackdrop then
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = 1,
-            insets = { left = 1, right = 1, top = 1, bottom = 1 },
-        })
-        if isGold then
-            btn:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
-        else
-            btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
-        end
-    end
-    local fs = btn.GetFontString and btn:GetFontString()
-    if not fs and btn.CreateFontString and btn.SetFontString then
-        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("CENTER", 0, 0)
-        btn:SetFontString(fs)
-    end
-    if fs and fs.SetTextColor then
-        if isGold then
-            fs:SetTextColor(1.0, 0.92, 0.45)
-        else
-            fs:SetTextColor(0.85, 0.80, 0.70)
-        end
-    end
+    -- Use the same native button appearance and interactions as the sidecar.
     if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
-    if not btn._hookedPill and btn.HookScript then
-        btn._hookedPill = true
-        btn:HookScript("OnEnter", function(self)
-            StripBlizzardTextures(self)
-            if self.SetBackdropColor then
-                if self._isGold then
-                    self:SetBackdropColor(0.55, 0.42, 0.12, 1.0)
-                    self:SetBackdropBorderColor(1.0, 0.88, 0.35, 1.0)
-                else
-                    self:SetBackdropColor(0.22, 0.19, 0.14, 0.95)
-                    self:SetBackdropBorderColor(0.80, 0.65, 0.25, 0.95)
-                end
-            end
-            local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then s:SetTextColor(1.0, 0.95, 0.60) end
-        end)
-        btn:HookScript("OnLeave", function(self)
-            StripBlizzardTextures(self)
-            if self.SetBackdropColor then
-                if self._isGold then
-                    self:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
-                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
-                else
-                    self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
-                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
-                end
-            end
-            local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then
-                if self._isGold then
-                    s:SetTextColor(1.0, 0.92, 0.45)
-                else
-                    s:SetTextColor(0.85, 0.80, 0.70)
-                end
-            end
-        end)
-    end
     return btn
 end
 
@@ -781,39 +687,17 @@ function MarketSync.CreateNotificationsPanel(parent)
     importTitle:SetPoint("TOPLEFT", 10, -7)
     importTitle:SetText("|cffffd700Preferred List Import|r")
 
-    local importDropdown = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate,BackdropTemplate")
+    local importDropdown = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
     local ddWidth = LEFT_W - 20
-    local innerWidth = math.max(40, ddWidth - 36)
-    UIDropDownMenu_SetWidth(importDropdown, innerWidth)
-    local ddLeft = _G[parentPrefix .. "NotificationsImportDropdownLeft"]
-    local ddMid = _G[parentPrefix .. "NotificationsImportDropdownMiddle"]
-    local ddRight = _G[parentPrefix .. "NotificationsImportDropdownRight"]
-    if ddLeft then ddLeft:Hide() end
-    if ddMid then ddMid:Hide() end
-    if ddRight then ddRight:Hide() end
     importDropdown:SetSize(ddWidth, 22)
-    importDropdown:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    importDropdown:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-    importDropdown:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
-    local ddBtn = _G[parentPrefix .. "NotificationsImportDropdownButton"]
-    if ddBtn then
-        ddBtn:ClearAllPoints()
-        ddBtn:SetPoint("RIGHT", importDropdown, "RIGHT", -2, 0)
-    end
-    local ddTxt = _G[parentPrefix .. "NotificationsImportDropdownText"]
-    if ddTxt then
-        ddTxt:ClearAllPoints()
-        ddTxt:SetPoint("LEFT", importDropdown, "LEFT", 8, 0)
-        ddTxt:SetPoint("RIGHT", importDropdown, "RIGHT", -22, 0)
-        ddTxt:SetJustifyH("LEFT")
-        ddTxt:SetTextColor(0.90, 0.85, 0.75)
-    end
+    local importMenu = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
+    importMenu:Hide()
+    importDropdown._menu = importMenu
     importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", 10, -25)
+    SetDropdownLabel(importDropdown, "All Lists")
+    importDropdown:SetScript("OnClick", function(self)
+        ToggleDropDownMenu(1, nil, importMenu, self, 0, 0)
+    end)
 
     local discountLabel = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     discountLabel:SetPoint("TOPLEFT", 10, -54)
@@ -867,22 +751,28 @@ function MarketSync.CreateNotificationsPanel(parent)
     StyleModernPillButton(btnDoImport, "Import to Watchlist", true)
 
     local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importStatusText:SetPoint("TOPLEFT", 10, -104)
+    importStatusText:SetPoint("TOPLEFT", 10, -105)
+    importStatusText:SetPoint("RIGHT", importBox, "RIGHT", -10, 0)
+    importStatusText:SetJustifyH("LEFT")
+    if importStatusText.SetWordWrap then importStatusText:SetWordWrap(false) end
     importStatusText:SetText("")
 
     local importDesc = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    if isEmbedded then
-        importDesc:SetPoint("TOPLEFT", 10, -106)
-        importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
-    else
-        importDesc:SetPoint("TOPLEFT", 10, -104)
-        importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
-    end
+    importDesc:SetPoint("TOPLEFT", 10, -126)
+    importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
     importDesc:SetJustifyH("LEFT")
     if importDesc.SetJustifyV then
         importDesc:SetJustifyV("TOP")
     end
-    importDesc:SetText("|cff777777Populates watchlist price triggers from your favorite lists with configured discounts below market price.|r")
+    importDesc:SetText("|cff777777Add selected list items as price alerts.|r")
+    importDesc:Hide()
+    btnDoImport:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Import to Watchlist", 1, 0.82, 0)
+        GameTooltip:AddLine("Add selected list items as price alerts using the chosen discount.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnDoImport:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- =========================================================
     -- RIGHT COLUMN: ENCLOSING RESULTS BOX (Height 338)
@@ -1216,7 +1106,7 @@ function MarketSync.CreateNotificationsPanel(parent)
                                 SetEditorItem(req.matchValue or req.displayName or row.itemID)
                                 SetThresholdCopper(req.thresholdCopper)
                                 panel.editorScope = req.scope or "all"
-                                UIDropDownMenu_SetText(scopeDropdown, ScopeLabel(panel.editorScope))
+                                SetDropdownLabel(scopeDropdown, ScopeLabel(panel.editorScope))
                                 urgentCheck:SetChecked(req.urgent == true)
                             end
                         },
@@ -1281,7 +1171,7 @@ function MarketSync.CreateNotificationsPanel(parent)
                 SetEditorItem(row.request.matchValue or row.request.displayName or row.itemID)
                 SetThresholdCopper(row.request.thresholdCopper)
                 panel.editorScope = row.request.scope or "all"
-                UIDropDownMenu_SetText(scopeDropdown, ScopeLabel(panel.editorScope))
+                SetDropdownLabel(scopeDropdown, ScopeLabel(panel.editorScope))
                 urgentCheck:SetChecked(row.request.urgent == true)
             elseif row.historyEntry then
                 SetEditorItem(row.historyEntry.itemLink or row.historyEntry.itemID or row.historyEntry.itemName)
@@ -1454,7 +1344,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         targetBox:SetText("")
         SetThresholdCopper(0)
         panel.editorScope = "all"
-        UIDropDownMenu_SetText(scopeDropdown, "All Scopes")
+        SetDropdownLabel(scopeDropdown, "All Scopes")
         if panel.RefreshUndercutButtons then panel.RefreshUndercutButtons() end
         urgentCheck:SetChecked(false)
         btnSave:SetText("Add Alert")
@@ -1542,12 +1432,12 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     RefreshImportDropdown = function()
         local lists = MarketSync.GetImportableListNames and MarketSync.GetImportableListNames() or {}
-        UIDropDownMenu_Initialize(importDropdown, function(self, level)
+        UIDropDownMenu_Initialize(importMenu, function(self, level)
             local infoAll = UIDropDownMenu_CreateInfo()
             infoAll.text = "All Lists"
             infoAll.func = function()
                 panel.importSelectedList = "__ALL__"
-                UIDropDownMenu_SetText(importDropdown, "All Lists")
+                SetDropdownLabel(importDropdown, "All Lists")
             end
             UIDropDownMenu_AddButton(infoAll, level)
 
@@ -1556,12 +1446,12 @@ function MarketSync.CreateNotificationsPanel(parent)
                 info.text = item.label or item.name
                 info.func = function()
                     panel.importSelectedList = item.name
-                    UIDropDownMenu_SetText(importDropdown, item.label or item.name)
+                    SetDropdownLabel(importDropdown, item.label or item.name)
                 end
                 UIDropDownMenu_AddButton(info, level)
             end
         end)
-        UIDropDownMenu_SetText(importDropdown, panel.importSelectedList == "__ALL__" and "All Lists" or panel.importSelectedList)
+        SetDropdownLabel(importDropdown, panel.importSelectedList == "__ALL__" and "All Lists" or panel.importSelectedList)
     end
 
     btnDoImport:SetScript("OnClick", function()

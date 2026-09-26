@@ -1758,6 +1758,11 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   const mockEnv = `
     MarketSync = MarketSync or {}
     MarketSyncDB = {}
+    createdFrames = {}
+    lastOpenedMenu = nil
+    ToggleDropDownMenu = function(level, value, menu, anchor)
+      lastOpenedMenu = { menu = menu, anchor = anchor }
+    end
     UIDropDownMenu_SetWidth = function() end
     UIDropDownMenu_Initialize = function() end
     UIDropDownMenu_SetText = function() end
@@ -1768,6 +1773,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
       local f = {
         name = name,
         parent = parent,
+        template = template,
         scripts = {},
         points = {},
         Show = function(self) self.shown = true end,
@@ -1815,6 +1821,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
       if frameType == "CheckButton" or (template and type(template) == "string" and template:find("CheckButton")) then
         f.text = f:CreateFontString()
       end
+      table.insert(createdFrames, f)
       return f
     end
 
@@ -1857,6 +1864,20 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     local alertsMain = MarketSync.CreateNotificationsPanel(MarketSync.MainFrame)
     assert(alertsMain.rows[1].width == 576, "MainFrame alerts row width should be 576, got: " .. tostring(alertsMain.rows[1].width))
     assert(#alertsMain.rows == 9, "MainFrame alerts rows should be 9, got: " .. tostring(#alertsMain.rows))
+
+    local menuButtons = 0
+    for _, frame in ipairs(createdFrames) do
+      if frame._menu then
+        menuButtons = menuButtons + 1
+        assert(frame.template and frame.template:find("UIPanelButtonTemplate"),
+          "Processing and Alerts dropdowns should match native sidecar buttons")
+        assert(frame.scripts.OnClick, "Dropdown button must have a click event")
+        frame.scripts.OnClick(frame)
+        assert(lastOpenedMenu and lastOpenedMenu.menu == frame._menu
+          and lastOpenedMenu.anchor == frame, "Dropdown click must open its own menu")
+      end
+    end
+    assert(menuButtons >= 5, "Expected Processing and Alerts menu buttons")
 
     -- Embedded AH alerts panel
     local ahAlertsContainer = CreateFrame("Frame", "AHAlertsContainer")

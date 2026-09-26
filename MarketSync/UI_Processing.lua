@@ -79,54 +79,22 @@ local function FormatProcessType(processType)
 end
 
 local function BuildDropdown(frameName, parent, width, initFunc)
-    local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate,BackdropTemplate")
-    local ddWidth = width or 120
-    local innerWidth = math.max(40, ddWidth - 36)
-    UIDropDownMenu_SetWidth(dd, innerWidth)
-    dd._initFunc = initFunc
-    UIDropDownMenu_Initialize(dd, initFunc)
+    -- Match the sidecar: a native AH button opens a hidden Blizzard menu.
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width or 120, 22)
+    local menu = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate")
+    menu:Hide()
+    button._menu = menu
+    button._initFunc = initFunc
+    UIDropDownMenu_Initialize(menu, initFunc)
+    button:SetScript("OnClick", function(self)
+        ToggleDropDownMenu(1, nil, menu, self, 0, 0)
+    end)
+    return button
+end
 
-    -- Reskin to sleek AH dark style
-    local left = _G[frameName.."Left"]
-    local mid = _G[frameName.."Middle"]
-    local right = _G[frameName.."Right"]
-    if left then left:Hide() end
-    if mid then mid:Hide() end
-    if right then right:Hide() end
-
-    -- Explicitly size the backdrop container frame to match width exactly
-    dd:SetSize(ddWidth, 22)
-
-    dd:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    dd:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-    dd:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
-
-    local btn = _G[frameName.."Button"]
-    if btn then
-        btn:ClearAllPoints()
-        btn:SetPoint("RIGHT", dd, "RIGHT", -2, 0)
-        btn:SetSize(18, 18)
-    end
-
-    local txt = _G[frameName.."Text"]
-    if txt then
-        txt:ClearAllPoints()
-        txt:SetPoint("LEFT", dd, "LEFT", 8, 0)
-        if btn then
-            txt:SetPoint("RIGHT", btn, "LEFT", -4, 0)
-        else
-            txt:SetPoint("RIGHT", dd, "RIGHT", -20, 0)
-        end
-        txt:SetJustifyH("LEFT")
-        if txt.SetWordWrap then txt:SetWordWrap(false) end
-    end
-
-    return dd
+local function SetDropdownLabel(button, label)
+    button:SetText(tostring(label or "") .. "  |cffffd700v|r")
 end
 
 local function ReadNumber(editBox, defaultVal)
@@ -339,78 +307,9 @@ end
 
 local function StyleModernPillButton(btn, text, isGold)
     if not btn then return btn end
-    StripBlizzardTextures(btn)
-    if type(text) == "boolean" and isGold == nil then
-        isGold = text
-        text = nil
-    end
-    if btn.SetBackdrop then
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = 1,
-            insets = { left = 1, right = 1, top = 1, bottom = 1 },
-        })
-        if isGold then
-            btn:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
-        else
-            btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
-        end
-    end
-    local fs = btn.GetFontString and btn:GetFontString()
-    if not fs and btn.CreateFontString and btn.SetFontString then
-        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("CENTER", 0, 0)
-        btn:SetFontString(fs)
-    end
-    if fs and fs.SetTextColor then
-        if isGold then
-            fs:SetTextColor(1.0, 0.92, 0.45)
-        else
-            fs:SetTextColor(0.85, 0.80, 0.70)
-        end
-    end
+    -- Keep the native Auction House button art and hover/click behavior,
+    -- matching the shopping-list sidecar rather than drawing grey pills.
     if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
-    btn._isGold = isGold
-    if not btn._hookedPill and btn.HookScript then
-        btn._hookedPill = true
-        btn:HookScript("OnEnter", function(self)
-            StripBlizzardTextures(self)
-            if self.SetBackdropColor then
-                if self._isGold then
-                    self:SetBackdropColor(0.50, 0.38, 0.12, 1.0)
-                    self:SetBackdropBorderColor(1.0, 0.88, 0.35, 1.0)
-                else
-                    self:SetBackdropColor(0.22, 0.19, 0.15, 0.98)
-                    self:SetBackdropBorderColor(0.80, 0.65, 0.25, 0.95)
-                end
-            end
-            local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then s:SetTextColor(1.0, 0.95, 0.60) end
-        end)
-        btn:HookScript("OnLeave", function(self)
-            StripBlizzardTextures(self)
-            if self.SetBackdropColor then
-                if self._isGold then
-                    self:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
-                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
-                else
-                    self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
-                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
-                end
-            end
-            local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then
-                if self._isGold then
-                    s:SetTextColor(1.0, 0.92, 0.45)
-                else
-                    s:SetTextColor(0.85, 0.80, 0.70)
-                end
-            end
-        end)
-    end
     return btn
 end
 
@@ -665,7 +564,7 @@ function MarketSync.CreateProcessingPanel(parent)
         resetInfo.func = function()
             panel.selectedTargetID = nil
             targetInputBox:SetText("")
-            UIDropDownMenu_SetText(targetDropdown, "Select material...")
+            SetDropdownLabel(targetDropdown, "Select material...")
         end
         UIDropDownMenu_AddButton(resetInfo, level)
 
@@ -681,19 +580,20 @@ function MarketSync.CreateProcessingPanel(parent)
             opt.func = function()
                 panel.selectedTargetID = t.itemID
                 targetInputBox:SetText(t.name or ("Item #" .. tostring(t.itemID)))
-                UIDropDownMenu_SetText(targetDropdown, t.name or ("Item #" .. tostring(t.itemID)))
+                SetDropdownLabel(targetDropdown, Truncate(t.name or ("Item #" .. tostring(t.itemID)), 16))
             end
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
     targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -64)
+    SetDropdownLabel(targetDropdown, "Select material...")
 
     local targetDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    targetDesc:SetPoint("TOPLEFT", 8, -116)
+    targetDesc:SetPoint("TOPLEFT", 8, -145)
     targetDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     targetDesc:SetJustifyH("LEFT")
     if targetDesc.SetJustifyV then targetDesc:SetJustifyV("TOP") end
-    targetDesc:SetText("|cff777777Calculates arbitrage profit from buying this material and processing it into secondary yields.|r")
+    targetDesc:SetText("|cff777777Compare this material's cost with its processing yields.|r")
 
     local processLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     processLabel:SetPoint("TOPLEFT", 8, -26)
@@ -710,20 +610,20 @@ function MarketSync.CreateProcessingPanel(parent)
             opt.text = p
             opt.func = function()
                 panel.selectedProcess = (p == "ALL") and nil or p
-                UIDropDownMenu_SetText(processDropdown, p)
+                SetDropdownLabel(processDropdown, p)
             end
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
     processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
-    UIDropDownMenu_SetText(processDropdown, "ALL")
+    SetDropdownLabel(processDropdown, "ALL")
 
     local processDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    processDesc:SetPoint("TOPLEFT", 8, -94)
+    processDesc:SetPoint("TOPLEFT", 8, -126)
     processDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     processDesc:SetJustifyH("LEFT")
     if processDesc.SetJustifyV then processDesc:SetJustifyV("TOP") end
-    processDesc:SetText("|cff777777Evaluates all auction house ores, herbs, and gear for mass processing profit.|r")
+    processDesc:SetText("|cff777777Compare AH materials by processing profit.|r")
 
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
     panel.selectedProfession = "ALL"
@@ -742,7 +642,7 @@ function MarketSync.CreateProcessingPanel(parent)
             opt.text = p
             opt.func = function()
                 panel.selectedProfession = p
-                UIDropDownMenu_SetText(professionDropdown, p)
+                SetDropdownLabel(professionDropdown, p)
                 if panel.activeMode == "craft" and panel:IsShown() and RunActiveMode then
                     RunActiveMode()
                 end
@@ -751,22 +651,22 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end)
     professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
-    UIDropDownMenu_SetText(professionDropdown, "ALL")
+    SetDropdownLabel(professionDropdown, "ALL")
 
     local craftDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    craftDesc:SetPoint("TOPLEFT", 8, -94)
+    craftDesc:SetPoint("TOPLEFT", 8, -126)
     craftDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     craftDesc:SetJustifyH("LEFT")
     if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
-    craftDesc:SetText("|cff777777Calculates profit for all recipes in your known profession against current auction prices.|r")
+    craftDesc:SetText("|cff777777Compare known recipes with current AH prices.|r")
 
     local marginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    marginLabel:SetPoint("TOPLEFT", 8, -72)
+    marginLabel:SetPoint("TOPLEFT", 8, -94)
     marginLabel:SetText("Desired Margin %")
 
     local marginBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
     marginBox:SetSize(34, 22)
-    marginBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -90)
+    marginBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -112)
     marginBox:SetAutoFocus(false)
     marginBox:SetNumeric(true)
     marginBox:SetText("10")
@@ -789,12 +689,12 @@ function MarketSync.CreateProcessingPanel(parent)
     marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
 
     local minMarginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    minMarginLabel:SetPoint("TOPLEFT", 8, -72)
+    minMarginLabel:SetPoint("TOPLEFT", 8, -74)
     minMarginLabel:SetText("Min Craft Profit")
 
     local minMarginGoldBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
     minMarginGoldBox:SetSize(34, 22)
-    minMarginGoldBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -90)
+    minMarginGoldBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -92)
     minMarginGoldBox:SetAutoFocus(false)
     minMarginGoldBox:SetNumeric(true)
     minMarginGoldBox:SetText("5")
@@ -1234,7 +1134,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local btnResyncProf = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
     btnResyncProf:SetSize(LEFT_W - 16, 20)
-    btnResyncProf:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -145)
+    btnResyncProf:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -160)
     btnResyncProf:SetText("Resync Profs")
     btnResyncProf:Hide()
     btnResyncProf:SetScript("OnEnter", function(self)
@@ -1377,16 +1277,16 @@ function MarketSync.CreateProcessingPanel(parent)
         if panel.selectedTargetID then
             local id = tonumber(panel.selectedTargetID)
             local targetText = FindTargetName(id) or ("Item " .. tostring(id))
-            UIDropDownMenu_SetText(targetDropdown, Truncate(targetText, 18))
+            SetDropdownLabel(targetDropdown, Truncate(targetText, 16))
         else
-            UIDropDownMenu_SetText(targetDropdown, "Select material...")
+            SetDropdownLabel(targetDropdown, "Select material...")
         end
 
         if panel.selectedProcess and not IsSupportedProcessType(panel.selectedProcess) then
             panel.selectedProcess = nil
         end
-        UIDropDownMenu_SetText(processDropdown, panel.selectedProcess or "ALL")
-        UIDropDownMenu_SetText(professionDropdown, panel.selectedProfession or "No professions")
+        SetDropdownLabel(processDropdown, panel.selectedProcess or "ALL")
+        SetDropdownLabel(professionDropdown, panel.selectedProfession or "No professions")
     end
 
     local function RefreshProfessionOptions()
@@ -1410,9 +1310,9 @@ function MarketSync.CreateProcessingPanel(parent)
         end
 
         if professionDropdown and professionDropdown._initFunc then
-            UIDropDownMenu_Initialize(professionDropdown, professionDropdown._initFunc)
+            UIDropDownMenu_Initialize(professionDropdown._menu, professionDropdown._initFunc)
         end
-        UIDropDownMenu_SetText(professionDropdown, panel.selectedProfession or "No professions")
+        SetDropdownLabel(professionDropdown, panel.selectedProfession or "No professions")
     end
 
     function panel:RefreshModeControls()
@@ -1433,12 +1333,6 @@ function MarketSync.CreateProcessingPanel(parent)
         SetControlVisible(professionDropdown, isCraft)
         SetControlVisible(craftDesc, isCraft)
         SetControlVisible(btnResyncProf, isCraft)
-
-        if isTarget then
-            marginLabel:SetPoint("TOPLEFT", 8, -94)
-        else
-            marginLabel:SetPoint("TOPLEFT", 8, -74)
-        end
 
         SetControlVisible(marginLabel, (isTarget or isProcess))
         SetControlVisible(marginBox, (isTarget or isProcess))
@@ -2355,10 +2249,10 @@ function MarketSync.CreateProcessingPanel(parent)
         RefreshProfessionOptions()
 
         if targetDropdown and targetDropdown._initFunc then
-            UIDropDownMenu_Initialize(targetDropdown, targetDropdown._initFunc)
+            UIDropDownMenu_Initialize(targetDropdown._menu, targetDropdown._initFunc)
         end
         if processDropdown and processDropdown._initFunc then
-            UIDropDownMenu_Initialize(processDropdown, processDropdown._initFunc)
+            UIDropDownMenu_Initialize(processDropdown._menu, processDropdown._initFunc)
         end
 
         RefreshModeButtons()
