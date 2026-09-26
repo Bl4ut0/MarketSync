@@ -1364,6 +1364,10 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
         SetBackdrop = function() end,
         SetBackdropColor = function() end,
         SetBackdropBorderColor = function() end,
+        SetFrameStrata = function() end,
+        SetFrameLevel = function() end,
+        SetMovable = function() end,
+        RegisterForDrag = function() end,
         SetPortraitToUnit = function() end,
         CreateTexture = function(self)
           return {
@@ -1779,6 +1783,8 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   const mockEnv = `
     MarketSync = MarketSync or {}
     MarketSyncDB = {}
+    UIParent = {}
+    C_Timer = { After = function() end }
     createdFrames = {}
     lastOpenedMenu = nil
     ToggleDropDownMenu = function(level, value, menu, anchor)
@@ -1808,6 +1814,10 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         SetBackdrop = function() end,
         SetBackdropColor = function() end,
         SetBackdropBorderColor = function() end,
+        SetFrameStrata = function() end,
+        SetFrameLevel = function() end,
+        SetMovable = function() end,
+        RegisterForDrag = function() end,
         GetWidth = function(self) return self.width or 0 end,
         GetHeight = function(self) return self.height or 0 end,
         SetAutoFocus = function() end,
@@ -1908,6 +1918,50 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(#alertsAH.rows == 12, "Embedded AH alerts rows should be 12, got: " .. tostring(#alertsAH.rows))
     -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
     assert(198 + alertsAH.rows[1].width <= 756, "Alerts table must fit inside AH width <= 756px")
+
+    -- List import opens a draft editor and only writes on confirmation.
+    local saved = {}
+    MarketSync.GetNotificationImportCandidates = function()
+      return {{ itemID = 42, matchType = "itemID", matchValue = 42,
+        displayName = "Test Item", marketPrice = 10000, thresholdCopper = 9000,
+        scope = "main", urgent = true, enabled = true, selected = true,
+        listName = "Consumables" }}
+    end
+    MarketSync.UpsertNotificationRequest = function(request)
+      table.insert(saved, request)
+      return request
+    end
+    local review
+    for _, frame in ipairs(createdFrames) do
+      if frame.text == "Review List Alerts..." then review = frame; break end
+    end
+    assert(review and review.scripts.OnClick, "Bulk import review button missing")
+    review.scripts.OnClick(review)
+    assert(#saved == 0, "Review should not save alerts")
+    local popup, save, cancel
+    for _, frame in ipairs(createdFrames) do
+      if frame.name == "MarketSyncBulkAlertImportFrame" then popup = frame end
+      if frame.text == "Import Selected" then save = frame end
+      if frame.text == "Cancel" and frame.parent == popup then cancel = frame end
+    end
+    assert(popup and popup.shown and save, "Bulk import popup did not open")
+    assert(popup.rows[1].item.displayName == "Test Item", "Bulk import row missing item")
+    popup.rows[1].gold:SetText("2")
+    popup.rows[1].silver:SetText("0")
+    popup.rows[1].copper:SetText("0")
+    popup.rows[1].gold.scripts.OnTextChanged()
+    save.scripts.OnClick(save)
+    assert(#saved == 1 and saved[1].thresholdCopper == 20000,
+      "Bulk import should save edited price only on confirmation")
+    assert(saved[1].scope == "main" and saved[1].urgent == true and saved[1].enabled == true,
+      "Bulk import must retain editor options")
+    review.scripts.OnClick(review)
+    for _, frame in ipairs(createdFrames) do
+      if frame.text == "Cancel" and frame.parent == popup then cancel = frame; break end
+    end
+    assert(cancel, "Bulk import cancel button missing")
+    cancel.scripts.OnClick(cancel)
+    assert(#saved == 1, "Cancel should not save alerts")
 
     -- Standalone MainFrame analytics panel
     local analyticsMain = MarketSync.CreateAnalyticsPanel(MarketSync.MainFrame)

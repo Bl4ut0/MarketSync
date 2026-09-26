@@ -662,6 +662,93 @@ local function SplitImportedSearchEntries(rawEntry)
     return out
 end
 
+-- Build a read-only draft for the bulk alert editor. Nothing is saved until
+-- the user explicitly confirms the preview window.
+function MarketSync.GetNotificationImportCandidates(listName, listSource, discountPct)
+    local candidates, seen = {}, {}
+    local pct = math.max(0, math.min(100, tonumber(discountPct) or 10))
+    local specs = {}
+    if not listName or listName == "__ALL__" then
+        specs = MarketSync.GetImportableListNames()
+    else
+        specs[1] = { name = listName, source = listSource or "favorites" }
+    end
+
+    local function AddCandidate(itemID, displayName, sourceName, sourceType, maxPrice, quantityHint)
+        itemID = tonumber(itemID)
+        local matchType = itemID and "itemID" or "name"
+        local matchValue = itemID or tostring(displayName or ""):lower()
+        if matchValue == "" then return end
+        local identity = matchType .. ":" .. tostring(matchValue)
+        if seen[identity] then return end
+        seen[identity] = true
+
+        local marketPrice = MarketSync.GetAuctionPrice
+            and MarketSync.GetAuctionPrice(itemID or displayName) or nil
+        marketPrice = tonumber(marketPrice)
+        if not marketPrice or marketPrice <= 0 then marketPrice = nil end
+        local threshold = tonumber(maxPrice)
+        if not threshold or threshold <= 0 then
+            threshold = marketPrice and math.floor(marketPrice * (100 - pct) / 100) or 0
+        end
+        local existing
+        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+        for _, request in pairs((realmDB and realmDB.NotificationRequests) or {}) do
+            if request.matchType == matchType and tostring(request.matchValue) == tostring(matchValue) then
+                existing = request
+                break
+            end
+        end
+        local resolvedThreshold = existing and tonumber(existing.thresholdCopper)
+            or math.max(0, math.floor(threshold))
+        candidates[#candidates + 1] = {
+            itemID = itemID,
+            matchType = matchType,
+            matchValue = matchValue,
+            displayName = tostring(displayName or (itemID and ("Item " .. itemID)) or matchValue),
+            marketPrice = marketPrice,
+            thresholdCopper = resolvedThreshold,
+            scope = existing and existing.scope or "all",
+            urgent = existing and existing.urgent == true or false,
+            enabled = existing and existing.enabled ~= false or (not existing and resolvedThreshold > 0),
+            selected = resolvedThreshold > 0,
+            requestID = existing and existing.id or nil,
+            listName = sourceName,
+            listSource = sourceType,
+            quantityHint = quantityHint,
+        }
+    end
+
+    for _, spec in ipairs(specs) do
+        if spec.source == "favorites" then
+            local list = MarketSyncDB and MarketSyncDB.Favorites and MarketSyncDB.Favorites[spec.name]
+            for _, itemID in ipairs(list or {}) do
+                local name = MarketSync.GetItemInfo and MarketSync.GetItemInfo(itemID)
+                AddCandidate(itemID, name, spec.name, "favorites")
+            end
+        elseif spec.source == "auctionator" and Auctionator and Auctionator.API and Auctionator.API.v1 then
+            local api = Auctionator.API.v1
+            local ok, entries = pcall(api.GetShoppingListItems, ADDON_CALLER_ID, spec.name)
+            if ok and type(entries) == "table" then
+                for _, raw in ipairs(entries) do
+                    for _, entry in ipairs(SplitImportedSearchEntries(raw)) do
+                        local converted, term = pcall(api.ConvertFromSearchString, ADDON_CALLER_ID, entry)
+                        if converted and type(term) == "table" and type(term.searchString) == "string" then
+                            local name = term.searchString:gsub('^"(.*)"$', "%1")
+                            local itemID = MarketSync.ResolveItemID and MarketSync.ResolveItemID(name)
+                            AddCandidate(itemID, name, spec.name, "auctionator", term.maxPrice, term.quantity)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    table.sort(candidates, function(a, b)
+        return a.displayName:lower() < b.displayName:lower()
+    end)
+    return candidates
+end
+
 function MarketSync.ImportNotificationRequestsFromAuctionator(listNames, options)
     options = options or {}
     if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then

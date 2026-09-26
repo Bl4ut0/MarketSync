@@ -232,6 +232,278 @@ end
 -- =============================================================
 -- MAIN PANEL CREATION
 -- =============================================================
+local bulkImportPopup
+local BULK_ROWS_PER_PAGE = 6
+
+local function ShowBulkImportPopup(listLabel, candidates, onSaved)
+    if not bulkImportPopup then
+        local popup = CreateFrame("Frame", "MarketSyncBulkAlertImportFrame", UIParent, "BackdropTemplate")
+        popup:SetSize(820, 490)
+        popup:SetPoint("CENTER", UIParent, "CENTER", 0, 25)
+        popup:SetFrameStrata("DIALOG")
+        popup:SetFrameLevel(200)
+        popup:SetMovable(true)
+        popup:EnableMouse(true)
+        popup:RegisterForDrag("LeftButton")
+        popup:SetScript("OnDragStart", popup.StartMoving)
+        popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
+        popup:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        popup:SetBackdropColor(0.055, 0.045, 0.035, 0.98)
+        popup:SetBackdropBorderColor(0.65, 0.50, 0.18, 1)
+        if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(popup) end
+
+        local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("TOP", popup, "TOP", 0, -14)
+        title:SetText("Mass Import Price Alerts")
+        local close = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -5, -5)
+        close:SetScript("OnClick", function() popup:Hide() end)
+
+        popup.listText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        popup.listText:SetPoint("TOPLEFT", 18, -38)
+        popup.listText:SetPoint("RIGHT", popup, "RIGHT", -215, 0)
+        popup.listText:SetJustifyH("LEFT")
+
+        local function PresetAll(multiplier)
+            for _, item in ipairs(popup.items or {}) do
+                if item.marketPrice and item.marketPrice > 0 then
+                    item.thresholdCopper = math.floor(item.marketPrice * multiplier)
+                end
+            end
+            popup:RefreshRows()
+        end
+        local undercut = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+        undercut:SetSize(92, 22)
+        undercut:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -108, -34)
+        undercut:SetText("Discount All")
+        undercut:SetScript("OnClick", function()
+            local pct = (MarketSyncDB and tonumber(MarketSyncDB.AlertUndercutPct)) or 10
+            PresetAll(math.max(0, 1 - pct / 100))
+        end)
+        local market = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+        market:SetSize(92, 22)
+        market:SetPoint("LEFT", undercut, "RIGHT", 4, 0)
+        market:SetText("Market All")
+        market:SetScript("OnClick", function() PresetAll(1) end)
+
+        local headers = {
+            { "Import / Item", 20 }, { "Market", 268 }, { "Alert Below (g / s / c)", 365 },
+            { "Scope", 514 }, { "Urgent", 663 }, { "Enabled", 746 },
+        }
+        for _, spec in ipairs(headers) do
+            local label = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            label:SetPoint("TOPLEFT", popup, "TOPLEFT", spec[2], -73)
+            label:SetText(spec[1])
+        end
+
+        popup.rows = {}
+        for i = 1, BULK_ROWS_PER_PAGE do
+            local row = CreateFrame("Frame", nil, popup)
+            row:SetSize(784, 49)
+            row:SetPoint("TOPLEFT", popup, "TOPLEFT", 18, -94 - (i - 1) * 50)
+            if i % 2 == 0 then
+                local stripe = row:CreateTexture(nil, "BACKGROUND")
+                stripe:SetAllPoints()
+                stripe:SetColorTexture(1, 1, 1, 0.035)
+            end
+
+            row.select = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            row.select:SetSize(20, 20)
+            row.select:SetPoint("LEFT", row, "LEFT", 0, 0)
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(20, 20)
+            row.icon:SetPoint("LEFT", row, "LEFT", 25, 0)
+            row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row.name:SetPoint("LEFT", row, "LEFT", 52, 0)
+            row.name:SetWidth(184)
+            row.name:SetJustifyH("LEFT")
+            if row.name.SetWordWrap then row.name:SetWordWrap(false) end
+            row.market = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row.market:SetPoint("LEFT", row, "LEFT", 250, 0)
+            row.market:SetWidth(88)
+            row.market:SetJustifyH("LEFT")
+
+            local function CoinBox(x, width, suffix)
+                local box = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+                box:SetSize(width, 20)
+                box:SetPoint("LEFT", row, "LEFT", x, 0)
+                box:SetAutoFocus(false)
+                box:SetNumeric(true)
+                local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                label:SetPoint("LEFT", box, "RIGHT", 2, 0)
+                label:SetText(suffix)
+                return box
+            end
+            row.gold = CoinBox(345, 44, "g")
+            row.silver = CoinBox(400, 28, "s")
+            row.copper = CoinBox(440, 28, "c")
+            local function SaveThreshold()
+                if popup.updatingRows or not row.item then return end
+                local g = tonumber(row.gold:GetText()) or 0
+                local s = tonumber(row.silver:GetText()) or 0
+                local c = tonumber(row.copper:GetText()) or 0
+                row.item.thresholdCopper = math.floor(g * 10000 + s * 100 + c)
+            end
+            for _, box in ipairs({ row.gold, row.silver, row.copper }) do
+                box:SetScript("OnTextChanged", SaveThreshold)
+                box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); SaveThreshold() end)
+            end
+
+            row.scope = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            row.scope:SetSize(134, 22)
+            row.scope:SetPoint("LEFT", row, "LEFT", 490, 0)
+            local scopeMenu = CreateFrame("Frame", "MarketSyncBulkAlertScope" .. i, row, "UIDropDownMenuTemplate")
+            scopeMenu:Hide()
+            UIDropDownMenu_Initialize(scopeMenu, function(_, level)
+                for _, option in ipairs(SCOPE_OPTIONS) do
+                    local info = UIDropDownMenu_CreateInfo()
+                    info.text = option.label
+                    info.checked = row.item and row.item.scope == option.value
+                    info.func = function()
+                        if row.item then row.item.scope = option.value end
+                        SetDropdownLabel(row.scope, option.label)
+                    end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end)
+            row.scope:SetScript("OnClick", function(self)
+                ToggleDropDownMenu(1, nil, scopeMenu, self, 0, 0)
+            end)
+            row.urgent = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            row.urgent:SetSize(20, 20)
+            row.urgent:SetPoint("LEFT", row, "LEFT", 644, 0)
+            row.enabled = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            row.enabled:SetSize(20, 20)
+            row.enabled:SetPoint("LEFT", row, "LEFT", 726, 0)
+            row.select:SetScript("OnClick", function(self)
+                if row.item then row.item.selected = self:GetChecked() and true or false end
+            end)
+            row.urgent:SetScript("OnClick", function(self)
+                if row.item then row.item.urgent = self:GetChecked() and true or false end
+            end)
+            row.enabled:SetScript("OnClick", function(self)
+                if row.item then row.item.enabled = self:GetChecked() and true or false end
+            end)
+            popup.rows[i] = row
+        end
+
+        popup.pageText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        popup.pageText:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", 82, 49)
+        local prev = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+        prev:SetSize(52, 22)
+        prev:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", 18, 42)
+        prev:SetText("< Prev")
+        prev:SetScript("OnClick", function() popup.page = math.max(0, popup.page - 1); popup:RefreshRows() end)
+        local next = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+        next:SetSize(52, 22)
+        next:SetPoint("LEFT", popup.pageText, "RIGHT", 8, -1)
+        next:SetText("Next >")
+        next:SetScript("OnClick", function()
+            popup.page = math.min(math.max(0, math.ceil(#popup.items / BULK_ROWS_PER_PAGE) - 1), popup.page + 1)
+            popup:RefreshRows()
+        end)
+        popup.prevButton, popup.nextButton = prev, next
+        popup.status = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        popup.status:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", 18, 17)
+        popup.status:SetPoint("RIGHT", popup, "RIGHT", -240, 0)
+        popup.status:SetJustifyH("LEFT")
+        local cancel = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+        cancel:SetSize(82, 24)
+        cancel:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -16, 12)
+        cancel:SetText("Cancel")
+        cancel:SetScript("OnClick", function() popup:Hide() end)
+        local save = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+        save:SetSize(140, 24)
+        save:SetPoint("RIGHT", cancel, "LEFT", -6, 0)
+        save:SetText("Import Selected")
+        save:SetScript("OnClick", function()
+            local selected = {}
+            for _, item in ipairs(popup.items or {}) do
+                if item.selected then
+                    if not item.thresholdCopper or item.thresholdCopper <= 0 then
+                        popup.status:SetText("|cffff4444Set a price above 0 for " .. item.displayName .. ".|r")
+                        return
+                    end
+                    selected[#selected + 1] = item
+                end
+            end
+            if #selected == 0 then
+                popup.status:SetText("|cffff4444Select at least one priced item.|r")
+                return
+            end
+            local imported = 0
+            for _, item in ipairs(selected) do
+                local request = MarketSync.UpsertNotificationRequest({
+                    id = item.requestID,
+                    matchType = item.matchType,
+                    matchValue = item.matchValue,
+                    displayName = item.displayName,
+                    thresholdCopper = item.thresholdCopper,
+                    scope = item.scope,
+                    variantMode = "any_suffix",
+                    cooldownSec = 3600,
+                    urgent = item.urgent,
+                    enabled = item.enabled,
+                    quantityHint = item.quantityHint,
+                    importSource = item.listName,
+                })
+                if request then imported = imported + 1 end
+            end
+            popup:Hide()
+            if popup.onSaved then popup.onSaved(imported) end
+        end)
+
+        function popup:RefreshRows()
+            local total = #(self.items or {})
+            local maxPage = math.max(0, math.ceil(total / BULK_ROWS_PER_PAGE) - 1)
+            self.page = math.min(math.max(0, self.page or 0), maxPage)
+            self.updatingRows = true
+            for i, row in ipairs(self.rows) do
+                local item = self.items[self.page * BULK_ROWS_PER_PAGE + i]
+                row.item = item
+                if item then
+                    row:Show()
+                    row.select:SetChecked(item.selected)
+                    row.icon:SetTexture(SafeGetItemIcon(item.itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
+                    local name = item.displayName or "Unknown item"
+                    if #name > 29 then name = name:sub(1, 26) .. "..." end
+                    row.name:SetText(name)
+                    row.market:SetText(item.marketPrice and FormatMoneyColored(item.marketPrice) or "|cff888888Unknown|r")
+                    local copper = math.max(0, math.floor(tonumber(item.thresholdCopper) or 0))
+                    row.gold:SetText(tostring(math.floor(copper / 10000)))
+                    row.silver:SetText(tostring(math.floor((copper % 10000) / 100)))
+                    row.copper:SetText(tostring(copper % 100))
+                    SetDropdownLabel(row.scope, ScopeLabel(item.scope))
+                    row.urgent:SetChecked(item.urgent)
+                    row.enabled:SetChecked(item.enabled)
+                else
+                    row:Hide()
+                end
+            end
+            self.updatingRows = false
+            local first = total > 0 and self.page * BULK_ROWS_PER_PAGE + 1 or 0
+            self.pageText:SetText(string.format("%d-%d of %d", first, math.min(total, first + BULK_ROWS_PER_PAGE - 1), total))
+            self.prevButton:SetEnabled(self.page > 0)
+            self.nextButton:SetEnabled(self.page < maxPage)
+        end
+        bulkImportPopup = popup
+        popup:Hide()
+    end
+
+    bulkImportPopup.items = candidates
+    bulkImportPopup.page = 0
+    bulkImportPopup.onSaved = onSaved
+    bulkImportPopup.listText:SetText(string.format("List: %s  |  %d item(s)", listLabel, #candidates))
+    bulkImportPopup.status:SetText("Review each alert; only checked rows are imported.")
+    bulkImportPopup:RefreshRows()
+    bulkImportPopup:Show()
+end
+
 function MarketSync.CreateNotificationsPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local LEFT_X = isEmbedded and 12 or 20
@@ -259,7 +531,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     panel.editorCooldown = 300
     panel.editorEditingID = nil
     panel.importSelectedList = "__ALL__"
-    panel.importDiscountPct = 10
+    panel.importSelectedSource = nil
 
     -- Forward declarations
     local RefreshView, RefreshWatchlistTable, RefreshHistoryTable, RefreshImportDropdown
@@ -699,77 +971,23 @@ function MarketSync.CreateNotificationsPanel(parent)
         ToggleDropDownMenu(1, nil, importMenu, self, 0, 0)
     end)
 
-    local discountLabel = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    discountLabel:SetPoint("TOPLEFT", 10, -54)
-    discountLabel:SetText("Discount:")
-
-    local impBtnUndercut = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
-    impBtnUndercut:SetSize(46, 20)
-    impBtnUndercut:SetPoint("LEFT", discountLabel, "RIGHT", 6, 0)
-    impBtnUndercut:SetText("-10%")
-    StyleModernPillButton(impBtnUndercut, "-10%")
-
-    local impBtnMarket = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
-    impBtnMarket:SetSize(48, 20)
-    impBtnMarket:SetPoint("LEFT", impBtnUndercut, "RIGHT", 4, 0)
-    impBtnMarket:SetText("Market")
-    StyleModernPillButton(impBtnMarket, "Market")
-
-    local function HighlightImportDiscount(pct)
-        panel.importDiscountPct = pct
-        local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        impBtnUndercut:SetAlpha(pct == userPct and 1.0 or 0.6)
-        impBtnMarket:SetAlpha(pct == 0 and 1.0 or 0.6)
-    end
-
-    local function RefreshImportUndercutButton()
-        local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        impBtnUndercut:SetText("-" .. tostring(userPct) .. "%")
-    end
-    panel.RefreshImportUndercutButton = RefreshImportUndercutButton
-
-    impBtnUndercut:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        GameTooltip:SetText(string.format("Import with %d%% discount below market price.", pct), 1, 1, 1)
-        GameTooltip:AddLine("Configure default percentage in Settings (Beta section).", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
-    impBtnUndercut:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    impBtnUndercut:SetScript("OnClick", function()
-        local userPct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        HighlightImportDiscount(userPct)
-    end)
-    impBtnMarket:SetScript("OnClick", function() HighlightImportDiscount(0) end)
-    HighlightImportDiscount(10)
-
     local btnDoImport = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
     btnDoImport:SetSize(LEFT_W - 20, 22)
-    btnDoImport:SetPoint("TOPLEFT", 10, -80)
-    btnDoImport:SetText("Import to Watchlist")
-    StyleModernPillButton(btnDoImport, "Import to Watchlist", true)
+    btnDoImport:SetPoint("TOPLEFT", 10, -55)
+    btnDoImport:SetText("Review List Alerts...")
+    StyleModernPillButton(btnDoImport, "Review List Alerts...", true)
 
     local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importStatusText:SetPoint("TOPLEFT", 10, -105)
+    importStatusText:SetPoint("TOPLEFT", 10, -83)
     importStatusText:SetPoint("RIGHT", importBox, "RIGHT", -10, 0)
     importStatusText:SetJustifyH("LEFT")
     if importStatusText.SetWordWrap then importStatusText:SetWordWrap(false) end
     importStatusText:SetText("")
 
-    local importDesc = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    importDesc:SetPoint("TOPLEFT", 10, -126)
-    importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
-    importDesc:SetJustifyH("LEFT")
-    if importDesc.SetJustifyV then
-        importDesc:SetJustifyV("TOP")
-    end
-    importDesc:SetText("|cff777777Add selected list items as price alerts.|r")
-    importDesc:Hide()
     btnDoImport:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Import to Watchlist", 1, 0.82, 0)
-        GameTooltip:AddLine("Add selected list items as price alerts using the chosen discount.", 0.85, 0.85, 0.85, true)
+        GameTooltip:SetText("Review List Alerts", 1, 0.82, 0)
+        GameTooltip:AddLine("Preview every item, adjust its alert price and options, then confirm the import.", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     btnDoImport:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1437,6 +1655,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             infoAll.text = "All Lists"
             infoAll.func = function()
                 panel.importSelectedList = "__ALL__"
+                panel.importSelectedSource = nil
                 SetDropdownLabel(importDropdown, "All Lists")
             end
             UIDropDownMenu_AddButton(infoAll, level)
@@ -1446,6 +1665,7 @@ function MarketSync.CreateNotificationsPanel(parent)
                 info.text = item.label or item.name
                 info.func = function()
                     panel.importSelectedList = item.name
+                    panel.importSelectedSource = item.source
                     SetDropdownLabel(importDropdown, item.label or item.name)
                 end
                 UIDropDownMenu_AddButton(info, level)
@@ -1455,37 +1675,21 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
 
     btnDoImport:SetScript("OnClick", function()
-        local listName = panel.importSelectedList
-        local discountPct = panel.importDiscountPct or 10
-        local thresholdMultiplier = (100 - discountPct)
-        local imported = 0
-        local err = nil
-
-        if MarketSync.ImportNotificationRequestsFromFavorites then
-            imported, err = MarketSync.ImportNotificationRequestsFromFavorites(listName, {
-                thresholdPct = thresholdMultiplier,
-                scope = "all",
-                cooldownSec = 300,
-                enabledDefault = true,
-            })
-        elseif MarketSync.ImportNotificationRequestsFromAuctionator then
-            imported, err = MarketSync.ImportNotificationRequestsFromAuctionator({ listName }, {
-                thresholdPct = thresholdMultiplier,
-                scope = "all",
-                cooldownSec = 300,
-                enabledDefault = true,
-            })
+        local candidates = MarketSync.GetNotificationImportCandidates
+            and MarketSync.GetNotificationImportCandidates(panel.importSelectedList,
+                panel.importSelectedSource, (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10)
+            or {}
+        if #candidates == 0 then
+            importStatusText:SetText("|cffff4444Selected list has no items.|r")
+            return
         end
-
-        if imported and imported > 0 then
+        local label = panel.importSelectedList == "__ALL__" and "All Lists" or panel.importSelectedList
+        ShowBulkImportPopup(label, candidates, function(imported)
             importStatusText:SetText(string.format("|cff00ff00Imported %d alert(s)!|r", imported))
             panel.watchlistPage = 0
             RefreshWatchlistTable()
             C_Timer.After(4, function() importStatusText:SetText("") end)
-        else
-            importStatusText:SetText("|cffff4444" .. tostring(err or "No items imported.") .. "|r")
-            C_Timer.After(4, function() importStatusText:SetText("") end)
-        end
+        end)
     end)
 
     -- =========================================================
@@ -1797,9 +2001,6 @@ function MarketSync.CreateNotificationsPanel(parent)
         if RefreshUndercutButtons then
             RefreshUndercutButtons()
         end
-        if RefreshImportUndercutButton then
-            RefreshImportUndercutButton()
-        end
         UpdateSubTabButtons()
         RefreshImportDropdown()
         RefreshView()
@@ -1832,7 +2033,6 @@ end
 function MarketSync.RefreshNotificationUndercutButtons()
     for _, p in ipairs(registeredNotificationPanels) do
         if p.RefreshUndercutButtons then p.RefreshUndercutButtons() end
-        if p.RefreshImportUndercutButton then p.RefreshImportUndercutButton() end
     end
 end
 
