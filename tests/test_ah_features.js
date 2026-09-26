@@ -1550,6 +1550,36 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     -- Call them to verify safety without crashing
     MarketSync.ShowSmartRulesDialog()
     MarketSync.ShowUserManagementDialog()
+
+    -- Test tab switching under Low RAM mode does NOT auto-load caches
+    MarketSyncDB.LowRamMode = true
+    local personalLoaded = false
+    local guildLoaded = false
+    local neutralLoaded = false
+    MarketSync.LoadPersonalCache = function() personalLoaded = true end
+    MarketSync.LoadGuildCache = function() guildLoaded = true end
+    MarketSync.LoadNeutralCache = function() neutralLoaded = true end
+
+    -- Switch to Personal tab (tab 1)
+    mainFrame.tabs[1]:Click()
+    assert(personalLoaded == false, "Tab 1 click must NOT auto-load Personal cache under LowRamMode")
+
+    -- Switch to Guild tab (tab 2)
+    mainFrame.tabs[2]:Click()
+    assert(guildLoaded == false, "Tab 2 click must NOT auto-load Guild cache under LowRamMode")
+
+    -- Switch to Neutral tab (tab 3)
+    mainFrame.tabs[3]:Click()
+    assert(neutralLoaded == false, "Tab 3 click must NOT auto-load Neutral cache under LowRamMode")
+
+    -- When LowRamMode is disabled, tab switching automatically pre-loads caches
+    MarketSyncDB.LowRamMode = false
+    mainFrame.tabs[1]:Click()
+    assert(personalLoaded == true, "Tab 1 click must auto-preload Personal cache when LowRamMode is false")
+    mainFrame.tabs[2]:Click()
+    assert(guildLoaded == true, "Tab 2 click must auto-preload Guild cache when LowRamMode is false")
+    mainFrame.tabs[3]:Click()
+    assert(neutralLoaded == true, "Tab 3 click must auto-preload Neutral cache when LowRamMode is false")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('MainFrame 7-tab check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

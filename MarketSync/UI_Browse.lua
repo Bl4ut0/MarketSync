@@ -492,7 +492,7 @@ local function BuildSearchIndex(callback)
                 if MarketSync.LogCacheEvent then
                     MarketSync.LogCacheEvent("|cffffff00[Personal]|r On-Demand enabled (Low RAM). Skipping Personal index build.")
                 end
-            else
+            elseif not PersonalIndexReady then
                 for dbKey, data in pairs(MarketSync.GetRealmDB().PersonalData) do
                     local itemID = ParseItemID(dbKey)
                     if itemID then
@@ -532,7 +532,7 @@ local function BuildSearchIndex(callback)
             if MarketSync.LogCacheEvent then
                 MarketSync.LogCacheEvent("|cff88aaff[Guild]|r On-Demand enabled (Low RAM). Skipping Guild index build.")
             end
-        elseif liveStore then
+        elseif liveStore and not GuildIndexReady then
             for dbKey, data in pairs(liveStore) do
                 local price = (type(data) == "table" and data.m) or (data and data.latest and data.latest.minUnitPrice)
                 if price and price > 0 then
@@ -568,7 +568,7 @@ local function BuildSearchIndex(callback)
             if MarketSync.LogCacheEvent then
                 MarketSync.LogCacheEvent("|cff00ccff[Neutral]|r On-Demand enabled (Low RAM). Skipping Neutral index build.")
             end
-        else
+        elseif not NeutralIndexReady then
             if MarketSyncDB and MarketSync.GetRealmDB().NeutralData then
                 for dbKey, data in pairs(MarketSync.GetRealmDB().NeutralData) do
                     local itemID = ParseItemID(dbKey)
@@ -1002,6 +1002,74 @@ end
 
 -- Expose for use by Frame module and startup trigger
 MarketSync.BuildSearchIndex = BuildSearchIndex
+
+local function StyleModernPillButton(btn, text, isGold)
+    if not btn then return btn end
+    if btn.SetBackdrop then
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        if isGold then
+            btn:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
+            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+        else
+            btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
+            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+        end
+    end
+    local fs = btn.GetFontString and btn:GetFontString()
+    if not fs and btn.CreateFontString and btn.SetFontString then
+        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("CENTER", 0, 0)
+        btn:SetFontString(fs)
+    end
+    if fs and fs.SetTextColor then
+        if isGold then
+            fs:SetTextColor(1.0, 0.88, 0.35)
+        else
+            fs:SetTextColor(0.90, 0.85, 0.75)
+        end
+    end
+    if text and btn.SetText then btn:SetText(text) end
+    if btn.HookScript then
+        btn:HookScript("OnEnter", function(self)
+            if self.SetBackdropColor then
+                if isGold then
+                    self:SetBackdropColor(0.32, 0.24, 0.10, 0.98)
+                    self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
+                else
+                    self:SetBackdropColor(0.22, 0.19, 0.14, 0.95)
+                    self:SetBackdropBorderColor(0.95, 0.78, 0.25, 0.95)
+                end
+            end
+            local s = self.GetFontString and self:GetFontString()
+            if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.40) end
+        end)
+        btn:HookScript("OnLeave", function(self)
+            if self.SetBackdropColor then
+                if isGold then
+                    self:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
+                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+                else
+                    self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
+                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+                end
+            end
+            local s = self.GetFontString and self:GetFontString()
+            if s and s.SetTextColor then
+                if isGold then
+                    s:SetTextColor(1.0, 0.88, 0.35)
+                else
+                    s:SetTextColor(0.90, 0.85, 0.75)
+                end
+            end
+        end)
+    end
+    return btn
+end
 
 -- ================================================================
 -- CREATE BROWSE PANEL
@@ -1460,25 +1528,92 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.noResultsText:SetText("Search for items using the box above.")
     panel.noResultsText:Show()
 
-    -- Low RAM notice box (shown when cache is generating on-demand or empty state)
-    local lowRamNotice = CreateFrame("Frame", nil, panel)
-    lowRamNotice:SetSize(520, 68)
-    lowRamNotice:SetPoint("TOP", panel.noResultsText, "BOTTOM", 0, -10)
+    -- Low RAM notice card (loading screen with manual trigger or link to settings)
+    local lowRamNotice = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    lowRamNotice:SetSize(470, 148)
+    lowRamNotice:SetPoint("TOP", panel, "TOP", 115, -140)
+    if lowRamNotice.SetBackdrop then
+        lowRamNotice:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 14,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        if lowRamNotice.SetBackdropColor then
+            lowRamNotice:SetBackdropColor(0.08, 0.08, 0.10, 0.90)
+        end
+        if lowRamNotice.SetBackdropBorderColor then
+            lowRamNotice:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+        end
+    end
+
+    local lowRamTitle = lowRamNotice:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    lowRamTitle:SetPoint("TOP", lowRamNotice, "TOP", 0, -16)
+    lowRamTitle:SetText("|cffffd700Low RAM Mode Active|r")
+    lowRamNotice.title = lowRamTitle
 
     local lowRamText = lowRamNotice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    lowRamText:SetPoint("TOP", lowRamNotice, "TOP", 0, 0)
-    lowRamText:SetWidth(500)
+    lowRamText:SetPoint("TOP", lowRamTitle, "BOTTOM", 0, -8)
+    lowRamText:SetWidth(430)
     lowRamText:SetJustifyH("CENTER")
     lowRamNotice.text = lowRamText
+    lowRamNotice.desc = lowRamText
+
+    local btnLoad = CreateFrame("Button", nil, lowRamNotice, "UIPanelButtonTemplate")
+    btnLoad:SetSize(154, 24)
+    btnLoad:SetPoint("BOTTOMRIGHT", lowRamNotice, "BOTTOM", -8, 16)
+    btnLoad:SetText("⚡ Load Scan Data")
+    if StyleModernPillButton then StyleModernPillButton(btnLoad, true) end
+    btnLoad:SetScript("OnClick", function()
+        btnLoad:SetText("Loading...")
+        if btnLoad.SetEnabled then btnLoad:SetEnabled(false) end
+        lowRamText:SetText("|cffffcc00Loading scan records into memory... Please wait.|r")
+        local onDone = function()
+            btnLoad:SetText("⚡ Load Scan Data")
+            if btnLoad.SetEnabled then btnLoad:SetEnabled(true) end
+            panel:RunSearch()
+        end
+        if panel.dataSource == "guild" then
+            MarketSync.LoadGuildCache(onDone)
+        elseif panel.dataSource == "neutral" then
+            MarketSync.LoadNeutralCache(onDone)
+        else
+            MarketSync.LoadPersonalCache(onDone)
+        end
+    end)
+    btnLoad:SetScript("OnEnter", function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Load Cache on Demand", 1, 0.82, 0)
+            GameTooltip:AddLine("Loads scan data for this tab into memory for the current session.", 0.9, 0.9, 0.9, true)
+            GameTooltip:Show()
+        end
+    end)
+    btnLoad:SetScript("OnLeave", function()
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    lowRamNotice.btnLoad = btnLoad
 
     local btnLowRamSettings = CreateFrame("Button", nil, lowRamNotice, "UIPanelButtonTemplate")
-    btnLowRamSettings:SetSize(120, 22)
-    btnLowRamSettings:SetPoint("TOP", lowRamText, "BOTTOM", 0, -8)
-    btnLowRamSettings:SetText("Open Settings")
+    btnLowRamSettings:SetSize(174, 24)
+    btnLowRamSettings:SetPoint("BOTTOMLEFT", lowRamNotice, "BOTTOM", 8, 16)
+    btnLowRamSettings:SetText("Settings (Disable Low RAM)")
+    if StyleModernPillButton then StyleModernPillButton(btnLowRamSettings, false) end
     btnLowRamSettings:SetScript("OnClick", function()
         if MarketSync.OpenSettings then
             MarketSync.OpenSettings()
         end
+    end)
+    btnLowRamSettings:SetScript("OnEnter", function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Addon Settings", 1, 0.82, 0)
+            GameTooltip:AddLine("Opens Settings to disable Low RAM Mode for instant searches across all tabs.", 0.9, 0.9, 0.9, true)
+            GameTooltip:Show()
+        end
+    end)
+    btnLowRamSettings:SetScript("OnLeave", function()
+        if GameTooltip then GameTooltip:Hide() end
     end)
     lowRamNotice.btnSettings = btnLowRamSettings
     lowRamNotice:Hide()
@@ -1753,12 +1888,22 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         self.currentResults = {}
         self.page = 0
 
-        if not PersonalIndexReady then
-            self.noResultsText:SetText("Building index, please wait...")
-            self.noResultsText:Show()
-            self:UpdateResults()
-            BuildSearchIndex(function() self:RunSearch() end)
-            return
+        local isGuild = self.dataSource == "guild"
+        local isNeutral = self.dataSource == "neutral"
+        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady) or (not isGuild and not isNeutral and PersonalIndexReady)
+
+        if not isReady then
+            if MarketSyncDB and MarketSyncDB.LowRamMode then
+                if self.noResultsText then self.noResultsText:Hide() end
+                self:UpdateResults()
+                return
+            else
+                self.noResultsText:SetText("Building index, please wait...")
+                self.noResultsText:Show()
+                self:UpdateResults()
+                BuildSearchIndex(function() self:RunSearch() end)
+                return
+            end
         end
 
         local activeCat = self.activeCategory
@@ -1929,17 +2074,37 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         if self.tableScrollBar then
             self.tableScrollBar:Update(self.page, maxPage)
         end
+        local isGuild = self.dataSource == "guild"
+        local isNeutral = self.dataSource == "neutral"
+        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady) or (not isGuild and not isNeutral and PersonalIndexReady)
+
         if self.lowRamNotice then
-            if total == 0 and MarketSyncDB and MarketSyncDB.LowRamMode and self.noResultsText and self.noResultsText:IsShown() then
+            if not isReady and MarketSyncDB and MarketSyncDB.LowRamMode then
                 local estMB, totalStored = 0, 0
                 if MarketSync.GetEstimatedRAMUsage then
                     estMB, totalStored = MarketSync.GetEstimatedRAMUsage()
                 end
-                self.lowRamNotice.text:SetText(string.format(
-                    "|cffffcc00Notice:|r Low RAM Mode is active (cache generates on-demand).\n|cffaaaaaaYou can disable Low RAM Mode in Settings for instant pre-cached searches.\nEstimated memory impact: ~%.1f MB (based on %d stored items).|r",
-                    estMB, totalStored
-                ))
+
+                if PersonalIndexBuilding then
+                    if self.lowRamNotice.title then self.lowRamNotice.title:SetText("|cffffd700Loading Cache into Memory...|r") end
+                    self.lowRamNotice.text:SetText("|cffaaaaaaPopulating search records from disk. Please wait a moment...|r")
+                    if self.lowRamNotice.btnLoad then
+                        self.lowRamNotice.btnLoad:SetText("Loading...")
+                        if self.lowRamNotice.btnLoad.SetEnabled then self.lowRamNotice.btnLoad:SetEnabled(false) end
+                    end
+                else
+                    if self.lowRamNotice.title then self.lowRamNotice.title:SetText("|cffffd700Low RAM Mode Active|r") end
+                    self.lowRamNotice.text:SetText(string.format(
+                        "|cffccccccSearch index is not loaded in memory to keep the addon lightweight.\nEstimated memory saved: ~%.1f MB (%d items stored).\nScanner, price checks, and analytics remain fully accessible.|r",
+                        estMB, totalStored
+                    ))
+                    if self.lowRamNotice.btnLoad then
+                        self.lowRamNotice.btnLoad:SetText("⚡ Load Scan Data")
+                        if self.lowRamNotice.btnLoad.SetEnabled then self.lowRamNotice.btnLoad:SetEnabled(true) end
+                    end
+                end
                 self.lowRamNotice:Show()
+                if self.noResultsText then self.noResultsText:Hide() end
             else
                 self.lowRamNotice:Hide()
             end
@@ -1983,23 +2148,29 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     return panel
 end
 -- Force load specific caches on demand
-function MarketSync.LoadPersonalCache()
+function MarketSync.LoadPersonalCache(callback)
     if not PersonalIndexReady then
         MarketSync.ForcePersonal = true
-        BuildSearchIndex()
+        BuildSearchIndex(callback)
+    elseif callback then
+        callback()
     end
 end
 
-function MarketSync.LoadGuildCache()
+function MarketSync.LoadGuildCache(callback)
     if not GuildIndexReady then
         MarketSync.ForceGuild = true
-        BuildSearchIndex()
+        BuildSearchIndex(callback)
+    elseif callback then
+        callback()
     end
 end
 
-function MarketSync.LoadNeutralCache()
+function MarketSync.LoadNeutralCache(callback)
     if not NeutralIndexReady then
         MarketSync.ForceNeutral = true
-        BuildSearchIndex()
+        BuildSearchIndex(callback)
+    elseif callback then
+        callback()
     end
 end

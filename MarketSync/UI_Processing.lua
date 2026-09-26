@@ -305,6 +305,107 @@ local function CreateBox(parent, x, y, width, height)
     return box
 end
 
+local function StyleModernPillButton(btn, text, isGold)
+    if not btn then return btn end
+    if btn.SetBackdrop then
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        if isGold then
+            btn:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
+            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+        else
+            btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
+            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+        end
+    end
+    local fs = btn.GetFontString and btn:GetFontString()
+    if not fs and btn.CreateFontString and btn.SetFontString then
+        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("CENTER", 0, 0)
+        btn:SetFontString(fs)
+    end
+    if fs and fs.SetTextColor then
+        if isGold then
+            fs:SetTextColor(1.0, 0.88, 0.35)
+        else
+            fs:SetTextColor(0.90, 0.85, 0.75)
+        end
+    end
+    if text and btn.SetText then btn:SetText(text) end
+    if btn.HookScript then
+        btn:HookScript("OnEnter", function(self)
+            if self.SetBackdropColor then
+                if isGold then
+                    self:SetBackdropColor(0.32, 0.24, 0.10, 0.98)
+                    self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
+                else
+                    self:SetBackdropColor(0.22, 0.19, 0.14, 0.95)
+                    self:SetBackdropBorderColor(0.95, 0.78, 0.25, 0.95)
+                end
+            end
+            local s = self.GetFontString and self:GetFontString()
+            if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.40) end
+        end)
+        btn:HookScript("OnLeave", function(self)
+            if self.SetBackdropColor then
+                if isGold then
+                    self:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
+                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+                else
+                    self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
+                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+                end
+            end
+            local s = self.GetFontString and self:GetFontString()
+            if s and s.SetTextColor then
+                if isGold then
+                    s:SetTextColor(1.0, 0.88, 0.35)
+                else
+                    s:SetTextColor(0.90, 0.85, 0.75)
+                end
+            end
+        end)
+    end
+    return btn
+end
+
+local function StyleModernSubTab(btn, isActive, text)
+    if not btn then return end
+    if btn.SetBackdrop then
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        if isActive then
+            btn:SetBackdropColor(0.26, 0.20, 0.09, 0.98)
+            btn:SetBackdropBorderColor(1.0, 0.84, 0.15, 1.0)
+        else
+            btn:SetBackdropColor(0.11, 0.10, 0.09, 0.95)
+            btn:SetBackdropBorderColor(0.34, 0.29, 0.20, 0.85)
+        end
+    end
+    local fs = btn.GetFontString and btn:GetFontString()
+    if not fs and btn.CreateFontString and btn.SetFontString then
+        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("CENTER", 0, 0)
+        btn:SetFontString(fs)
+    end
+    if fs and fs.SetTextColor then
+        if isActive then
+            fs:SetTextColor(1.0, 0.86, 0.20)
+        else
+            fs:SetTextColor(0.78, 0.74, 0.66)
+        end
+    end
+    if text and btn.SetText then btn:SetText(text) end
+end
+
 function MarketSync.CreateProcessingPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local LEFT_X = isEmbedded and 10 or 14
@@ -386,15 +487,13 @@ function MarketSync.CreateProcessingPanel(parent)
         for _, def in ipairs(MODE_OPTIONS) do
             local btn = modeButtons[def.key]
             if btn then
-                if def.key == panel.activeMode then
+                local isActive = (def.key == panel.activeMode)
+                if isActive then
                     btn:Disable()
-                    local t = btn.GetFontString and btn:GetFontString()
-                    if t and t.SetTextColor then t:SetTextColor(1.0, 0.82, 0.0) end
                 else
                     btn:Enable()
-                    local t = btn.GetFontString and btn:GetFontString()
-                    if t and t.SetTextColor then t:SetTextColor(0.90, 0.90, 0.90) end
                 end
+                StyleModernSubTab(btn, isActive, def.label)
             end
         end
         if leftTopTitle then
@@ -410,8 +509,8 @@ function MarketSync.CreateProcessingPanel(parent)
 
     -- Top Sub-Tab Mode Buttons (Target Material / Process Scan / Craft Profit)
     local function CreateModeTab(def, index)
-        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        btn:SetSize(isEmbedded and 110 or 118, 22)
+        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+        btn:SetSize(isEmbedded and 114 or 124, 24)
         if index == 1 then
             btn:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, isEmbedded and -8 or -34)
         else
@@ -439,6 +538,7 @@ function MarketSync.CreateProcessingPanel(parent)
     modeButtons.target = CreateModeTab(MODE_OPTIONS[1], 1)
     modeButtons.process = CreateModeTab(MODE_OPTIONS[2], 2)
     modeButtons.craft = CreateModeTab(MODE_OPTIONS[3], 3)
+    RefreshModeButtons()
 
     local targetLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     targetLabel:SetPoint("TOPLEFT", 8, -26)
@@ -598,11 +698,11 @@ function MarketSync.CreateProcessingPanel(parent)
     craftDesc:SetText("|cff777777Calculates profit for all recipes in your known profession against current auction prices.|r")
 
     local marginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    marginLabel:SetPoint("TOPLEFT", 8, -92)
+    marginLabel:SetPoint("TOPLEFT", 8, -94)
     marginLabel:SetText("Margin %")
 
     local marginBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    marginBox:SetSize(28, 18)
+    marginBox:SetSize(30, 22)
     marginBox:SetPoint("LEFT", marginLabel, "RIGHT", 5, 0)
     marginBox:SetAutoFocus(false)
     marginBox:SetNumeric(true)
@@ -611,24 +711,26 @@ function MarketSync.CreateProcessingPanel(parent)
         MarketSync.RegisterLinkAwareEditBox(marginBox)
     end
 
-    local marginBtn10 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
-    marginBtn10:SetSize(28, 18)
+    local marginBtn10 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
+    marginBtn10:SetSize(34, 22)
     marginBtn10:SetPoint("LEFT", marginBox, "RIGHT", 4, 0)
     marginBtn10:SetText("10%")
+    StyleModernPillButton(marginBtn10, "10%")
     marginBtn10:SetScript("OnClick", function() marginBox:SetText("10") end)
 
-    local marginBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
-    marginBtn20:SetSize(28, 18)
+    local marginBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
+    marginBtn20:SetSize(34, 22)
     marginBtn20:SetPoint("LEFT", marginBtn10, "RIGHT", 3, 0)
     marginBtn20:SetText("20%")
+    StyleModernPillButton(marginBtn20, "20%")
     marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
 
     local minMarginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    minMarginLabel:SetPoint("TOPLEFT", 8, -70)
+    minMarginLabel:SetPoint("TOPLEFT", 8, -72)
     minMarginLabel:SetText("Min Craft")
 
     local minMarginGoldBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    minMarginGoldBox:SetSize(28, 18)
+    minMarginGoldBox:SetSize(30, 22)
     minMarginGoldBox:SetPoint("LEFT", minMarginLabel, "RIGHT", 5, 0)
     minMarginGoldBox:SetAutoFocus(false)
     minMarginGoldBox:SetNumeric(true)
@@ -637,27 +739,29 @@ function MarketSync.CreateProcessingPanel(parent)
         MarketSync.RegisterLinkAwareEditBox(minMarginGoldBox)
     end
 
-    local minGoldBtn5 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
-    minGoldBtn5:SetSize(26, 18)
+    local minGoldBtn5 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
+    minGoldBtn5:SetSize(32, 22)
     minGoldBtn5:SetPoint("LEFT", minMarginGoldBox, "RIGHT", 4, 0)
     minGoldBtn5:SetText("5g")
+    StyleModernPillButton(minGoldBtn5, "5g")
     minGoldBtn5:SetScript("OnClick", function() minMarginGoldBox:SetText("5") end)
 
-    local minGoldBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
-    minGoldBtn20:SetSize(28, 18)
+    local minGoldBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
+    minGoldBtn20:SetSize(34, 22)
     minGoldBtn20:SetPoint("LEFT", minGoldBtn5, "RIGHT", 3, 0)
     minGoldBtn20:SetText("20g")
+    StyleModernPillButton(minGoldBtn20, "20g")
     minGoldBtn20:SetScript("OnClick", function() minMarginGoldBox:SetText("20") end)
 
-    btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
     local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 
     if isEmbedded then
-        btnRun:SetSize(84, 20)
-        btnExport:SetSize(66, 20)
-        btnTrack:SetSize(62, 20)
+        btnRun:SetSize(88, 24)
+        btnExport:SetSize(66, 24)
+        btnTrack:SetSize(64, 24)
 
         btnTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -8)
         btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
@@ -667,9 +771,9 @@ function MarketSync.CreateProcessingPanel(parent)
         statusSummary:SetPoint("RIGHT", panel, "BOTTOMRIGHT", -140, 14)
         statusSummary:SetJustifyH("LEFT")
     else
-        btnRun:SetSize(88, 22)
-        btnExport:SetSize(62, 22)
-        btnTrack:SetSize(62, 22)
+        btnRun:SetSize(96, 24)
+        btnExport:SetSize(70, 24)
+        btnTrack:SetSize(68, 24)
 
         btnTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -14, -34)
         btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
@@ -682,6 +786,9 @@ function MarketSync.CreateProcessingPanel(parent)
     if statusSummary.SetWordWrap then statusSummary:SetWordWrap(false) end
     btnExport:SetText("Export")
     btnTrack:SetText("Track")
+    StyleModernPillButton(btnRun, nil, true)
+    StyleModernPillButton(btnExport, "Export")
+    StyleModernPillButton(btnTrack, "Track")
     statusSummary:SetText("|cff888888Ready|r")
 
     if MarketSync.SetAccessibility then
@@ -1147,18 +1254,19 @@ function MarketSync.CreateProcessingPanel(parent)
     customTitle:SetText("|cffffd700Custom Selections|r")
 
     local customNameLabel = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    customNameLabel:SetPoint("TOPLEFT", 8, -26)
+    customNameLabel:SetPoint("TOPLEFT", 8, -28)
     customNameLabel:SetText("Preset")
 
-    local btnSaveCustom = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
-    btnSaveCustom:SetSize(42, 18)
-    btnSaveCustom:SetPoint("TOPRIGHT", leftBottomBox, "TOPRIGHT", -8, -24)
+    local btnSaveCustom = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate,BackdropTemplate")
+    btnSaveCustom:SetSize(48, 22)
+    btnSaveCustom:SetPoint("TOPRIGHT", leftBottomBox, "TOPRIGHT", -8, -26)
     btnSaveCustom:SetText("Save")
+    StyleModernPillButton(btnSaveCustom, "Save")
 
     local customNameBox = CreateFrame("EditBox", nil, leftBottomBox, "InputBoxTemplate")
     customNameBox:SetPoint("LEFT", customNameLabel, "RIGHT", 5, 0)
     customNameBox:SetPoint("RIGHT", btnSaveCustom, "LEFT", -4, 0)
-    customNameBox:SetHeight(18)
+    customNameBox:SetHeight(20)
     customNameBox:SetAutoFocus(false)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(customNameBox)

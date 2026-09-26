@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-09-25
+
+### Added
+- **Low RAM Mode Manual Loading Screen ([`UI_Browse.lua`](file:///c:/Dev%20Projects/MarketSync/MarketSync/UI_Browse.lua), [`UI_Main.lua`](file:///c:/Dev%20Projects/MarketSync/MarketSync/UI_Main.lua))**:
+  - Search indices for Personal Scan (Buy), Guild Sync (Sell), and Neutral AH (Auctions) tabs are no longer automatically forced into Lua memory on tab switches or startup when Low RAM mode is active.
+  - Dedicated on-demand loading card displays memory savings estimates and offers two manual actions:
+    - `"⚡ Load Scan Data"`: Asynchronously builds the specific tab's cache into memory on demand without stalling the client or rebuilding already-loaded sibling caches.
+    - `"Settings (Disable Low RAM)"`: Direct link to AddOn Settings for players wishing to disable Low RAM mode for instant pre-cached searches across all tabs.
+  - Keeps the addon ultra-lightweight when players only want native AH scanning, price check tooltip integrations, or analytics without loading the entire search catalog into memory.
+
+### Changed
+- Ergonomic UI layout overhaul for both standalone and embedded Auction House windows:
+  - **Alerts ([`UI_Notifications.lua`](file:///c:/Dev%20Projects/MarketSync/MarketSync/UI_Notifications.lua))**: Upgraded top sub-tabs to modern 24px segmented tabs with active gold accent styling and unread badges; expanded preset buttons (`-10%`, `Market`) and action buttons (`Add Alert`, `Clear`, `Import`) to 22–24px height with modern pill backdrops; improved vertical label spacing, drop slot dimensions, and search bar height.
+  - **Processing ([`UI_Processing.lua`](file:///c:/Dev%20Projects/MarketSync/MarketSync/UI_Processing.lua))**: Upgraded mode tabs (`Target Material`, `Process Scan`, `Craft Profit`) to 24px segmented sub-tabs with active highlight states; elevated top action buttons (`Run Target`, `Export`, `Track`) to 24px with primary gold emphasis; overhauled margin presets (`10%`, `20%`) and minimum craft gold buttons (`5g`, `20g`) to modern pill buttons with proper internal text padding; styled preset save button with comfortable height and spacing.
+
 ## [0.9.2] - 2026-09-25
 
 ### Added

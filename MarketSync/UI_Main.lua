@@ -349,8 +349,8 @@ local function CreateMainFrame()
             MarketSync.HideAllTabContent()
         end
 
-        -- LOW RAM MODE: Load caches on demand
-        if MarketSyncDB and MarketSyncDB.LowRamMode then
+        -- Only auto-preload caches on tab change when Low RAM mode is disabled
+        if MarketSyncDB and not MarketSyncDB.LowRamMode then
             if id == 1 and MarketSync.LoadPersonalCache then
                 MarketSync.LoadPersonalCache()
             elseif id == 2 and MarketSync.LoadGuildCache then

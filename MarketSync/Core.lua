@@ -270,7 +270,7 @@ local function PopulateAddonSettings(panel)
     local chkLowRam = CreateOptCheckbox(cardMemory, 12, -42, "Enable Low RAM Mode (Default: ON)",
         "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Automatically loads caches on demand.",
         "LowRamMode", true, function(val)
-            if not val and MarketSyncDB and MarketSyncDB.BuildCacheOnStartup and MarketSync.BuildSearchIndex then
+            if not val and MarketSync.BuildSearchIndex then
                 MarketSync.BuildSearchIndex()
             end
             if UpdateMemoryCardLayout then UpdateMemoryCardLayout() end
