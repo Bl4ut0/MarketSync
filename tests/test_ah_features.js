@@ -1507,6 +1507,9 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
   const check = `
     local mainFrame = MarketSync.CreateMainFrame()
     assert(mainFrame ~= nil, "MainFrame should exist")
+    local syncAnchor = mainFrame.syncButton and mainFrame.syncButton.points[1]
+    assert(syncAnchor and syncAnchor[1] == "TOPRIGHT" and syncAnchor[5] == -3,
+      "Network status must sit within the title strip, clear of its lower border")
     assert(mainFrame.tabs ~= nil, "MainFrame.tabs should exist")
     assert(#mainFrame.tabs == 7, "MainFrame must have 7 tabs, found: " .. tostring(#mainFrame.tabs))
     assert(mainFrame.tabs[1]:GetText() == "Personal Scan", "Tab 1 must be Personal Scan")

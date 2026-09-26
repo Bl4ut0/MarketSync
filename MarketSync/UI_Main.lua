@@ -230,7 +230,9 @@ local function CreateMainFrame()
     local syncButton = CreateFrame("Button", nil, MainFrame)
     -- Anchor to the title bar itself, not the template close button (whose
     -- vertical position varies by client and can put the label under content).
-    syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -42, -9)
+    -- PortraitFrameTemplate's title strip is shallow; keep the status text
+    -- centered in it rather than sitting on the lower decorative border.
+    syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -42, -3)
     syncButton:SetHeight(20)
     syncButton:SetWidth(150)
     local syncFrameLevel = 100
@@ -1703,4 +1705,3 @@ function MarketSync_ToggleUI()
         end
     end
 end
-
