@@ -1931,12 +1931,25 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
       table.insert(saved, request)
       return request
     end
-    local review
-    for _, frame in ipairs(createdFrames) do
-      if frame.text == "Review List Alerts..." then review = frame; break end
+    local function IsChildOf(frame, ancestor)
+      while frame do
+        if frame == ancestor then return true end
+        frame = frame.parent
+      end
+      return false
     end
-    assert(review and review.scripts.OnClick, "Bulk import review button missing")
-    review.scripts.OnClick(review)
+    local portableReview, auctionReview
+    for _, frame in ipairs(createdFrames) do
+      if frame.text == "Review List Alerts..." then
+        if IsChildOf(frame, alertsMain) then portableReview = frame end
+        if IsChildOf(frame, alertsAH) then auctionReview = frame end
+      end
+    end
+    assert(portableReview and portableReview.scripts.OnClick,
+      "Portable Alerts bulk import button missing")
+    assert(auctionReview and auctionReview.scripts.OnClick,
+      "Auction House Alerts bulk import button missing")
+    portableReview.scripts.OnClick(portableReview)
     assert(#saved == 0, "Review should not save alerts")
     local popup, save, cancel
     for _, frame in ipairs(createdFrames) do
@@ -1955,7 +1968,9 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
       "Bulk import should save edited price only on confirmation")
     assert(saved[1].scope == "main" and saved[1].urgent == true and saved[1].enabled == true,
       "Bulk import must retain editor options")
-    review.scripts.OnClick(review)
+    auctionReview.scripts.OnClick(auctionReview)
+    assert(popup.shown and popup.rows[1].item.displayName == "Test Item",
+      "Auction House Alerts should open the same list-review popup")
     for _, frame in ipairs(createdFrames) do
       if frame.text == "Cancel" and frame.parent == popup then cancel = frame; break end
     end
