@@ -762,11 +762,20 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                 row:SetScript("OnClick", function(self, mouseButton)
                     if mouseButton == "RightButton" then
-                        if MarketSync.ShowAnalytics and data.itemID then
-                            local dbKey = data.dbKey or (data.itemKey and MarketSync.NormalizeItemKey
-                                and select(1, MarketSync.NormalizeItemKey(data.itemKey))) or tostring(data.itemID)
-                            local link = data.itemKey and data.itemKey.itemLink
-                                or select(2, SafeGetItemInfo(data.itemID)) or data.name
+                        local dbKey = data.dbKey or (data.itemKey and MarketSync.NormalizeItemKey
+                            and select(1, MarketSync.NormalizeItemKey(data.itemKey))) or tostring(data.itemID)
+                        local link = data.itemKey and data.itemKey.itemLink
+                            or select(2, SafeGetItemInfo(data.itemID)) or data.name
+                        if MarketSync.ShowItemContextMenu then
+                            MarketSync.ShowItemContextMenu(row, {
+                                itemID = data.itemID,
+                                itemLink = link,
+                                itemName = data.name,
+                                icon = data.icon,
+                                price = data.unitPrice,
+                                dbKey = dbKey,
+                            })
+                        elseif MarketSync.ShowAnalytics and data.itemID then
                             MarketSync.ShowAnalytics(dbKey, link, data.name, data.icon, data.unitPrice)
                         end
                     else

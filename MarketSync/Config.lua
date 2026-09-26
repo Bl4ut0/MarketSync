@@ -1973,4 +1973,139 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
     return slider
 end
 
+-- ================================================================
+-- SHARED ITEM CONTEXT MENU
+-- ================================================================
+local globalItemContextMenu = nil
+
+function MarketSync.ShowItemContextMenu(anchorFrame, opts)
+    if not opts then return end
+    if not globalItemContextMenu then
+        globalItemContextMenu = CreateFrame("Frame", "MarketSyncGlobalItemContextMenu", UIParent, "UIDropDownMenuTemplate")
+    end
+
+    local itemID = opts.itemID
+    local itemLink = opts.itemLink or opts.link
+    local itemName = opts.itemName or opts.name
+    local price = opts.price or opts.unitPrice
+    local dbKey = opts.dbKey or (itemID and tostring(itemID)) or itemName
+
+    if (not itemName or not itemLink) and itemID then
+        local n, l = MarketSync.GetItemInfo(itemID)
+        if n and not itemName then itemName = n end
+        if l and not itemLink then itemLink = l end
+    end
+
+    UIDropDownMenu_Initialize(globalItemContextMenu, function(self, level, menuList)
+        if level == 1 then
+            local titleInfo = UIDropDownMenu_CreateInfo()
+            titleInfo.text = itemName or (itemID and ("Item #" .. tostring(itemID))) or "Item Actions"
+            titleInfo.isTitle = true
+            titleInfo.notCheckable = true
+            UIDropDownMenu_AddButton(titleInfo, level)
+
+            if opts.customActions then
+                for _, act in ipairs(opts.customActions) do
+                    if act and act.text then
+                        local info = UIDropDownMenu_CreateInfo()
+                        info.text = act.text
+                        info.notCheckable = true
+                        info.func = function()
+                            CloseDropDownMenus()
+                            if act.func then act.func() end
+                        end
+                        UIDropDownMenu_AddButton(info, level)
+                    end
+                end
+            end
+
+            if MarketSync.SearchInAuctionHouse and (itemName or itemID) then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "Search in AH"
+                info.notCheckable = true
+                info.func = function()
+                    CloseDropDownMenus()
+                    MarketSync.SearchInAuctionHouse(itemName or itemID)
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+
+            if MarketSync.ShowAnalytics and (dbKey or itemID or itemName) then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "Show Analytics"
+                info.notCheckable = true
+                info.func = function()
+                    CloseDropDownMenus()
+                    local key = dbKey or (itemID and tostring(itemID)) or itemName
+                    MarketSync.ShowAnalytics(key, itemLink, itemName, opts.icon, price)
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+
+            if MarketSync.OpenAlertEditorWithItem and (itemLink or itemID or itemName) then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "Create Price Alert"
+                info.notCheckable = true
+                info.func = function()
+                    CloseDropDownMenus()
+                    MarketSync.OpenAlertEditorWithItem(itemLink or itemID or itemName, price)
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+
+            if MarketSync.Favorites and MarketSync.Favorites.GetLists then
+                local lists = MarketSync.Favorites.GetLists()
+                if lists and #lists > 0 then
+                    local info = UIDropDownMenu_CreateInfo()
+                    info.text = "Add to List"
+                    info.hasArrow = true
+                    info.notCheckable = true
+                    info.menuList = "FAVORITE_LISTS"
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end
+
+            if itemLink then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "Link to Chat"
+                info.notCheckable = true
+                info.func = function()
+                    CloseDropDownMenus()
+                    if ChatEdit_InsertLink then
+                        ChatEdit_InsertLink(itemLink)
+                    end
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+
+            local cancelInfo = UIDropDownMenu_CreateInfo()
+            cancelInfo.text = "Cancel"
+            cancelInfo.notCheckable = true
+            cancelInfo.func = function() CloseDropDownMenus() end
+            UIDropDownMenu_AddButton(cancelInfo, level)
+
+        elseif level == 2 and menuList == "FAVORITE_LISTS" then
+            if MarketSync.Favorites and MarketSync.Favorites.GetLists then
+                local lists = MarketSync.Favorites.GetLists()
+                for _, listName in ipairs(lists or {}) do
+                    local info = UIDropDownMenu_CreateInfo()
+                    info.text = listName
+                    info.notCheckable = true
+                    info.func = function()
+                        CloseDropDownMenus()
+                        local itemRef = itemLink or itemID or itemName
+                        MarketSync.Favorites.AddToList(listName, itemRef)
+                        if MarketSync.Print then
+                            MarketSync.Print(string.format("Added %s to %s.", tostring(itemName or itemRef), listName))
+                        end
+                    end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end
+        end
+    end, "MENU")
+
+    ToggleDropDownMenu(1, nil, globalItemContextMenu, anchorFrame or "cursor", 0, 0)
+end
+
 

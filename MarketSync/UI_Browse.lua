@@ -1813,8 +1813,18 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             row:UnlockHighlight()
             GameTooltip:Hide()
         end)
-        iconBtn:SetScript("OnClick", function()
-            if row.link and IsModifiedClick("CHATLINK") then
+        iconBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        iconBtn:SetScript("OnClick", function(self, button)
+            if button == "RightButton" and row.itemData and MarketSync.ShowItemContextMenu then
+                MarketSync.ShowItemContextMenu(row, {
+                    itemID = row.itemData.itemID,
+                    itemLink = row.itemData.link,
+                    itemName = row.itemData.name,
+                    icon = row.itemData.icon,
+                    price = row.itemData.price,
+                    dbKey = row.itemData.dbKey,
+                })
+            elseif row.link and IsModifiedClick("CHATLINK") then
                 ChatEdit_InsertLink(row.link)
             elseif panel.dataSource ~= "neutral" and row.itemData and MarketSync.ShowItemHistory then
                 MarketSync.ShowItemHistory(
@@ -1827,9 +1837,19 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             end
         end)
 
-        -- Row click (non-icon area) also opens history
-        row:SetScript("OnClick", function(self)
-            if self.link and IsModifiedClick("CHATLINK") then
+        -- Row click (non-icon area) also opens history or context menu
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetScript("OnClick", function(self, button)
+            if button == "RightButton" and self.itemData and MarketSync.ShowItemContextMenu then
+                MarketSync.ShowItemContextMenu(self, {
+                    itemID = self.itemData.itemID,
+                    itemLink = self.itemData.link,
+                    itemName = self.itemData.name,
+                    icon = self.itemData.icon,
+                    price = self.itemData.price,
+                    dbKey = self.itemData.dbKey,
+                })
+            elseif self.link and IsModifiedClick("CHATLINK") then
                 ChatEdit_InsertLink(self.link)
             elseif panel.dataSource ~= "neutral" and self.itemData and MarketSync.ShowItemHistory then
                 MarketSync.ShowItemHistory(

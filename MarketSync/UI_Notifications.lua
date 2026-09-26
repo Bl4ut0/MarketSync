@@ -117,9 +117,60 @@ local function CreateBox(parent, x, y, width, height)
     return box
 end
 
+local function StripBlizzardTextures(btn)
+    if not btn then return end
+    if btn.Left and btn.Left.SetAlpha then btn.Left:SetAlpha(0) end
+    if btn.Middle and btn.Middle.SetAlpha then btn.Middle:SetAlpha(0) end
+    if btn.Right and btn.Right.SetAlpha then btn.Right:SetAlpha(0) end
+    local norm = btn.GetNormalTexture and btn:GetNormalTexture()
+    if norm and norm.SetAlpha then norm:SetAlpha(0) end
+    local push = btn.GetPushedTexture and btn:GetPushedTexture()
+    if push and push.SetAlpha then push:SetAlpha(0) end
+    local dis = btn.GetDisabledTexture and btn:GetDisabledTexture()
+    if dis and dis.SetAlpha then dis:SetAlpha(0) end
+    local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if hl and hl.SetAlpha and hl.GetTexture and hl:GetTexture() and string.find(tostring(hl:GetTexture()), "UI%-Panel%-Button") then
+        hl:SetAlpha(0)
+    end
+end
+
 local function BuildScopeDropdown(frameName, parent, width, getValue, setValue)
-    local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(dd, width)
+    local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate,BackdropTemplate")
+    local ddWidth = width or 100
+    local innerWidth = math.max(40, ddWidth - 36)
+    UIDropDownMenu_SetWidth(dd, innerWidth)
+
+    local left = _G[frameName.."Left"]
+    local mid = _G[frameName.."Middle"]
+    local right = _G[frameName.."Right"]
+    if left then left:Hide() end
+    if mid then mid:Hide() end
+    if right then right:Hide() end
+
+    dd:SetSize(ddWidth, 22)
+    dd:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    dd:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+    dd:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+
+    local btn = _G[frameName.."Button"]
+    if btn then
+        btn:ClearAllPoints()
+        btn:SetPoint("RIGHT", dd, "RIGHT", -2, 0)
+    end
+    local txt = _G[frameName.."Text"]
+    if txt then
+        txt:ClearAllPoints()
+        txt:SetPoint("LEFT", dd, "LEFT", 8, 0)
+        txt:SetPoint("RIGHT", dd, "RIGHT", -22, 0)
+        txt:SetJustifyH("LEFT")
+        txt:SetTextColor(0.90, 0.85, 0.75)
+    end
+
     UIDropDownMenu_Initialize(dd, function(self, level)
         for _, opt in ipairs(SCOPE_OPTIONS) do
             local info = UIDropDownMenu_CreateInfo()
@@ -141,6 +192,8 @@ local function StyleModernPillButton(btn, text, isGold)
         isGold = text
         text = nil
     end
+    StripBlizzardTextures(btn)
+    btn._isGold = isGold
     if btn.SetBackdrop then
         btn:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -149,8 +202,8 @@ local function StyleModernPillButton(btn, text, isGold)
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
         if isGold then
-            btn:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
-            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+            btn:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
+            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
         else
             btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
             btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
@@ -164,31 +217,34 @@ local function StyleModernPillButton(btn, text, isGold)
     end
     if fs and fs.SetTextColor then
         if isGold then
-            fs:SetTextColor(1.0, 0.88, 0.35)
+            fs:SetTextColor(1.0, 0.92, 0.45)
         else
-            fs:SetTextColor(0.90, 0.85, 0.75)
+            fs:SetTextColor(0.85, 0.80, 0.70)
         end
     end
     if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
-    if btn.HookScript then
+    if not btn._hookedPill and btn.HookScript then
+        btn._hookedPill = true
         btn:HookScript("OnEnter", function(self)
+            StripBlizzardTextures(self)
             if self.SetBackdropColor then
-                if isGold then
-                    self:SetBackdropColor(0.32, 0.24, 0.10, 0.98)
-                    self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
+                if self._isGold then
+                    self:SetBackdropColor(0.55, 0.42, 0.12, 1.0)
+                    self:SetBackdropBorderColor(1.0, 0.88, 0.35, 1.0)
                 else
                     self:SetBackdropColor(0.22, 0.19, 0.14, 0.95)
-                    self:SetBackdropBorderColor(0.95, 0.78, 0.25, 0.95)
+                    self:SetBackdropBorderColor(0.80, 0.65, 0.25, 0.95)
                 end
             end
             local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.40) end
+            if s and s.SetTextColor then s:SetTextColor(1.0, 0.95, 0.60) end
         end)
         btn:HookScript("OnLeave", function(self)
+            StripBlizzardTextures(self)
             if self.SetBackdropColor then
-                if isGold then
-                    self:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
-                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+                if self._isGold then
+                    self:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
+                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
                 else
                     self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
                     self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
@@ -196,10 +252,10 @@ local function StyleModernPillButton(btn, text, isGold)
             end
             local s = self.GetFontString and self:GetFontString()
             if s and s.SetTextColor then
-                if isGold then
-                    s:SetTextColor(1.0, 0.88, 0.35)
+                if self._isGold then
+                    s:SetTextColor(1.0, 0.92, 0.45)
                 else
-                    s:SetTextColor(0.90, 0.85, 0.75)
+                    s:SetTextColor(0.85, 0.80, 0.70)
                 end
             end
         end)
@@ -209,6 +265,7 @@ end
 
 local function StyleModernSubTab(btn, isActive, text)
     if not btn then return end
+    StripBlizzardTextures(btn)
     if btn.SetBackdrop then
         btn:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -217,11 +274,11 @@ local function StyleModernSubTab(btn, isActive, text)
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
         if isActive then
-            btn:SetBackdropColor(0.26, 0.20, 0.09, 0.98)
-            btn:SetBackdropBorderColor(1.0, 0.84, 0.15, 1.0)
+            btn:SetBackdropColor(0.38, 0.28, 0.10, 0.98)
+            btn:SetBackdropBorderColor(1.0, 0.85, 0.20, 1.0)
         else
-            btn:SetBackdropColor(0.11, 0.10, 0.09, 0.95)
-            btn:SetBackdropBorderColor(0.34, 0.29, 0.20, 0.85)
+            btn:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
+            btn:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
         end
     end
     local fs = btn.GetFontString and btn:GetFontString()
@@ -232,12 +289,38 @@ local function StyleModernSubTab(btn, isActive, text)
     end
     if fs and fs.SetTextColor then
         if isActive then
-            fs:SetTextColor(1.0, 0.86, 0.20)
+            fs:SetTextColor(1.0, 0.95, 0.70)
         else
-            fs:SetTextColor(0.78, 0.74, 0.66)
+            fs:SetTextColor(0.75, 0.70, 0.60)
         end
     end
     if text and btn.SetText then btn:SetText(text) end
+    btn._isActive = isActive
+    if not btn._hookedTab and btn.HookScript then
+        btn._hookedTab = true
+        btn:HookScript("OnEnter", function(self)
+            StripBlizzardTextures(self)
+            if not self._isActive then
+                if self.SetBackdropColor then
+                    self:SetBackdropColor(0.20, 0.17, 0.12, 0.95)
+                    self:SetBackdropBorderColor(0.70, 0.58, 0.25, 0.95)
+                end
+                local s = self.GetFontString and self:GetFontString()
+                if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.60) end
+            end
+        end)
+        btn:HookScript("OnLeave", function(self)
+            StripBlizzardTextures(self)
+            if not self._isActive then
+                if self.SetBackdropColor then
+                    self:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
+                    self:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
+                end
+                local s = self.GetFontString and self:GetFontString()
+                if s and s.SetTextColor then s:SetTextColor(0.75, 0.70, 0.60) end
+            end
+        end)
+    end
 end
 
 -- =============================================================
@@ -348,13 +431,9 @@ function MarketSync.CreateNotificationsPanel(parent)
         local historyText = unread > 0 and string.format("Alert History (|cffffd700%d|r)", unread) or "Alert History"
 
         if panel.currentView == "watchlist" then
-            btnTabWatchlist:Disable()
-            btnTabHistory:Enable()
             StyleModernSubTab(btnTabWatchlist, true, "Tracked Watchlist")
             StyleModernSubTab(btnTabHistory, false, historyText)
         else
-            btnTabWatchlist:Enable()
-            btnTabHistory:Disable()
             StyleModernSubTab(btnTabWatchlist, false, "Tracked Watchlist")
             StyleModernSubTab(btnTabHistory, true, historyText)
         end
@@ -362,12 +441,14 @@ function MarketSync.CreateNotificationsPanel(parent)
     UpdateSubTabButtons()
 
     btnTabWatchlist:SetScript("OnClick", function()
+        if panel.currentView == "watchlist" then return end
         panel.currentView = "watchlist"
         UpdateSubTabButtons()
         RefreshView()
     end)
 
     btnTabHistory:SetScript("OnClick", function()
+        if panel.currentView == "history" then return end
         panel.currentView = "history"
         UpdateSubTabButtons()
         RefreshView()
@@ -378,9 +459,9 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local editorBox
     if isEmbedded then
-        editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 216)
+        editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 252)
     else
-        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 224)
+        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 252)
     end
 
     local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -390,7 +471,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- 34x34 Item Drop Slot
     local itemSlot = CreateFrame("Button", parentPrefix .. "ItemDropSlot", editorBox)
     itemSlot:SetSize(34, 34)
-    itemSlot:SetPoint("TOPLEFT", 10, -23)
+    itemSlot:SetPoint("TOPLEFT", 10, -24)
 
     local itemSlotIcon = itemSlot:CreateTexture(nil, "BORDER")
     itemSlotIcon:SetAllPoints()
@@ -469,12 +550,12 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Item Target EditBox
     local targetLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    targetLabel:SetPoint("TOPLEFT", 10, -60)
+    targetLabel:SetPoint("TOPLEFT", 10, -62)
     targetLabel:SetText("Item Name or ID:")
 
     local targetBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
     targetBox:SetSize(LEFT_W - 20, 20)
-    targetBox:SetPoint("TOPLEFT", 10, -74)
+    targetBox:SetPoint("TOPLEFT", 10, -76)
     targetBox:SetAutoFocus(false)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(targetBox, {
@@ -502,45 +583,104 @@ function MarketSync.CreateNotificationsPanel(parent)
         })
     end
 
-    -- Threshold Input & Preset Buttons
+    -- Threshold Input & Preset Buttons (Gold, Silver, Bronze/Copper)
     local threshLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    threshLabel:SetPoint("TOPLEFT", 10, -98)
-    threshLabel:SetText("Alert Below (Gold):")
+    threshLabel:SetPoint("TOPLEFT", 10, -100)
+    threshLabel:SetText("Alert Below:")
 
-    local threshBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
-    threshBox:SetSize(52, 22)
-    threshBox:SetPoint("TOPLEFT", 10, -114)
-    threshBox:SetAutoFocus(false)
-    threshBox:SetText("0")
-    if MarketSync.RegisterLinkAwareEditBox then
-        MarketSync.RegisterLinkAwareEditBox(threshBox)
-    end
+    local goldBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
+    goldBox:SetSize(40, 20)
+    goldBox:SetPoint("TOPLEFT", 10, -116)
+    goldBox:SetAutoFocus(false)
+    goldBox:SetNumeric(true)
+    if goldBox.SetMaxLetters then goldBox:SetMaxLetters(7) end
+    goldBox:SetText("0")
 
-    if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(threshBox, {
-            name = "Alert Threshold Gold",
-            context = "Edit Box",
-            description = "Notify when price drops below this gold amount",
-        })
+    local goldLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    goldLabel:SetPoint("LEFT", goldBox, "RIGHT", 2, 0)
+    goldLabel:SetText("|cffffd700g|r")
+
+    local silverBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
+    silverBox:SetSize(24, 20)
+    silverBox:SetPoint("LEFT", goldLabel, "RIGHT", 4, 0)
+    silverBox:SetAutoFocus(false)
+    silverBox:SetNumeric(true)
+    if silverBox.SetMaxLetters then silverBox:SetMaxLetters(2) end
+    silverBox:SetText("0")
+
+    local silverLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    silverLabel:SetPoint("LEFT", silverBox, "RIGHT", 2, 0)
+    silverLabel:SetText("|cffc0c0c0s|r")
+
+    local copperBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
+    copperBox:SetSize(24, 20)
+    copperBox:SetPoint("LEFT", silverLabel, "RIGHT", 4, 0)
+    copperBox:SetAutoFocus(false)
+    copperBox:SetNumeric(true)
+    if copperBox.SetMaxLetters then copperBox:SetMaxLetters(2) end
+    copperBox:SetText("0")
+
+    local copperLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    copperLabel:SetPoint("LEFT", copperBox, "RIGHT", 2, 0)
+    copperLabel:SetText("|cffeda55fc|r")
+
+    goldBox:SetScript("OnTabPressed", function() silverBox:SetFocus() end)
+    silverBox:SetScript("OnTabPressed", function() copperBox:SetFocus() end)
+    copperBox:SetScript("OnTabPressed", function() goldBox:SetFocus() end)
+
+    local function GetThresholdCopper()
+        local g = tonumber(goldBox:GetText()) or 0
+        local s = tonumber(silverBox:GetText()) or 0
+        local c = tonumber(copperBox:GetText()) or 0
+        return (g * 10000) + (s * 100) + c
     end
+    panel.GetThresholdCopper = GetThresholdCopper
+
+    local function SetThresholdCopper(copper)
+        local c = math.max(0, tonumber(copper) or 0)
+        local g = math.floor(c / 10000)
+        local s = math.floor((c % 10000) / 100)
+        local cop = c % 100
+        goldBox:SetText(tostring(g))
+        silverBox:SetText(tostring(s))
+        copperBox:SetText(tostring(cop))
+    end
+    panel.SetThresholdCopper = SetThresholdCopper
 
     local btnUndercut = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnUndercut:SetSize(46, 22)
-    btnUndercut:SetPoint("LEFT", threshBox, "RIGHT", 4, 0)
+    btnUndercut:SetSize(48, 20)
+    btnUndercut:SetPoint("TOPLEFT", editorBox, "TOPLEFT", 10, -140)
     btnUndercut:SetText("-10%")
     StyleModernPillButton(btnUndercut, "-10%")
 
     local btnMarket = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnMarket:SetSize(50, 22)
-    btnMarket:SetPoint("LEFT", btnUndercut, "RIGHT", 3, 0)
+    btnMarket:SetSize(52, 20)
+    btnMarket:SetPoint("LEFT", btnUndercut, "RIGHT", 6, 0)
     btnMarket:SetText("Market")
     StyleModernPillButton(btnMarket, "Market")
 
     local function ApplyThresholdPreset(multiplier)
         local mp = panel.editorMarketPrice or 0
+        if mp <= 0 then
+            local target = panel.editorItemLink or panel.editorItemID or targetBox:GetText()
+            if target and target ~= "" then
+                mp = (MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(target)) or 0
+                if mp > 0 then
+                    panel.editorMarketPrice = mp
+                    itemSlotMarket:SetText("Market: " .. FormatMoneyColored(mp))
+                end
+            end
+        end
+
         if mp > 0 then
             local targetCopper = math.max(0, math.floor(mp * multiplier))
-            threshBox:SetText(FormatGoldInput(targetCopper))
+            SetThresholdCopper(targetCopper)
+        else
+            local cur = GetThresholdCopper()
+            if cur > 0 and multiplier < 1.0 then
+                local targetCopper = math.max(0, math.floor(cur * multiplier))
+                SetThresholdCopper(targetCopper)
+            end
         end
     end
 
@@ -567,22 +707,22 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Dedicated Scope Row
     local scopeLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    scopeLabel:SetPoint("TOPLEFT", 10, -144)
+    scopeLabel:SetPoint("TOPLEFT", 10, -166)
     scopeLabel:SetText("Scope:")
 
     local scopeDropdown = BuildScopeDropdown(
         parentPrefix .. "NotificationsScopeDropdown",
         editorBox,
-        80,
+        LEFT_W - 68,
         function() return panel.editorScope end,
         function(v) panel.editorScope = v end
     )
-    scopeDropdown:SetPoint("TOPLEFT", editorBox, "TOPLEFT", 48, -139)
+    scopeDropdown:SetPoint("LEFT", scopeLabel, "RIGHT", 6, 0)
 
     -- Urgent Checkbox
     local urgentCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
     urgentCheck:SetSize(18, 18)
-    urgentCheck:SetPoint("TOPLEFT", 10, -168)
+    urgentCheck:SetPoint("TOPLEFT", 10, -194)
     local urgentText = urgentCheck.text or urgentCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     urgentCheck.text = urgentText
     urgentText:SetText("Urgent (Raid Warning)")
@@ -591,17 +731,17 @@ function MarketSync.CreateNotificationsPanel(parent)
     urgentCheck:SetChecked(false)
 
     -- Action Buttons (dynamically sized to never spill over LEFT_W - 20)
-    local saveW = isEmbedded and 104 or 114
-    local clearW = isEmbedded and 52 or 58
+    local saveW = isEmbedded and 100 or 108
+    local clearW = isEmbedded and 50 or 56
     local btnSave = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnSave:SetSize(saveW, 24)
-    btnSave:SetPoint("TOPLEFT", 10, -192)
+    btnSave:SetSize(saveW, 22)
+    btnSave:SetPoint("TOPLEFT", 10, -220)
     btnSave:SetText("Add Alert")
     StyleModernPillButton(btnSave, "Add Alert", true)
 
     local btnClear = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnClear:SetSize(clearW, 24)
-    btnClear:SetPoint("LEFT", btnSave, "RIGHT", 4, 0)
+    btnClear:SetSize(clearW, 22)
+    btnClear:SetPoint("LEFT", btnSave, "RIGHT", 6, 0)
     btnClear:SetText("Clear")
     StyleModernPillButton(btnClear, "Clear")
 
@@ -626,37 +766,67 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
 
     -- =========================================================
-    -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2 - Height 114)
+    -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2)
     -- =========================================================
     local importBox
     if isEmbedded then
-        importBox = CreateBox(panel, LEFT_X, -260, LEFT_W, 200)
+        importBox = CreateBox(panel, LEFT_X, -292, LEFT_W, 178)
         importBox:SetWidth(LEFT_W)
         importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
     else
-        importBox = CreateBox(panel, LEFT_X, TOP_Y - 230, LEFT_W, 118)
+        importBox = CreateBox(panel, LEFT_X, TOP_Y - 258, LEFT_W, 118)
     end
 
     local importTitle = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     importTitle:SetPoint("TOPLEFT", 10, -7)
     importTitle:SetText("|cffffd700Preferred List Import|r")
 
-    local importDropdown = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(importDropdown, LEFT_W - 54)
-    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", -12, -22)
+    local importDropdown = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate,BackdropTemplate")
+    local ddWidth = LEFT_W - 20
+    local innerWidth = math.max(40, ddWidth - 36)
+    UIDropDownMenu_SetWidth(importDropdown, innerWidth)
+    local ddLeft = _G[parentPrefix .. "NotificationsImportDropdownLeft"]
+    local ddMid = _G[parentPrefix .. "NotificationsImportDropdownMiddle"]
+    local ddRight = _G[parentPrefix .. "NotificationsImportDropdownRight"]
+    if ddLeft then ddLeft:Hide() end
+    if ddMid then ddMid:Hide() end
+    if ddRight then ddRight:Hide() end
+    importDropdown:SetSize(ddWidth, 22)
+    importDropdown:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    importDropdown:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+    importDropdown:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+    local ddBtn = _G[parentPrefix .. "NotificationsImportDropdownButton"]
+    if ddBtn then
+        ddBtn:ClearAllPoints()
+        ddBtn:SetPoint("RIGHT", importDropdown, "RIGHT", -2, 0)
+    end
+    local ddTxt = _G[parentPrefix .. "NotificationsImportDropdownText"]
+    if ddTxt then
+        ddTxt:ClearAllPoints()
+        ddTxt:SetPoint("LEFT", importDropdown, "LEFT", 8, 0)
+        ddTxt:SetPoint("RIGHT", importDropdown, "RIGHT", -22, 0)
+        ddTxt:SetJustifyH("LEFT")
+        ddTxt:SetTextColor(0.90, 0.85, 0.75)
+    end
+    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", 10, -25)
 
     local discountLabel = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     discountLabel:SetPoint("TOPLEFT", 10, -54)
     discountLabel:SetText("Discount:")
 
     local impBtnUndercut = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
-    impBtnUndercut:SetSize(48, 22)
+    impBtnUndercut:SetSize(46, 20)
     impBtnUndercut:SetPoint("LEFT", discountLabel, "RIGHT", 6, 0)
     impBtnUndercut:SetText("-10%")
     StyleModernPillButton(impBtnUndercut, "-10%")
 
     local impBtnMarket = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
-    impBtnMarket:SetSize(50, 22)
+    impBtnMarket:SetSize(48, 20)
     impBtnMarket:SetPoint("LEFT", impBtnUndercut, "RIGHT", 4, 0)
     impBtnMarket:SetText("Market")
     StyleModernPillButton(impBtnMarket, "Market")
@@ -691,21 +861,21 @@ function MarketSync.CreateNotificationsPanel(parent)
     HighlightImportDiscount(10)
 
     local btnDoImport = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnDoImport:SetSize(LEFT_W - 20, 24)
-    btnDoImport:SetPoint("TOPLEFT", 10, -82)
+    btnDoImport:SetSize(LEFT_W - 20, 22)
+    btnDoImport:SetPoint("TOPLEFT", 10, -80)
     btnDoImport:SetText("Import to Watchlist")
     StyleModernPillButton(btnDoImport, "Import to Watchlist", true)
 
     local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importStatusText:SetPoint("TOPLEFT", 10, -98)
+    importStatusText:SetPoint("TOPLEFT", 10, -104)
     importStatusText:SetText("")
 
     local importDesc = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
     if isEmbedded then
-        importDesc:SetPoint("TOPLEFT", 10, -118)
-        importDesc:SetPoint("BOTTOMRIGHT", -10, 10)
+        importDesc:SetPoint("TOPLEFT", 10, -106)
+        importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
     else
-        importDesc:SetPoint("TOPLEFT", 10, -98)
+        importDesc:SetPoint("TOPLEFT", 10, -104)
         importDesc:SetPoint("BOTTOMRIGHT", -10, 6)
     end
     importDesc:SetJustifyH("LEFT")
@@ -758,7 +928,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     btnClearSearch:SetPoint("RIGHT", searchBox, "RIGHT", -4, 0)
     local clearSearchText = btnClearSearch:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     clearSearchText:SetPoint("CENTER")
-    clearSearchText:SetText("✕")
+    clearSearchText:SetText("X")
     btnClearSearch:SetScript("OnClick", function()
         searchBox:SetText("")
         searchBox:ClearFocus()
@@ -990,7 +1160,9 @@ function MarketSync.CreateNotificationsPanel(parent)
         wDelBtn:SetPoint("LEFT", isEmbedded and 505 or 540, 0)
         local delText = wDelBtn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         delText:SetPoint("CENTER")
-        delText:SetText("|cffff4444✕|r")
+        delText:SetText("|cffff5555X|r")
+        wDelBtn:SetScript("OnEnter", function() delText:SetText("|cffff2222X|r") end)
+        wDelBtn:SetScript("OnLeave", function() delText:SetText("|cffff5555X|r") end)
         row.wDelBtn = wDelBtn
 
         -- History items
@@ -1030,21 +1202,97 @@ function MarketSync.CreateNotificationsPanel(parent)
         hSource:SetJustifyH("LEFT")
         row.hSource = hSource
 
-        -- Row click handler (load into editor)
-        row:SetScript("OnClick", function(self)
+        -- Row click handler (Left click: load into editor; Right click: context menu)
+        local function HandleRowClick(self, button)
+            if button == "RightButton" then
+                if row.request then
+                    local req = row.request
+                    local customActions = {
+                        {
+                            text = "Edit in Alert Form",
+                            func = function()
+                                panel.editorEditingID = req.id
+                                btnSave:SetText("Update Alert")
+                                SetEditorItem(req.matchValue or req.displayName or row.itemID)
+                                SetThresholdCopper(req.thresholdCopper)
+                                panel.editorScope = req.scope or "all"
+                                UIDropDownMenu_SetText(scopeDropdown, ScopeLabel(panel.editorScope))
+                                urgentCheck:SetChecked(req.urgent == true)
+                            end
+                        },
+                        {
+                            text = (req.enabled ~= false) and "Disable Alert" or "Enable Alert",
+                            func = function()
+                                if MarketSync.ToggleNotificationRequest then
+                                    MarketSync.ToggleNotificationRequest(req.id)
+                                else
+                                    req.enabled = not (req.enabled ~= false)
+                                end
+                                RefreshView()
+                            end
+                        },
+                        {
+                            text = "Delete Alert",
+                            func = function()
+                                if MarketSync.DeleteNotificationRequest then
+                                    MarketSync.DeleteNotificationRequest(req.id)
+                                    RefreshView()
+                                end
+                            end
+                        },
+                    }
+                    if MarketSync.ShowItemContextMenu then
+                        MarketSync.ShowItemContextMenu(row, {
+                            itemID = row.itemID,
+                            itemLink = row.itemLink,
+                            itemName = req.displayName or row.itemName,
+                            price = req.thresholdCopper,
+                            customActions = customActions,
+                        })
+                    end
+                elseif row.historyEntry then
+                    local h = row.historyEntry
+                    local customActions = {
+                        {
+                            text = "Load into Alert Form",
+                            func = function()
+                                SetEditorItem(h.itemLink or h.itemID or h.itemName)
+                                SetThresholdCopper(h.threshold)
+                            end
+                        }
+                    }
+                    if MarketSync.ShowItemContextMenu then
+                        MarketSync.ShowItemContextMenu(row, {
+                            itemID = row.itemID,
+                            itemLink = row.itemLink or h.itemLink,
+                            itemName = h.itemName or row.itemName,
+                            price = h.price or h.threshold,
+                            customActions = customActions,
+                        })
+                    end
+                end
+                return
+            end
+
+            -- Left click: load into editor
             if row.request then
                 panel.editorEditingID = row.request.id
                 btnSave:SetText("Update Alert")
                 SetEditorItem(row.request.matchValue or row.request.displayName or row.itemID)
-                threshBox:SetText(FormatGoldInput(row.request.thresholdCopper))
+                SetThresholdCopper(row.request.thresholdCopper)
                 panel.editorScope = row.request.scope or "all"
                 UIDropDownMenu_SetText(scopeDropdown, ScopeLabel(panel.editorScope))
                 urgentCheck:SetChecked(row.request.urgent == true)
             elseif row.historyEntry then
                 SetEditorItem(row.historyEntry.itemLink or row.historyEntry.itemID or row.historyEntry.itemName)
-                threshBox:SetText(FormatGoldInput(row.historyEntry.threshold))
+                SetThresholdCopper(row.historyEntry.threshold)
             end
-        end)
+        end
+
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetScript("OnClick", HandleRowClick)
+        iconBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        iconBtn:SetScript("OnClick", HandleRowClick)
 
         if tableScrollBar then
             tableScrollBar:AttachMouseWheel(row)
@@ -1183,14 +1431,15 @@ function MarketSync.CreateNotificationsPanel(parent)
         panel.editorMarketPrice = marketPrice
         if marketPrice > 0 then
             itemSlotMarket:SetText("Market: " .. FormatMoneyColored(marketPrice))
-            local curThresh = ParseGoldToCopper(threshBox:GetText())
+            local curThresh = GetThresholdCopper()
             if curThresh == 0 then
-                threshBox:SetText(FormatGoldInput(math.floor(marketPrice * 0.9)))
+                SetThresholdCopper(math.floor(marketPrice * 0.9))
             end
         else
             itemSlotMarket:SetText("Market: |cff888888--|r")
         end
     end
+    panel.SetEditorItem = SetEditorItem
 
     ClearEditorForm = function()
         panel.editorEditingID = nil
@@ -1203,7 +1452,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         itemSlotName:SetText("|cff888888Drag item here|r")
         itemSlotMarket:SetText("Market: |cff888888--|r")
         targetBox:SetText("")
-        threshBox:SetText("0")
+        SetThresholdCopper(0)
         panel.editorScope = "all"
         UIDropDownMenu_SetText(scopeDropdown, "All Scopes")
         if panel.RefreshUndercutButtons then panel.RefreshUndercutButtons() end
@@ -1220,13 +1469,24 @@ function MarketSync.CreateNotificationsPanel(parent)
         end
         self:ClearFocus()
     end)
+    targetBox:SetScript("OnEditFocusLost", function(self)
+        local val = TrimText(self:GetText())
+        if val ~= "" and not panel.editorItemID then
+            SetEditorItem(val)
+        end
+    end)
     targetBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
-    threshBox:SetScript("OnEnterPressed", function(self)
+    local function OnCoinEnterPressed(self)
         self:ClearFocus()
         btnSave:Click()
-    end)
-    threshBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    end
+    goldBox:SetScript("OnEnterPressed", OnCoinEnterPressed)
+    goldBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    silverBox:SetScript("OnEnterPressed", OnCoinEnterPressed)
+    silverBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    copperBox:SetScript("OnEnterPressed", OnCoinEnterPressed)
+    copperBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
     btnSave:SetScript("OnClick", function()
         local rawTarget = TrimText(targetBox:GetText())
@@ -1235,7 +1495,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             return
         end
 
-        local threshCopper = ParseGoldToCopper(threshBox:GetText())
+        local threshCopper = GetThresholdCopper()
         if threshCopper <= 0 then
             SetStatus("Set a threshold price greater than 0.", true)
             return
@@ -1683,5 +1943,27 @@ function MarketSync.RefreshNotificationUndercutButtons()
     for _, p in ipairs(registeredNotificationPanels) do
         if p.RefreshUndercutButtons then p.RefreshUndercutButtons() end
         if p.RefreshImportUndercutButton then p.RefreshImportUndercutButton() end
+    end
+end
+
+function MarketSync.OpenAlertEditorWithItem(itemRef, price)
+    if AuctionFrame and AuctionFrame:IsShown() and MarketSync.AuctionHouse and MarketSync.AuctionHouse.SelectTab then
+        MarketSync.AuctionHouse.SelectTab("alerts")
+    elseif MarketSync.SelectMainFrameTab then
+        if MarketSyncMainFrame and not MarketSyncMainFrame:IsShown() then
+            MarketSyncMainFrame:Show()
+        end
+        MarketSync.SelectMainFrameTab(6)
+    elseif MarketSync.ToggleNotificationsManager then
+        MarketSync.ToggleNotificationsManager()
+    end
+
+    for _, p in ipairs(registeredNotificationPanels) do
+        if p and p.SetEditorItem then
+            p.SetEditorItem(itemRef)
+            if price and price > 0 and p.SetThresholdCopper then
+                p.SetThresholdCopper(price)
+            end
+        end
     end
 end

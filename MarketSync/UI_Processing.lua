@@ -69,6 +69,15 @@ local function IsSupportedProcessType(processType)
     return v == "PROSPECT" or v == "MILL" or v == "DISENCHANT"
 end
 
+local function FormatProcessType(processType)
+    if not processType then return "-" end
+    local v = tostring(processType):upper()
+    if v == "DISENCHANT" then return "Disenchant" end
+    if v == "PROSPECT" then return "Prospect" end
+    if v == "MILL" then return "Milling" end
+    return tostring(processType)
+end
+
 local function BuildDropdown(frameName, parent, width, initFunc)
     local dd = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate,BackdropTemplate")
     local ddWidth = width or 120
@@ -305,8 +314,32 @@ local function CreateBox(parent, x, y, width, height)
     return box
 end
 
+local function StripBlizzardTextures(btn)
+    if not btn then return end
+    if btn.Left then btn.Left:SetAlpha(0) end
+    if btn.Middle then btn.Middle:SetAlpha(0) end
+    if btn.Right then btn.Right:SetAlpha(0) end
+    if btn.TopLeft then btn.TopLeft:SetAlpha(0) end
+    if btn.TopRight then btn.TopRight:SetAlpha(0) end
+    if btn.BottomLeft then btn.BottomLeft:SetAlpha(0) end
+    if btn.BottomRight then btn.BottomRight:SetAlpha(0) end
+    if btn.TopMiddle then btn.TopMiddle:SetAlpha(0) end
+    if btn.BottomMiddle then btn.BottomMiddle:SetAlpha(0) end
+    if btn.MiddleLeft then btn.MiddleLeft:SetAlpha(0) end
+    if btn.MiddleRight then btn.MiddleRight:SetAlpha(0) end
+    local nt = btn.GetNormalTexture and btn:GetNormalTexture()
+    if nt then nt:SetAlpha(0) end
+    local pt = btn.GetPushedTexture and btn:GetPushedTexture()
+    if pt then pt:SetAlpha(0) end
+    local dt = btn.GetDisabledTexture and btn:GetDisabledTexture()
+    if dt then dt:SetAlpha(0) end
+    local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if ht then ht:SetAlpha(0) end
+end
+
 local function StyleModernPillButton(btn, text, isGold)
     if not btn then return btn end
+    StripBlizzardTextures(btn)
     if type(text) == "boolean" and isGold == nil then
         isGold = text
         text = nil
@@ -319,8 +352,8 @@ local function StyleModernPillButton(btn, text, isGold)
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
         if isGold then
-            btn:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
-            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+            btn:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
+            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
         else
             btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
             btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
@@ -334,31 +367,35 @@ local function StyleModernPillButton(btn, text, isGold)
     end
     if fs and fs.SetTextColor then
         if isGold then
-            fs:SetTextColor(1.0, 0.88, 0.35)
+            fs:SetTextColor(1.0, 0.92, 0.45)
         else
-            fs:SetTextColor(0.90, 0.85, 0.75)
+            fs:SetTextColor(0.85, 0.80, 0.70)
         end
     end
     if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
-    if btn.HookScript then
+    btn._isGold = isGold
+    if not btn._hookedPill and btn.HookScript then
+        btn._hookedPill = true
         btn:HookScript("OnEnter", function(self)
+            StripBlizzardTextures(self)
             if self.SetBackdropColor then
-                if isGold then
-                    self:SetBackdropColor(0.32, 0.24, 0.10, 0.98)
-                    self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
+                if self._isGold then
+                    self:SetBackdropColor(0.50, 0.38, 0.12, 1.0)
+                    self:SetBackdropBorderColor(1.0, 0.88, 0.35, 1.0)
                 else
-                    self:SetBackdropColor(0.22, 0.19, 0.14, 0.95)
-                    self:SetBackdropBorderColor(0.95, 0.78, 0.25, 0.95)
+                    self:SetBackdropColor(0.22, 0.19, 0.15, 0.98)
+                    self:SetBackdropBorderColor(0.80, 0.65, 0.25, 0.95)
                 end
             end
             local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.40) end
+            if s and s.SetTextColor then s:SetTextColor(1.0, 0.95, 0.60) end
         end)
         btn:HookScript("OnLeave", function(self)
+            StripBlizzardTextures(self)
             if self.SetBackdropColor then
-                if isGold then
-                    self:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
-                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+                if self._isGold then
+                    self:SetBackdropColor(0.40, 0.30, 0.10, 0.95)
+                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 1.0)
                 else
                     self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
                     self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
@@ -366,10 +403,10 @@ local function StyleModernPillButton(btn, text, isGold)
             end
             local s = self.GetFontString and self:GetFontString()
             if s and s.SetTextColor then
-                if isGold then
-                    s:SetTextColor(1.0, 0.88, 0.35)
+                if self._isGold then
+                    s:SetTextColor(1.0, 0.92, 0.45)
                 else
-                    s:SetTextColor(0.90, 0.85, 0.75)
+                    s:SetTextColor(0.85, 0.80, 0.70)
                 end
             end
         end)
@@ -379,6 +416,7 @@ end
 
 local function StyleModernSubTab(btn, isActive, text)
     if not btn then return end
+    StripBlizzardTextures(btn)
     if btn.SetBackdrop then
         btn:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -387,11 +425,11 @@ local function StyleModernSubTab(btn, isActive, text)
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
         if isActive then
-            btn:SetBackdropColor(0.26, 0.20, 0.09, 0.98)
-            btn:SetBackdropBorderColor(1.0, 0.84, 0.15, 1.0)
+            btn:SetBackdropColor(0.38, 0.28, 0.10, 0.98)
+            btn:SetBackdropBorderColor(1.0, 0.85, 0.20, 1.0)
         else
-            btn:SetBackdropColor(0.11, 0.10, 0.09, 0.95)
-            btn:SetBackdropBorderColor(0.34, 0.29, 0.20, 0.85)
+            btn:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
+            btn:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
         end
     end
     local fs = btn.GetFontString and btn:GetFontString()
@@ -402,12 +440,38 @@ local function StyleModernSubTab(btn, isActive, text)
     end
     if fs and fs.SetTextColor then
         if isActive then
-            fs:SetTextColor(1.0, 0.86, 0.20)
+            fs:SetTextColor(1.0, 0.95, 0.70)
         else
-            fs:SetTextColor(0.78, 0.74, 0.66)
+            fs:SetTextColor(0.75, 0.70, 0.60)
         end
     end
     if text and btn.SetText then btn:SetText(text) end
+    btn._isActive = isActive
+    if not btn._hookedTab and btn.HookScript then
+        btn._hookedTab = true
+        btn:HookScript("OnEnter", function(self)
+            StripBlizzardTextures(self)
+            if not self._isActive then
+                if self.SetBackdropColor then
+                    self:SetBackdropColor(0.20, 0.17, 0.12, 0.95)
+                    self:SetBackdropBorderColor(0.70, 0.58, 0.25, 0.95)
+                end
+                local s = self.GetFontString and self:GetFontString()
+                if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.60) end
+            end
+        end)
+        btn:HookScript("OnLeave", function(self)
+            StripBlizzardTextures(self)
+            if not self._isActive then
+                if self.SetBackdropColor then
+                    self:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
+                    self:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
+                end
+                local s = self.GetFontString and self:GetFontString()
+                if s and s.SetTextColor then s:SetTextColor(0.75, 0.70, 0.60) end
+            end
+        end)
+    end
 end
 
 function MarketSync.CreateProcessingPanel(parent)
@@ -492,11 +556,6 @@ function MarketSync.CreateProcessingPanel(parent)
             local btn = modeButtons[def.key]
             if btn then
                 local isActive = (def.key == panel.activeMode)
-                if isActive then
-                    btn:Disable()
-                else
-                    btn:Enable()
-                end
                 StyleModernSubTab(btn, isActive, def.label)
             end
         end
@@ -702,12 +761,12 @@ function MarketSync.CreateProcessingPanel(parent)
     craftDesc:SetText("|cff777777Calculates profit for all recipes in your known profession against current auction prices.|r")
 
     local marginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    marginLabel:SetPoint("TOPLEFT", 8, -94)
-    marginLabel:SetText("Margin %")
+    marginLabel:SetPoint("TOPLEFT", 8, -72)
+    marginLabel:SetText("Desired Margin %")
 
     local marginBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    marginBox:SetSize(30, 22)
-    marginBox:SetPoint("LEFT", marginLabel, "RIGHT", 5, 0)
+    marginBox:SetSize(34, 22)
+    marginBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -90)
     marginBox:SetAutoFocus(false)
     marginBox:SetNumeric(true)
     marginBox:SetText("10")
@@ -716,26 +775,26 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     local marginBtn10 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    marginBtn10:SetSize(34, 22)
-    marginBtn10:SetPoint("LEFT", marginBox, "RIGHT", 4, 0)
+    marginBtn10:SetSize(36, 22)
+    marginBtn10:SetPoint("LEFT", marginBox, "RIGHT", 6, 0)
     marginBtn10:SetText("10%")
     StyleModernPillButton(marginBtn10, "10%")
     marginBtn10:SetScript("OnClick", function() marginBox:SetText("10") end)
 
     local marginBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    marginBtn20:SetSize(34, 22)
-    marginBtn20:SetPoint("LEFT", marginBtn10, "RIGHT", 3, 0)
+    marginBtn20:SetSize(36, 22)
+    marginBtn20:SetPoint("LEFT", marginBtn10, "RIGHT", 4, 0)
     marginBtn20:SetText("20%")
     StyleModernPillButton(marginBtn20, "20%")
     marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
 
     local minMarginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     minMarginLabel:SetPoint("TOPLEFT", 8, -72)
-    minMarginLabel:SetText("Min Craft")
+    minMarginLabel:SetText("Min Craft Profit")
 
     local minMarginGoldBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    minMarginGoldBox:SetSize(30, 22)
-    minMarginGoldBox:SetPoint("LEFT", minMarginLabel, "RIGHT", 5, 0)
+    minMarginGoldBox:SetSize(34, 22)
+    minMarginGoldBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -90)
     minMarginGoldBox:SetAutoFocus(false)
     minMarginGoldBox:SetNumeric(true)
     minMarginGoldBox:SetText("5")
@@ -744,15 +803,15 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     local minGoldBtn5 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    minGoldBtn5:SetSize(32, 22)
-    minGoldBtn5:SetPoint("LEFT", minMarginGoldBox, "RIGHT", 4, 0)
+    minGoldBtn5:SetSize(34, 22)
+    minGoldBtn5:SetPoint("LEFT", minMarginGoldBox, "RIGHT", 6, 0)
     minGoldBtn5:SetText("5g")
     StyleModernPillButton(minGoldBtn5, "5g")
     minGoldBtn5:SetScript("OnClick", function() minMarginGoldBox:SetText("5") end)
 
     local minGoldBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    minGoldBtn20:SetSize(34, 22)
-    minGoldBtn20:SetPoint("LEFT", minGoldBtn5, "RIGHT", 3, 0)
+    minGoldBtn20:SetSize(36, 22)
+    minGoldBtn20:SetPoint("LEFT", minGoldBtn5, "RIGHT", 4, 0)
     minGoldBtn20:SetText("20g")
     StyleModernPillButton(minGoldBtn20, "20g")
     minGoldBtn20:SetScript("OnClick", function() minMarginGoldBox:SetText("20") end)
@@ -827,20 +886,20 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.sortAscending = false
 
     local colDefs = isEmbedded and {
-        { name = "Item",     width = 168, sortKey = "itemSort"   },
-        { name = "Type/Lvl", width = 70,  sortKey = "typeSort"   },
-        { name = "Value",    width = 64,  sortKey = "valueSort"  },
-        { name = "Max",      width = 64,  sortKey = "maxSort"    },
-        { name = "Live",     width = 62,  sortKey = "liveSort"   },
-        { name = "Delta",    width = 62,  sortKey = "deltaSort"  },
-        { name = "Status",   width = 60,  sortKey = "statusSort" },
+        { name = "Item",     width = 175, sortKey = "itemSort"   },
+        { name = "Type",     width = 65,  sortKey = "typeSort"   },
+        { name = "Net EV",   width = 62,  sortKey = "valueSort"  },
+        { name = "Max/ea",   width = 62,  sortKey = "maxSort"    },
+        { name = "AH/ea",    width = 62,  sortKey = "liveSort"   },
+        { name = "Edge",     width = 62,  sortKey = "deltaSort"  },
+        { name = "Status",   width = 62,  sortKey = "statusSort" },
     } or {
-        { name = "Item",     width = 216, sortKey = "itemSort"   },
-        { name = "Type/Lvl", width = 72,  sortKey = "typeSort"   },
-        { name = "Value",    width = 72,  sortKey = "valueSort"  },
-        { name = "Max",      width = 72,  sortKey = "maxSort"    },
-        { name = "Live",     width = 68,  sortKey = "liveSort"   },
-        { name = "Delta",    width = 68,  sortKey = "deltaSort"  },
+        { name = "Item",     width = 224, sortKey = "itemSort"   },
+        { name = "Type",     width = 68,  sortKey = "typeSort"   },
+        { name = "Net EV",   width = 70,  sortKey = "valueSort"  },
+        { name = "Max/ea",   width = 70,  sortKey = "maxSort"    },
+        { name = "AH/ea",    width = 68,  sortKey = "liveSort"   },
+        { name = "Edge",     width = 68,  sortKey = "deltaSort"  },
         { name = "Status",   width = 64,  sortKey = "statusSort" },
     }
 
@@ -909,7 +968,7 @@ function MarketSync.CreateProcessingPanel(parent)
         { "Net EV", "Expected net resale value per input item after the 5% main Auction House sale cut." },
         { "Max/ea", "Maximum buy price per input item after applying the selected safety margin." },
         { "AH/ea", "Current Auctionator price per input item." },
-        { "Edge/ea", "Maximum buy price minus the current price, per input item." },
+        { "Edge", "Maximum buy price minus the current price, per input item." },
         { "Status", "Partial/stale pricing state and whether the current input price is at or below the maximum buy price." },
     }
     local CRAFT_HEADERS = {
@@ -1087,71 +1146,27 @@ function MarketSync.CreateProcessingPanel(parent)
             if not idKey then return end
 
             if button == "RightButton" then
-                local menuFrame = CreateFrame("Frame", "MarketSyncProcContextMenu", UIParent, "UIDropDownMenuTemplate")
                 local isSelected = selectTable[idKey] and true or false
-                UIDropDownMenu_Initialize(menuFrame, function(_, level)
-                    local info = UIDropDownMenu_CreateInfo()
-                    info.text = isSelected and "Deselect" or "Select"
-                    info.notCheckable = true
-                    info.func = function()
-                        selectTable[idKey] = not isSelected and true or nil
-                        row.selectedBg:SetShown(not isSelected)
-                        if row.data then row.data.isSelected = not isSelected end
-                    end
-                    UIDropDownMenu_AddButton(info, level)
-
-                    info = UIDropDownMenu_CreateInfo()
-                    info.text = "History"
-                    info.notCheckable = true
-                    info.func = function()
-                        if MarketSync.ShowItemHistory then
-                            local hDBKey = row.itemID and tostring(row.itemID) or nil
-                            if hDBKey then
-                                local hPrice = row.data and row.data.liveSort or nil
-                                MarketSync.ShowItemHistory(hDBKey, row.link, row.nameText:GetText(), row.iconTex:GetTexture(), hPrice)
-                            end
+                local customActions = {
+                    {
+                        text = isSelected and "Deselect" or "Select",
+                        func = function()
+                            selectTable[idKey] = not isSelected and true or nil
+                            row.selectedBg:SetShown(not isSelected)
+                            if row.data then row.data.isSelected = not isSelected end
                         end
-                    end
-                    UIDropDownMenu_AddButton(info, level)
-
-                    info = UIDropDownMenu_CreateInfo()
-                    info.text = "Analytics"
-                    info.notCheckable = true
-                    info.func = function()
-                        if MarketSync.ShowAnalytics then
-                            local hDBKey = row.itemID and tostring(row.itemID) or nil
-                            if hDBKey then
-                                local hPrice = row.data and row.data.liveSort or nil
-                                MarketSync.ShowAnalytics(hDBKey, row.link, row.nameText:GetText(), row.iconTex:GetTexture(), hPrice)
-                            end
-                        end
-                    end
-                    UIDropDownMenu_AddButton(info, level)
-
-                    info = UIDropDownMenu_CreateInfo()
-                    info.text = "Search in AH"
-                    info.notCheckable = true
-                    info.func = function()
-                        if MarketSync.SearchInAuctionHouse then
-                            local searchTarget = (row.data and row.data.name) or (row.nameText and row.nameText:GetText()) or row.itemID
-                            MarketSync.SearchInAuctionHouse(searchTarget)
-                        end
-                    end
-                    UIDropDownMenu_AddButton(info, level)
-
-                    info = UIDropDownMenu_CreateInfo()
-                    info.text = ""
-                    info.isTitle = true
-                    info.notCheckable = true
-                    UIDropDownMenu_AddButton(info, level)
-
-                    info = UIDropDownMenu_CreateInfo()
-                    info.text = "Cancel"
-                    info.notCheckable = true
-                    info.func = function() end
-                    UIDropDownMenu_AddButton(info, level)
-                end, "MENU")
-                ToggleDropDownMenu(1, nil, menuFrame, "cursor", 0, 0)
+                    }
+                }
+                if MarketSync.ShowItemContextMenu then
+                    MarketSync.ShowItemContextMenu(row, {
+                        itemID = row.itemID,
+                        itemLink = row.link,
+                        itemName = (row.data and row.data.name) or (row.nameText and row.nameText:GetText()),
+                        icon = row.iconTex and row.iconTex:GetTexture(),
+                        price = row.data and row.data.liveSort or nil,
+                        customActions = customActions,
+                    })
+                end
                 return
             end
 
@@ -1686,8 +1701,8 @@ function MarketSync.CreateProcessingPanel(parent)
                 itemID = r.inputItemID,
                 link = itemLink,
                 icon = icon,
-                nameText = Truncate(itemName, 24),
-                typeText = Truncate(tostring(r.processType or "-"), 12),
+                nameText = itemName,
+                typeText = FormatProcessType(r.processType),
                 valueText = MoneyText(evPerUnit),
                 maxText = MoneyText(maxBuy),
                 liveText = (livePrice > 0) and MoneyText(livePrice) or "-",
@@ -1798,8 +1813,8 @@ function MarketSync.CreateProcessingPanel(parent)
                 itemID = c.outputItemID,
                 link = itemLink,
                 icon = icon,
-                nameText = Truncate(itemName, 24),
-                typeText = Truncate(tostring(c.profession or c.skillType or "Craft"), 12),
+                nameText = itemName or outputName,
+                typeText = tostring(c.profession or c.skillType or "Craft"),
                 valueText = missingPrice and "-" or SignedMoneyText(margin, true),
                 maxText = missingPrice and "-" or MoneyText(maxSpend),
                 liveText = missingPrice and "-" or MoneyText(craftCost),
