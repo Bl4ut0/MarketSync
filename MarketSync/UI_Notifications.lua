@@ -137,6 +137,10 @@ end
 
 local function StyleModernPillButton(btn, text, isGold)
     if not btn then return btn end
+    if type(text) == "boolean" and isGold == nil then
+        isGold = text
+        text = nil
+    end
     if btn.SetBackdrop then
         btn:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -165,7 +169,7 @@ local function StyleModernPillButton(btn, text, isGold)
             fs:SetTextColor(0.90, 0.85, 0.75)
         end
     end
-    if text and btn.SetText then btn:SetText(text) end
+    if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
     if btn.HookScript then
         btn:HookScript("OnEnter", function(self)
             if self.SetBackdropColor then

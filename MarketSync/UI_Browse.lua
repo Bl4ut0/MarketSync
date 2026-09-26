@@ -1005,6 +1005,10 @@ MarketSync.BuildSearchIndex = BuildSearchIndex
 
 local function StyleModernPillButton(btn, text, isGold)
     if not btn then return btn end
+    if type(text) == "boolean" and isGold == nil then
+        isGold = text
+        text = nil
+    end
     if btn.SetBackdrop then
         btn:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -1033,7 +1037,7 @@ local function StyleModernPillButton(btn, text, isGold)
             fs:SetTextColor(0.90, 0.85, 0.75)
         end
     end
-    if text and btn.SetText then btn:SetText(text) end
+    if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
     if btn.HookScript then
         btn:HookScript("OnEnter", function(self)
             if self.SetBackdropColor then
@@ -1563,7 +1567,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     btnLoad:SetSize(154, 24)
     btnLoad:SetPoint("BOTTOMRIGHT", lowRamNotice, "BOTTOM", -8, 16)
     btnLoad:SetText("⚡ Load Scan Data")
-    if StyleModernPillButton then StyleModernPillButton(btnLoad, true) end
+    if StyleModernPillButton then StyleModernPillButton(btnLoad, "⚡ Load Scan Data", true) end
     btnLoad:SetScript("OnClick", function()
         btnLoad:SetText("Loading...")
         if btnLoad.SetEnabled then btnLoad:SetEnabled(false) end
@@ -1598,7 +1602,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     btnLowRamSettings:SetSize(174, 24)
     btnLowRamSettings:SetPoint("BOTTOMLEFT", lowRamNotice, "BOTTOM", 8, 16)
     btnLowRamSettings:SetText("Settings (Disable Low RAM)")
-    if StyleModernPillButton then StyleModernPillButton(btnLowRamSettings, false) end
+    if StyleModernPillButton then StyleModernPillButton(btnLowRamSettings, "Settings (Disable Low RAM)", false) end
     btnLowRamSettings:SetScript("OnClick", function()
         if MarketSync.OpenSettings then
             MarketSync.OpenSettings()
