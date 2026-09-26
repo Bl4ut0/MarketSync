@@ -228,9 +228,23 @@ local function CreateMainFrame()
 
     -- --- TITLE BAR SYNC STATUS MONITOR ---
     local syncButton = CreateFrame("Button", nil, MainFrame)
-    syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -38, -14)
+    if closeBtn then
+        syncButton:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
+    else
+        syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -38, -18)
+    end
     syncButton:SetHeight(20)
     syncButton:SetWidth(150)
+    local syncFrameLevel = 50
+    if closeBtn and closeBtn.GetFrameLevel then
+        syncFrameLevel = math.max(syncFrameLevel, closeBtn:GetFrameLevel() + 5)
+    end
+    if MainFrame.GetFrameLevel then
+        syncFrameLevel = math.max(syncFrameLevel, MainFrame:GetFrameLevel() + 20)
+    end
+    if syncButton.SetFrameLevel then
+        syncButton:SetFrameLevel(syncFrameLevel)
+    end
 
     local syncMonitor = syncButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     syncMonitor:SetPoint("RIGHT", syncButton, "RIGHT", 0, 0)
