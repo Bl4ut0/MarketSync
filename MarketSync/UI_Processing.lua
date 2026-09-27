@@ -1709,7 +1709,17 @@ function MarketSync.CreateProcessingPanel(parent)
                 marginText = "-" .. marginText
             end
             if not missingPrice then
-                detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profit/Craft:"), (margin >= 0) and ColorGood(marginText) or ColorBad(marginText))
+                if c.marginMin and c.marginMax and c.marginMax > c.marginMin then
+                    detailLines[#detailLines + 1] = string.format("%s %s / %s / %s",
+                        ColorLabel("Profit/Craft (min / expected / max):"),
+                        (c.marginMin >= 0 and ColorGood or ColorBad)(SignedMoneyText(c.marginMin, true)),
+                        ((c.marginExpected or margin) >= 0 and ColorGood or ColorBad)(SignedMoneyText(c.marginExpected or margin, true)),
+                        (c.marginMax >= 0 and ColorGood or ColorBad)(SignedMoneyText(c.marginMax, true)))
+                    detailLines[#detailLines + 1] = ColorMuted(string.format("Guaranteed floor: %s | Max proc yield: %s",
+                        SignedMoneyText(c.marginMin, true), SignedMoneyText(c.marginMax, true)))
+                else
+                    detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profit/Craft:"), (margin >= 0) and ColorGood(marginText) or ColorBad(marginText))
+                end
             end
 
             if maxSpend > 0 and not missingPrice then
@@ -1730,6 +1740,15 @@ function MarketSync.CreateProcessingPanel(parent)
                     ColorMuted(matName), qty, ColorMuted("@"), priceColor, ColorMuted("/ea"))
             end
 
+            local valueDisplay = "-"
+            if not missingPrice then
+                if c.marginMin and c.marginMax and c.marginMax > c.marginMin then
+                    valueDisplay = SignedMoneyText(c.marginMin, true) .. " +"
+                else
+                    valueDisplay = SignedMoneyText(margin, true)
+                end
+            end
+
             rows[#rows + 1] = {
                 recipeName = outputName,
                 itemID = c.outputItemID,
@@ -1737,7 +1756,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 icon = icon,
                 nameText = itemName or outputName,
                 typeText = tostring(c.profession or c.skillType or "Craft"),
-                valueText = missingPrice and "-" or SignedMoneyText(margin, true),
+                valueText = valueDisplay,
                 maxText = missingPrice and "-" or MoneyText(maxSpend),
                 liveText = missingPrice and "-" or MoneyText(craftCost),
                 deltaText = missingPrice and "-" or FormatDelta(capDelta),

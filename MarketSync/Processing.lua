@@ -1859,8 +1859,17 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper)
         local outputQty = math.max(1, tonumber(recipe.outputQty) or 1)
         local outputQtyMin = math.max(1, tonumber(recipe.outputQtyMin) or outputQty)
         local outputQtyMax = math.max(outputQtyMin, tonumber(recipe.outputQtyMax) or outputQty)
-        local revenue = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQty)) or nil
-        local margin = not hasMissing and (revenue - craftCost) or nil
+        local revenueExpected = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQty)) or nil
+        local revenueMin = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQtyMin)) or nil
+        local revenueMax = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQtyMax)) or nil
+
+        -- Under-promise & over-deliver: conservative baseline uses outputQtyMin
+        local marginMin = not hasMissing and (revenueMin - craftCost) or nil
+        local marginExpected = not hasMissing and (revenueExpected - craftCost) or nil
+        local marginMax = not hasMissing and (revenueMax - craftCost) or nil
+
+        local revenue = revenueMin or revenueExpected
+        local margin = marginMin or marginExpected
         local maxCraftCost = revenue and math.max(0, revenue - minMargin) or nil
         local matCapScale = (maxCraftCost and craftCost > 0) and (maxCraftCost / craftCost) or nil
         if matCapScale then
@@ -1885,7 +1894,13 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper)
             ahCutPercent = MAIN_AH_CUT_PERCENT,
             craftCost = craftCost,
             revenue = revenue,
+            revenueMin = revenueMin,
+            revenueExpected = revenueExpected,
+            revenueMax = revenueMax,
             margin = margin,
+            marginMin = marginMin,
+            marginExpected = marginExpected,
+            marginMax = marginMax,
             hasMissingPrice = hasMissing,
             meetsMargin = margin and (margin >= minMargin) or false,
             outputAge = outputAge,
