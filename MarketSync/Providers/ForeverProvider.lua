@@ -138,15 +138,42 @@ function ForeverProvider.GetSnapshot(keyOrLink)
             dbKey = "p:" .. key.itemID .. ":" .. key.itemSuffix
         end
         local entry = realmDB.PersonalData[dbKey]
-        if entry and entry.m and entry.m > 0 then
-            local seenAt = realmDB.PersonalScanTime or time()
-            return {
-                seenAt = seenAt,
-                complete = true,
-                minUnitPrice = entry.m,
-                available = 1,
-                source = "native-personal",
-            }
+        if entry then
+            local price = entry.m
+            if (not price or price <= 0) and entry.h and type(entry.h) == "table" then
+                local maxDay = -1
+                local latestStr = nil
+                for dayKey, histStr in pairs(entry.h) do
+                    local d = tonumber(dayKey)
+                    if d and d > maxDay then
+                        maxDay = d
+                        latestStr = histStr
+                    end
+                end
+                if latestStr and type(latestStr) == "string" then
+                    local lastPoint = latestStr:match("[^,]+$")
+                    if lastPoint then
+                        local _, p_b36 = lastPoint:match("^(%d+):([%w%-]+):")
+                        if p_b36 and MarketSync.FromBase36 then
+                            local p = MarketSync.FromBase36(p_b36)
+                            if p and p > 0 then
+                                price = p
+                                entry.m = p
+                            end
+                        end
+                    end
+                end
+            end
+            if price and price > 0 then
+                local seenAt = realmDB.PersonalScanTime or time()
+                return {
+                    seenAt = seenAt,
+                    complete = true,
+                    minUnitPrice = price,
+                    available = 1,
+                    source = "native-personal",
+                }
+            end
         end
     end
 

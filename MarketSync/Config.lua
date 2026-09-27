@@ -989,8 +989,34 @@ function MarketSync.GetAuctionPrice(itemLink)
                 or tostring(itemLink):match("item:%d+")) and tostring(id))
             or tostring(itemLink)
         local entry = realmDB.PersonalData[dbKey]
-        if entry and entry.m and entry.m > 0 then
-            return entry.m
+        if entry then
+            if entry.m and entry.m > 0 then
+                return entry.m
+            end
+            if entry.h and type(entry.h) == "table" then
+                local maxDay = -1
+                local latestStr = nil
+                for dayKey, histStr in pairs(entry.h) do
+                    local d = tonumber(dayKey)
+                    if d and d > maxDay then
+                        maxDay = d
+                        latestStr = histStr
+                    end
+                end
+                if latestStr and type(latestStr) == "string" then
+                    local lastPoint = latestStr:match("[^,]+$")
+                    if lastPoint then
+                        local _, p_b36 = lastPoint:match("^(%d+):([%w%-]+):")
+                        if p_b36 and MarketSync.FromBase36 then
+                            local price = MarketSync.FromBase36(p_b36)
+                            if price and price > 0 then
+                                entry.m = price
+                                return price
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
     return nil
@@ -1012,6 +1038,19 @@ function MarketSync.GetAuctionAge(itemLink)
         if type(method) == "function" then
             local ok, age = pcall(method, ADDON_NAME, itemID or itemLink)
             if ok then return age end
+        end
+    end
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and realmDB.PersonalData and itemLink then
+        local id, suffix = MarketSync.ParseItemIDFromDBKey(itemLink)
+        local dbKey = (id and suffix and suffix ~= 0) and string.format("p:%d:%d", id, suffix)
+            or (id and (type(itemLink) == "number" or tostring(itemLink):match("^%d+$")
+                or tostring(itemLink):match("item:%d+")) and tostring(id))
+            or tostring(itemLink)
+        local entry = realmDB.PersonalData[dbKey]
+        if entry then
+            local scanTime = realmDB.PersonalScanTime or time()
+            return math.max(0, time() - scanTime) / 86400
         end
     end
     return nil
@@ -1904,6 +1943,9 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
     slider:SetScript("OnMouseWheel", function(self, delta)
         HandleWheel(delta)
     end)
+    slider.HandleWheel = function(self, delta)
+        HandleWheel(delta)
+    end
 
     function slider:AttachMouseWheel(targetFrame)
         if not targetFrame then return end

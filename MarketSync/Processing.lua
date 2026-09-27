@@ -1531,6 +1531,107 @@ function MarketSync.DeleteProcessingCustomSelection(selectionID)
     return false
 end
 
+local function GetItemDisenchantMeta(itemID)
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    local info = cache and cache[itemID]
+    local quality = info and tonumber(info.r)
+    local ilvl = info and tonumber(info.i)
+    local classID = info and tonumber(info.c)
+    local name = info and info.n
+
+    if not (quality and ilvl and classID) then
+        local rName, _, rQuality, rIlvl, _, _, _, _, _, rIcon, _, rClassID = SafeGetItemInfo(itemID)
+        if rQuality and rIlvl and rClassID then
+            quality = rQuality
+            ilvl = rIlvl
+            classID = rClassID
+            name = rName or name
+            if MarketSyncDB and MarketSyncDB.ItemInfoCache then
+                local c = MarketSyncDB.ItemInfoCache[itemID] or {}
+                c.n = name or c.n
+                c.r = quality
+                c.i = ilvl
+                c.c = classID
+                if rIcon then c.ic = rIcon end
+                MarketSyncDB.ItemInfoCache[itemID] = c
+            end
+        end
+    end
+    return quality, ilvl, classID, name
+end
+
+local function GetDisenchantCandidateItemIDs()
+    local seen = {}
+    local itemIDs = {}
+
+    local function AddID(rawID)
+        local id = tonumber(rawID)
+        if id and id > 0 and not seen[id] then
+            seen[id] = true
+            itemIDs[#itemIDs + 1] = id
+        end
+    end
+
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    if type(cache) == "table" then
+        for id in pairs(cache) do
+            AddID(id)
+        end
+    end
+
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if realmDB and type(realmDB.PersonalData) == "table" then
+        for key in pairs(realmDB.PersonalData) do
+            local numID = tonumber(key)
+            if numID then
+                AddID(numID)
+            elseif type(key) == "string" and not key:find("^p:") then
+                local firstPart = key:match("^(%d+)")
+                if firstPart then AddID(firstPart) end
+            end
+        end
+    end
+
+    if AUCTIONATOR_PRICE_DATABASE and type(AUCTIONATOR_PRICE_DATABASE) == "table" then
+        for key in pairs(AUCTIONATOR_PRICE_DATABASE) do
+            local numID = tonumber(key)
+            if numID then
+                AddID(numID)
+            elseif type(key) == "string" and not key:find("^p:") then
+                local firstPart = key:match("^(%d+)")
+                if firstPart then AddID(firstPart) end
+            end
+        end
+    end
+
+    return itemIDs
+end
+
+function MarketSync.HasProcessingDefinitionForTarget(targetItemID)
+    local tid = tonumber(targetItemID)
+    if not tid or tid <= 0 then return false end
+
+    for _, def in pairs(MarketSync.ProcessingData or {}) do
+        if IsProcessTypeSupported(def.type) then
+            for _, y in ipairs(def.yields or {}) do
+                if tonumber(y.itemID) == tid then
+                    return true
+                end
+            end
+        end
+    end
+
+    if IsProcessTypeSupported("DISENCHANT") then
+        for _, id in ipairs(GetAllDisenchantOutputIDs()) do
+            if id == tid then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 function MarketSync.FindArbitrageByTarget(targetItemID, marginPercent)
     local targetPrice, targetAge, targetStale = GetPriceInfoByItemID(targetItemID)
     if not targetPrice or targetPrice <= 0 then
@@ -1584,54 +1685,49 @@ function MarketSync.FindArbitrageByTarget(targetItemID, marginPercent)
         end
     end
 
-    -- 2. Disenchant sources — find items in ItemInfoCache whose DE table yields the target material
+    -- 2. Disenchant sources
     if IsProcessTypeSupported("DISENCHANT") then
         local tid = tonumber(targetItemID)
-        local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
-        if tid and type(cache) == "table" then
-            for itemID, info in pairs(cache) do
-                if type(info) == "table" then
-                    local quality = tonumber(info.r) or 0
-                    local ilvl = tonumber(info.i) or 0
-                    local classID = tonumber(info.c)
-
-                    if quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl > 0 then
-                        local expectedQty = 0
-                        for _, drop in ipairs(GetDisenchantDropList(quality, ilvl, classID)) do
-                            if drop.itemID == tid then
-                                expectedQty = expectedQty + drop.expected
-                            end
+        if tid then
+            local candidates = GetDisenchantCandidateItemIDs()
+            for _, itemID in ipairs(candidates) do
+                local quality, ilvl, classID, name = GetItemDisenchantMeta(itemID)
+                if quality and quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl and ilvl > 0 then
+                    local expectedQty = 0
+                    for _, drop in ipairs(GetDisenchantDropList(quality, ilvl, classID)) do
+                        if drop.itemID == tid then
+                            expectedQty = expectedQty + drop.expected
                         end
-                        if expectedQty > 0 then
-                            local grossTargetValue = targetPrice * expectedQty
-                            local netTargetValue = NetMainAuctionValue(grossTargetValue)
-                            local maxBuy = math.floor(netTargetValue * marginMult)
-                            local livePrice, liveAge, liveStale = GetPriceInfoByItemID(itemID)
-                            livePrice = livePrice or 0
-                            if livePrice > 0 then
-                                table.insert(results, {
-                                    inputItemID = tonumber(itemID),
-                                    inputName = info.n or ("Item " .. tostring(itemID)),
-                                    processType = "DISENCHANT",
-                                    stackSize = 1,
-                                    targetItemID = targetItemID,
-                                    targetName = GetItemName(targetItemID) or ("Item " .. tostring(targetItemID)),
-                                    targetPrice = targetPrice,
-                                    targetAge = targetAge,
-                                    targetStale = targetStale,
-                                    expectedTarget = expectedQty,
-                                    grossEVPerAction = math.floor(grossTargetValue),
-                                    evPerAction = math.floor(netTargetValue),
-                                    evPerUnit = math.floor(netTargetValue),
-                                    ahCutPercent = MAIN_AH_CUT_PERCENT,
-                                    maxBuyPerUnit = maxBuy,
-                                    maxBuyPerStack = maxBuy,
-                                    livePrice = livePrice,
-                                    liveAge = liveAge,
-                                    liveStale = liveStale,
-                                    profitable = (livePrice <= maxBuy),
-                                })
-                            end
+                    end
+                    if expectedQty > 0 then
+                        local grossTargetValue = targetPrice * expectedQty
+                        local netTargetValue = NetMainAuctionValue(grossTargetValue)
+                        local maxBuy = math.floor(netTargetValue * marginMult)
+                        local livePrice, liveAge, liveStale = GetPriceInfoByItemID(itemID)
+                        livePrice = livePrice or 0
+                        if livePrice > 0 then
+                            table.insert(results, {
+                                inputItemID = tonumber(itemID),
+                                inputName = name or ("Item " .. tostring(itemID)),
+                                processType = "DISENCHANT",
+                                stackSize = 1,
+                                targetItemID = targetItemID,
+                                targetName = GetItemName(targetItemID) or ("Item " .. tostring(targetItemID)),
+                                targetPrice = targetPrice,
+                                targetAge = targetAge,
+                                targetStale = targetStale,
+                                expectedTarget = expectedQty,
+                                grossEVPerAction = math.floor(grossTargetValue),
+                                evPerAction = math.floor(netTargetValue),
+                                evPerUnit = math.floor(netTargetValue),
+                                ahCutPercent = MAIN_AH_CUT_PERCENT,
+                                maxBuyPerUnit = maxBuy,
+                                maxBuyPerStack = maxBuy,
+                                livePrice = livePrice,
+                                liveAge = liveAge,
+                                liveStale = liveStale,
+                                profitable = (livePrice <= maxBuy),
+                            })
                         end
                     end
                 end
@@ -1692,52 +1788,43 @@ function MarketSync.FindArbitrageByProcess(processType, marginPercent)
         end
     end
 
-    -- 2. Disenchant entries — scan existing ItemInfoCache
+    -- 2. Disenchant entries
     if IsProcessTypeSupported("DISENCHANT") and (not processType or processType == "DISENCHANT") then
-        local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
-        if type(cache) == "table" then
-            for itemID, info in pairs(cache) do
-                if type(info) == "table" then
-                    local quality = tonumber(info.r) or 0
-                    local ilvl = tonumber(info.i) or 0
-                    local classID = tonumber(info.c)
+        local candidates = GetDisenchantCandidateItemIDs()
+        for _, itemID in ipairs(candidates) do
+            local quality, ilvl, classID, name = GetItemDisenchantMeta(itemID)
+            if quality and quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl and ilvl > 0 then
+                local deEV, deStale, deMissing, deGross, dePartial, deDrops, deLow, deHigh =
+                    EstimateDisenchantEV(quality, ilvl, classID, tonumber(itemID))
 
-                    -- Only equipment (Weapons = 2, Armor = 4) with Uncommon+ quality
-                    if quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl > 0 then
-                        local deEV, deStale, deMissing, deGross, dePartial, deDrops, deLow, deHigh =
-                            EstimateDisenchantEV(quality, ilvl, classID, tonumber(itemID))
+                if deEV and deEV > 0 then
+                    local maxBuyPerUnit = math.floor(deEV * marginMult)
+                    local livePrice, liveAge, liveStale = GetPriceInfoByItemID(itemID)
+                    livePrice = livePrice or 0
 
-                        if deEV and deEV > 0 then
-                            local maxBuyPerUnit = math.floor(deEV * marginMult)
-                            local livePrice, liveAge, liveStale = GetPriceInfoByItemID(itemID)
-                            livePrice = livePrice or 0
-
-                            -- Only include items that have a live AH price (i.e. actually listed)
-                            if livePrice > 0 then
-                                table.insert(results, {
-                                    inputItemID = tonumber(itemID),
-                                    inputName = info.n or ("Item " .. tostring(itemID)),
-                                    processType = "DISENCHANT",
-                                    stackSize = 1,
-                                    evPerAction = deEV,
-                                    grossEVPerAction = math.floor(tonumber(deGross) or 0),
-                                    evPerUnit = deEV,
-                                    ahCutPercent = MAIN_AH_CUT_PERCENT,
-                                    evStale = deStale,
-                                    missingOutputs = deMissing,
-                                    partialEV = dePartial,
-                                    lowNetPerAction = deLow,
-                                    highNetPerAction = deHigh,
-                                    disenchantDrops = deDrops,
-                                    disenchantItemLevel = ilvl,
-                                    maxBuyPerUnit = maxBuyPerUnit,
-                                    livePrice = livePrice,
-                                    liveAge = liveAge,
-                                    liveStale = liveStale,
-                                    profitable = (livePrice <= maxBuyPerUnit),
-                                })
-                            end
-                        end
+                    if livePrice > 0 then
+                        table.insert(results, {
+                            inputItemID = tonumber(itemID),
+                            inputName = name or ("Item " .. tostring(itemID)),
+                            processType = "DISENCHANT",
+                            stackSize = 1,
+                            evPerAction = deEV,
+                            grossEVPerAction = math.floor(tonumber(deGross) or 0),
+                            evPerUnit = deEV,
+                            ahCutPercent = MAIN_AH_CUT_PERCENT,
+                            evStale = deStale,
+                            missingOutputs = deMissing,
+                            partialEV = dePartial,
+                            lowNetPerAction = deLow,
+                            highNetPerAction = deHigh,
+                            disenchantDrops = deDrops,
+                            disenchantItemLevel = ilvl,
+                            maxBuyPerUnit = maxBuyPerUnit,
+                            livePrice = livePrice,
+                            liveAge = liveAge,
+                            liveStale = liveStale,
+                            profitable = (livePrice <= maxBuyPerUnit),
+                        })
                     end
                 end
             end

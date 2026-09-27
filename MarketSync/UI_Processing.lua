@@ -425,12 +425,15 @@ function MarketSync.CreateProcessingPanel(parent)
     local ApplyDisplaySort
     local RunActiveMode
     local UpdateResultRows
+    local HandleTableMouseWheel
 
     local tableScrollBar
     if MarketSync.CreateModernTableScrollBar and rightBox then
         tableScrollBar = MarketSync.CreateModernTableScrollBar(panel, rightBox, function(newPage)
             panel.page = newPage
-            if UpdateResultRows then
+            if panel.UpdateResultRows then
+                panel.UpdateResultRows()
+            elseif UpdateResultRows then
                 UpdateResultRows()
             end
         end, 8, isEmbedded and -24 or -28, 28)
@@ -1059,6 +1062,18 @@ function MarketSync.CreateProcessingPanel(parent)
         end)
 
         row:Hide()
+        row:EnableMouseWheel(true)
+        row:SetScript("OnMouseWheel", function(self, delta)
+            if HandleTableMouseWheel then
+                HandleTableMouseWheel(delta)
+            end
+        end)
+        iconButton:EnableMouseWheel(true)
+        iconButton:SetScript("OnMouseWheel", function(self, delta)
+            if HandleTableMouseWheel then
+                HandleTableMouseWheel(delta)
+            end
+        end)
         if tableScrollBar then
             tableScrollBar:AttachMouseWheel(row)
             tableScrollBar:AttachMouseWheel(iconButton)
@@ -1306,7 +1321,7 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end
 
-    local function UpdateResultRows()
+    UpdateResultRows = function()
         local rows = panel.displayRows or {}
         local total = #rows
         local totalPages = math.max(1, math.ceil(total / numResultsPerPage))
@@ -1335,7 +1350,13 @@ function MarketSync.CreateProcessingPanel(parent)
                 row.data = data
                 row.craftID = data.recipeName
                 if row.selectedBg then
-                    row.selectedBg:SetShown(data.isSelected and true or false)
+                    if row.selectedBg.SetShown then
+                        row.selectedBg:SetShown(data.isSelected and true or false)
+                    elseif data.isSelected then
+                        row.selectedBg:Show()
+                    else
+                        row.selectedBg:Hide()
+                    end
                 end
 
                 if MarketSync.SetAccessibility then
@@ -1395,6 +1416,27 @@ function MarketSync.CreateProcessingPanel(parent)
 
         if tableScrollBar then
             tableScrollBar:Update(panel.page, totalPages - 1)
+        end
+    end
+    panel.UpdateResultRows = UpdateResultRows
+
+    HandleTableMouseWheel = function(delta)
+        if tableScrollBar and tableScrollBar.HandleWheel then
+            tableScrollBar:HandleWheel(delta)
+            return
+        end
+        local total = #(panel.displayRows or {})
+        local totalPages = math.max(1, math.ceil(total / numResultsPerPage))
+        if delta > 0 then
+            if panel.page > 0 then
+                panel.page = panel.page - 1
+                UpdateResultRows()
+            end
+        else
+            if panel.page < (totalPages - 1) then
+                panel.page = panel.page + 1
+                UpdateResultRows()
+            end
         end
     end
 
@@ -1775,21 +1817,19 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.displayRows = BuildArbitrageDisplay(results)
 
             local targetName = FindTargetName(panel.selectedTargetID) or ("Item " .. tostring(panel.selectedTargetID))
-            statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", targetName, #panel.displayRows))
-            local hasTargetDefinition = false
-            for _, def in pairs(MarketSync.ProcessingData or {}) do
-                for _, y in ipairs(def.yields or {}) do
-                    if tonumber(y.itemID) == tonumber(panel.selectedTargetID) then
-                        hasTargetDefinition = true
-                        break
-                    end
-                end
-                if hasTargetDefinition then break end
-            end
-            if hasTargetDefinition then
-                SetNoResultsMessage("No target arbitrage rows met the current inputs.")
+            local targetPrice = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(panel.selectedTargetID)
+            if not targetPrice or targetPrice <= 0 then
+                statusSummary:SetText(string.format("|cffffaa00%s: No AH price data|r", targetName))
+                SetNoResultsMessage(string.format("'%s' has no current AH price. Cannot calculate arbitrage without output market value.", targetName))
             else
-                SetNoResultsMessage("Target has no processing definitions in the current dataset yet.")
+                statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", targetName, #panel.displayRows))
+                local hasTargetDefinition = MarketSync.HasProcessingDefinitionForTarget
+                    and MarketSync.HasProcessingDefinitionForTarget(panel.selectedTargetID)
+                if hasTargetDefinition then
+                    SetNoResultsMessage("No items currently on the AH yield this material.")
+                else
+                    SetNoResultsMessage("Target has no processing definitions in the current dataset yet.")
+                end
             end
             ApplyDisplaySort()
             return
@@ -1803,7 +1843,7 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.displayRows = BuildArbitrageDisplay(results)
 
             statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", panel.selectedProcess or "ALL", #panel.displayRows))
-            SetNoResultsMessage("No process-scan rows met the current inputs.")
+            SetNoResultsMessage("No processable items with current auction prices found.")
             ApplyDisplaySort()
             return
         end
@@ -2299,30 +2339,27 @@ function MarketSync.CreateProcessingPanel(parent)
     end)
 
     prevBtn:SetScript("OnClick", function()
-        panel.page = panel.page - 1
-        UpdateResultRows()
+        if tableScrollBar and tableScrollBar.HandleWheel then
+            tableScrollBar:HandleWheel(1)
+        else
+            panel.page = panel.page - 1
+            UpdateResultRows()
+        end
     end)
 
     nextBtn:SetScript("OnClick", function()
-        panel.page = panel.page + 1
-        UpdateResultRows()
+        if tableScrollBar and tableScrollBar.HandleWheel then
+            tableScrollBar:HandleWheel(-1)
+        else
+            panel.page = panel.page + 1
+            UpdateResultRows()
+        end
     end)
 
     panel:EnableMouseWheel(true)
     panel:SetScript("OnMouseWheel", function(self, delta)
-        if delta > 0 then
-            if self.page > 0 then
-                self.page = self.page - 1
-                UpdateResultRows()
-            end
-            return
-        end
-
-        local total = #(self.displayRows or {})
-        local maxPage = math.max(0, math.ceil(total / RESULTS_PER_PAGE) - 1)
-        if self.page < maxPage then
-            self.page = self.page + 1
-            UpdateResultRows()
+        if HandleTableMouseWheel then
+            HandleTableMouseWheel(delta)
         end
     end)
 

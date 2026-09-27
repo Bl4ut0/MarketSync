@@ -1910,6 +1910,27 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
     assert(198 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
 
+    -- Test mouse wheel scrolling on processing panel
+    procMain.displayRows = {}
+    for r = 1, 25 do
+      procMain.displayRows[r] = { nameText = "Item " .. r, itemID = r }
+    end
+    procMain.page = 0
+    procMain.UpdateResultRows()
+    assert(procMain.page == 0, "Initial page should be 0")
+    if procMain.resultRows[1].scripts and procMain.resultRows[1].scripts.OnMouseWheel then
+      procMain.resultRows[1].scripts.OnMouseWheel(procMain.resultRows[1], -1)
+      assert(procMain.page == 1, "Page after scroll down on row should be 1, got: " .. tostring(procMain.page))
+      procMain.resultRows[1].scripts.OnMouseWheel(procMain.resultRows[1], 1)
+      assert(procMain.page == 0, "Page after scroll up on row should be 0, got: " .. tostring(procMain.page))
+    end
+    if procMain.scripts and procMain.scripts.OnMouseWheel then
+      procMain.scripts.OnMouseWheel(procMain, -1)
+      assert(procMain.page == 1, "Page after scroll down on panel should be 1, got: " .. tostring(procMain.page))
+      procMain.scripts.OnMouseWheel(procMain, 1)
+      assert(procMain.page == 0, "Page after scroll up on panel should be 0, got: " .. tostring(procMain.page))
+    end
+
     -- Standalone MainFrame alerts panel
     local alertsMain = MarketSync.CreateNotificationsPanel(MarketSync.MainFrame)
     assert(alertsMain.rows[1].width == 576, "MainFrame alerts row width should be 576, got: " .. tostring(alertsMain.rows[1].width))
