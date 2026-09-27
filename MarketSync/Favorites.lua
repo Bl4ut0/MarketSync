@@ -167,6 +167,12 @@ function F.ToggleItemInList(listName, itemOrLink)
     end
 end
 
+function F.GetList(listName)
+    F.Initialize()
+    listName = listName or "Favorites"
+    return MarketSyncDB.Favorites[listName] or {}
+end
+
 function F.GetListItems(listName)
     F.Initialize()
     listName = listName or "Favorites"

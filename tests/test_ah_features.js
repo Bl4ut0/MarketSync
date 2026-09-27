@@ -286,6 +286,12 @@ test('Favorites.AddToList resolves item names and item links', () => {
     local ok2 = F.AddToList("Favorites", "item:13444")
     assert(ok2 == true, "AddToList by item link should succeed")
     assert(#F.GetListItems("Favorites") == 2, "Favorites should have 2 items")
+
+    local rawList = F.GetList("Favorites")
+    assert(type(rawList) == "table", "GetList should return a table")
+    assert(#rawList == 2, "GetList should return 2 raw item IDs")
+    assert(rawList[1] == 4371, "First item should be 4371")
+    assert(rawList[2] == 13444, "Second item should be 13444")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Validation failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
@@ -1297,6 +1303,12 @@ test('Auction age formatting masks float days into human-readable duration witho
 
     local relTimeMulti = MarketSync.FormatRelativeTime(nil, 3.8)
     assert(relTimeMulti == "3d ago", "Expected '3d ago' without decimals, got: " .. tostring(relTimeMulti))
+
+    -- 7. Test FormatMoney and FormatMoneyColored with floating copper
+    local formatted = MarketSync.FormatMoney(1203.15)
+    assert(formatted == "12s 3c", "Expected '12s 3c' without float decimals, got: " .. tostring(formatted))
+    local formatted2 = MarketSync.FormatMoney(1196.325)
+    assert(formatted2 == "11s 96c", "Expected '11s 96c' without float decimals, got: " .. tostring(formatted2))
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('FormatAuctionAge test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

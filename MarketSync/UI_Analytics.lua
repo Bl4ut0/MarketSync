@@ -26,9 +26,10 @@ end
 
 local function FormatMoneyPlain(copper)
     if not copper or copper == 0 then return "0c" end
-    local g = math.floor(copper / 10000)
-    local s = math.floor((copper % 10000) / 100)
-    local c = copper % 100
+    local rounded = math.floor((tonumber(copper) or 0) + 0.5)
+    local g = math.floor(rounded / 10000)
+    local s = math.floor((rounded % 10000) / 100)
+    local c = rounded % 100
     if g > 0 then return g .. "g" .. (s > 0 and (" " .. s .. "s") or "") end
     if s > 0 then return s .. "s" .. (c > 0 and (" " .. c .. "c") or "") end
     return c .. "c"
@@ -36,9 +37,10 @@ end
 
 local function FormatMoney(copper)
     if not copper or copper == 0 then return "|cff888888N/A|r" end
-    local g = math.floor(copper / 10000)
-    local s = math.floor((copper % 10000) / 100)
-    local c = copper % 100
+    local rounded = math.floor((tonumber(copper) or 0) + 0.5)
+    local g = math.floor(rounded / 10000)
+    local s = math.floor((rounded % 10000) / 100)
+    local c = rounded % 100
     local str = ""
     if g > 0 then str = str .. "|cffffd700" .. g .. "|r|cffffd700g|r " end
     if s > 0 or g > 0 then str = str .. "|cffc0c0c0" .. s .. "|r|cffc0c0c0s|r " end
@@ -498,7 +500,9 @@ function MarketSync.CreateAnalyticsPanel(parent)
         itemsList = {}
         if currentMode == "recent" then
             emptyListText:SetText("No scanned items recorded.\nRun an AH scan or drop an item above.")
-            recentBtn:Disable()
+            recentBtn:SetText("|cffffd700Recent Scans|r")
+            favBtn:SetText((selectedListName or "Favorites") .. "  |cff888888v|r")
+            recentBtn:Enable()
             favBtn:Enable()
             -- Select the newest per-item observations before resolving item
             -- metadata. A full AH snapshot may contain tens of thousands of
@@ -604,29 +608,38 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 if name == selectedListName then listExists = true; break end
             end
             if not listExists then selectedListName = "Favorites" end
-            favBtn:SetText(selectedListName .. "  |cFFFFD100v|r")
+            recentBtn:SetText("|cff888888Recent Scans|r")
+            favBtn:SetText("|cffffd700" .. selectedListName .. "|r  |cffffd700v|r")
             emptyListText:SetText("No items in " .. selectedListName .. ".\nAdd items from the MarketSync sidecar.")
             recentBtn:Enable()
             favBtn:Enable()
-            if MarketSync.Favorites and MarketSync.Favorites.GetList then
-                local favs = MarketSync.Favorites.GetList(selectedListName) or {}
-                for _, id in ipairs(favs) do
-                    local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
-                    if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
-                        name = MarketSyncDB.ItemInfoCache[id].n
-                        icon = MarketSyncDB.ItemInfoCache[id].ic
-                        qual = MarketSyncDB.ItemInfoCache[id].r
-                    end
-                    local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(id) or 0
-                    table.insert(itemsList, {
-                        itemID = id,
-                        name = name or ("Item #" .. id),
-                        icon = icon or 134400,
-                        quality = qual or 1,
-                        price = p,
-                        sourceText = selectedListName,
-                    })
+            local favs = {}
+            if MarketSync.Favorites then
+                if MarketSync.Favorites.GetList then
+                    favs = MarketSync.Favorites.GetList(selectedListName) or {}
+                elseif MarketSyncDB and MarketSyncDB.Favorites then
+                    favs = MarketSyncDB.Favorites[selectedListName] or {}
                 end
+            end
+            for _, id in ipairs(favs) do
+                local name, link, qual, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
+                if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id] then
+                    name = MarketSyncDB.ItemInfoCache[id].n
+                    icon = MarketSyncDB.ItemInfoCache[id].ic
+                    qual = MarketSyncDB.ItemInfoCache[id].r
+                end
+                if not name and C_Item and C_Item.RequestLoadItemDataByID then
+                    pcall(C_Item.RequestLoadItemDataByID, id)
+                end
+                local p = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(id) or 0
+                table.insert(itemsList, {
+                    itemID = id,
+                    name = name or ("Item #" .. id),
+                    icon = icon or 134400,
+                    quality = qual or 1,
+                    price = p,
+                    sourceText = selectedListName,
+                })
             end
         end
 
@@ -752,10 +765,31 @@ function MarketSync.CreateAnalyticsPanel(parent)
         end)
     end
 
+    if MarketSync.Scanner and MarketSync.Scanner.RegisterCallback then
+        MarketSync.Scanner.RegisterCallback(function()
+            if panel:IsShown() then RefreshItemsList() end
+        end)
+    end
+
+    local itemInfoListener = CreateFrame("Frame", nil, panel)
+    if itemInfoListener.RegisterEvent then
+        itemInfoListener:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+        local infoTimer = nil
+        itemInfoListener:SetScript("OnEvent", function(self, event, itemID)
+            if not panel:IsShown() then return end
+            if infoTimer then return end
+            infoTimer = C_Timer.NewTimer(0.25, function()
+                infoTimer = nil
+                if panel:IsShown() then RefreshItemsList() end
+            end)
+        end)
+    end
+
     recentBtn:SetScript("OnClick", function()
         currentMode = "recent"
         RefreshItemsList()
     end)
+
     local listDropdown = CreateFrame("Frame", "MarketSyncAnalyticsListDropdown", leftInset, "UIDropDownMenuTemplate")
     listDropdown:Hide()
     UIDropDownMenu_Initialize(listDropdown, function(_, level)
@@ -773,8 +807,19 @@ function MarketSync.CreateAnalyticsPanel(parent)
             UIDropDownMenu_AddButton(option, level)
         end
     end)
-    favBtn:SetScript("OnClick", function()
-        ToggleDropDownMenu(1, nil, listDropdown, favBtn, 0, 0)
+
+    favBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    favBtn:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            ToggleDropDownMenu(1, nil, listDropdown, favBtn, 0, 0)
+        else
+            if currentMode ~= "favorites" then
+                currentMode = "favorites"
+                RefreshItemsList()
+            else
+                ToggleDropDownMenu(1, nil, listDropdown, favBtn, 0, 0)
+            end
+        end
     end)
 
     -- ================================================================

@@ -492,6 +492,9 @@ function MarketSync.CreateProcessingPanel(parent)
                 if panel.RefreshModeControls then
                     panel:RefreshModeControls()
                 end
+                if def.key == "craft" and RunActiveMode then
+                    RunActiveMode()
+                end
             end
         end)
         return btn
@@ -654,7 +657,7 @@ function MarketSync.CreateProcessingPanel(parent)
     SetDropdownLabel(professionDropdown, "ALL")
 
     local craftDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    craftDesc:SetPoint("TOPLEFT", 8, -126)
+    craftDesc:SetPoint("TOPLEFT", 8, -74)
     craftDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     craftDesc:SetJustifyH("LEFT")
     if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
@@ -687,34 +690,6 @@ function MarketSync.CreateProcessingPanel(parent)
     marginBtn20:SetText("20%")
     StyleModernPillButton(marginBtn20, "20%")
     marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
-
-    local minMarginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    minMarginLabel:SetPoint("TOPLEFT", 8, -74)
-    minMarginLabel:SetText("Min Craft Profit")
-
-    local minMarginGoldBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    minMarginGoldBox:SetSize(34, 22)
-    minMarginGoldBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -92)
-    minMarginGoldBox:SetAutoFocus(false)
-    minMarginGoldBox:SetNumeric(true)
-    minMarginGoldBox:SetText("5")
-    if MarketSync.RegisterLinkAwareEditBox then
-        MarketSync.RegisterLinkAwareEditBox(minMarginGoldBox)
-    end
-
-    local minGoldBtn5 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    minGoldBtn5:SetSize(34, 22)
-    minGoldBtn5:SetPoint("LEFT", minMarginGoldBox, "RIGHT", 6, 0)
-    minGoldBtn5:SetText("5g")
-    StyleModernPillButton(minGoldBtn5, "5g")
-    minGoldBtn5:SetScript("OnClick", function() minMarginGoldBox:SetText("5") end)
-
-    local minGoldBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    minGoldBtn20:SetSize(36, 22)
-    minGoldBtn20:SetPoint("LEFT", minGoldBtn5, "RIGHT", 4, 0)
-    minGoldBtn20:SetText("20g")
-    StyleModernPillButton(minGoldBtn20, "20g")
-    minGoldBtn20:SetScript("OnClick", function() minMarginGoldBox:SetText("20") end)
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
@@ -1055,6 +1030,24 @@ function MarketSync.CreateProcessingPanel(parent)
                             row.selectedBg:SetShown(not isSelected)
                             if row.data then row.data.isSelected = not isSelected end
                         end
+                    },
+                    {
+                        text = "Create Price Alert...",
+                        func = function()
+                            if MarketSync.OpenAlertEditorWithItem then
+                                local targetPrice = (panel.lastMode == "craft") and (row.data and row.data.maxSort) or (row.data and row.data.maxSort)
+                                MarketSync.OpenAlertEditorWithItem(row.itemID or row.link, targetPrice)
+                            end
+                        end
+                    },
+                    {
+                        text = "Add to Favorites",
+                        func = function()
+                            if MarketSync.Favorites and MarketSync.Favorites.AddToList and row.itemID then
+                                MarketSync.Favorites.AddToList("Favorites", row.itemID)
+                                print("|cFF00FF00[MarketSync]|r Added " .. tostring((row.data and row.data.name) or (row.nameText and row.nameText:GetText()) or "item") .. " to Favorites.")
+                            end
+                        end
                     }
                 }
                 if MarketSync.ShowItemContextMenu then
@@ -1338,11 +1331,6 @@ function MarketSync.CreateProcessingPanel(parent)
         SetControlVisible(marginBox, (isTarget or isProcess))
         SetControlVisible(marginBtn10, (isTarget or isProcess))
         SetControlVisible(marginBtn20, (isTarget or isProcess))
-
-        SetControlVisible(minMarginLabel, isCraft)
-        SetControlVisible(minMarginGoldBox, isCraft)
-        SetControlVisible(minGoldBtn5, isCraft)
-        SetControlVisible(minGoldBtn20, isCraft)
         RefreshResultHeaders()
     end
 
@@ -1506,26 +1494,52 @@ function MarketSync.CreateProcessingPanel(parent)
             end
             local delta = maxBuy - livePrice
 
+            local pctOfEV = (evPerUnit and evPerUnit > 0 and livePrice > 0) and math.floor((livePrice / evPerUnit * 100) + 0.5) or nil
+            local pctColor = "|cff888888"
+            local pctLabel = ""
+            if pctOfEV then
+                if pctOfEV <= 50 then
+                    pctColor = "|cff3399ff"
+                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
+                elseif pctOfEV <= 80 then
+                    pctColor = "|cff00ff00"
+                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
+                elseif pctOfEV <= 105 then
+                    pctColor = "|cffffd700"
+                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
+                elseif pctOfEV <= 130 then
+                    pctColor = "|cffff8800"
+                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
+                else
+                    pctColor = "|cffff4444"
+                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
+                end
+            end
+
             local status
             local statusRank = 0
             if r.partialEV then
-                status = "|cffffaa00PARTIAL|r"
+                status = "|cffffaa00PARTIAL|r" .. pctLabel
                 statusRank = 2
             elseif r.liveStale or r.evStale or r.targetStale then
-                status = "|cffffaa00STALE|r"
+                status = "|cffffaa00STALE|r" .. pctLabel
                 statusRank = 2
             elseif livePrice <= 0 then
                 status = "|cff888888NO AH|r"
                 statusRank = 1
             elseif r.profitable then
-                status = "|cff00ff00GOOD|r"
+                status = "|cff00ff00GOOD|r" .. pctLabel
                 statusRank = 3
             else
-                status = "|cffff4444MISS|r"
+                status = "|cffff4444MISS|r" .. pctLabel
                 statusRank = 0
             end
 
             local detailLines = {}
+            if pctOfEV then
+                detailLines[#detailLines + 1] = string.format("%s %s%d%% of Net EV|r",
+                    ColorLabel("Deal Rating:"), pctColor, pctOfEV)
+            end
             local ahCutPercent = tonumber(r.ahCutPercent) or 5
             local evBasisLabel = r.targetName and "Target-only Net EV/Input:"
                 or (r.partialEV and "Partial Net EV/Input:" or "Net EV/Input:")
@@ -1634,19 +1648,33 @@ function MarketSync.CreateProcessingPanel(parent)
             local capDelta = maxSpend - craftCost
             local missingPrice = c.hasMissingPrice == true
 
+            local profitPct = (revenue > 0 and margin) and math.floor((margin / revenue * 100) + 0.5) or nil
+            local pctLabel = ""
+            if profitPct and not missingPrice then
+                if profitPct >= 30 then
+                    pctLabel = " |cff00ff00(+" .. profitPct .. "%)|r"
+                elseif profitPct >= 10 then
+                    pctLabel = " |cffffd700(+" .. profitPct .. "%)|r"
+                elseif profitPct >= 0 then
+                    pctLabel = " |cffffd700(+" .. profitPct .. "%)|r"
+                else
+                    pctLabel = " |cffff4444(" .. profitPct .. "%)|r"
+                end
+            end
+
             local status
             local statusRank = 0
             if missingPrice then
                 status = "|cffffaa00NO PRICE|r"
                 statusRank = 1
             elseif c.outputStale or c.hasStaleMat then
-                status = "|cffffaa00STALE|r"
+                status = "|cffffaa00STALE|r" .. pctLabel
                 statusRank = 2
             elseif c.meetsMargin then
-                status = "|cff00ff00GOOD|r"
+                status = "|cff00ff00GOOD|r" .. pctLabel
                 statusRank = 3
             else
-                status = "|cffff4444MISS|r"
+                status = "|cffff4444MISS|r" .. pctLabel
                 statusRank = 0
             end
 
@@ -1814,12 +1842,7 @@ function MarketSync.CreateProcessingPanel(parent)
             return
         end
 
-        local minMarginGold = ReadNumber(minMarginGoldBox, 5)
-        minMarginGold = math.max(0, minMarginGold)
-        minMarginGoldBox:SetText(tostring(math.floor(minMarginGold + 0.5)))
-
-        local minMarginCopper = math.floor(minMarginGold * 10000)
-        local results = MarketSync.FindProfitableCrafts and MarketSync.FindProfitableCrafts(profession, minMarginCopper) or {}
+        local results = MarketSync.FindProfitableCrafts and MarketSync.FindProfitableCrafts(profession, 0) or {}
 
         panel.lastMode = "craft"
         panel.lastCraftResults = results
@@ -1842,8 +1865,10 @@ function MarketSync.CreateProcessingPanel(parent)
                 SetNoResultsMessage("No craft rows have complete pricing data yet.")
             end
         else
-            SetNoResultsMessage("Showing profitable and unprofitable rows for this profession.")
+            SetNoResultsMessage("Showing recipes sorted by highest profit.")
         end
+        panel.sortField = "valueSort"
+        panel.sortAscending = false
         ApplyDisplaySort()
     end
 
@@ -1997,95 +2022,173 @@ function MarketSync.CreateProcessingPanel(parent)
         RunActiveMode()
     end)
 
-    btnExport:SetScript("OnClick", function()
-        if panel.lastMode == "craft" then
-            if not panel.lastCraftResults or #panel.lastCraftResults == 0 then
-                statusSummary:SetText("|cffff4444No craft results to export.|r")
-                return
-            end
+    if not StaticPopupDialogs then StaticPopupDialogs = {} end
+    if not StaticPopupDialogs["MARKETSYNC_PROCESSING_NEW_LIST"] then
+        StaticPopupDialogs["MARKETSYNC_PROCESSING_NEW_LIST"] = {
+            text = "Enter name for new Shopping List:",
+            button1 = "Create & Add",
+            button2 = "Cancel",
+            hasEditBox = true,
+            OnAccept = function(self)
+                local eb = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+                local text = eb and eb:GetText()
+                text = text and text:match("^%s*(.-)%s*$")
+                if text and text ~= "" and MarketSync.Favorites then
+                    MarketSync.Favorites.CreateList(text)
+                    local items = panel._pendingExportItemIDs or {}
+                    local count = 0
+                    for _, id in ipairs(items) do
+                        if MarketSync.Favorites.AddToList(text, id) then
+                            count = count + 1
+                        end
+                    end
+                    statusSummary:SetText(string.format("|cff00ff00Created '%s' with %d item(s).|r", text, count))
+                end
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+        }
+    end
 
-            local exportRows = {}
+    local function GetExportItemIDs()
+        local itemIDs = {}
+        local seen = {}
+        local function Add(id)
+            id = tonumber(id)
+            if id and id > 0 and not seen[id] then
+                seen[id] = true
+                itemIDs[#itemIDs + 1] = id
+            end
+        end
+
+        if panel.lastMode == "craft" then
             local hasAnySelection = false
-            for k, v in pairs(panel.selectedCrafts or {}) do
+            for _, v in pairs(panel.selectedCrafts or {}) do
                 if v then hasAnySelection = true; break end
             end
-
-            for _, row in ipairs(panel.lastCraftResults) do
-                if row and row.meetsMargin then
-                    local name = row.outputName or row.recipeName or ("Item " .. tostring(row.outputItemID or "?"))
-                    local isSelected = panel.selectedCrafts and panel.selectedCrafts[name]
-                    if (not hasAnySelection) or isSelected then
-                        exportRows[#exportRows + 1] = row
+            for _, row in ipairs(panel.lastCraftResults or {}) do
+                local name = row.outputName or row.recipeName or ("Item " .. tostring(row.outputItemID or "?"))
+                local isSelected = panel.selectedCrafts and panel.selectedCrafts[name]
+                if (not hasAnySelection) or isSelected then
+                    Add(row.outputItemID)
+                    for _, mat in ipairs(row.matsDetailed or {}) do
+                        Add(mat.itemID)
                     end
                 end
             end
-            if #exportRows == 0 then
-                statusSummary:SetText("|cffff4444No valid craft rows to export.|r")
-                return
+        else
+            local hasAnySelection = false
+            for _, v in pairs(panel.selectedArbitrage or {}) do
+                if v then hasAnySelection = true; break end
             end
+            for _, row in ipairs(panel.lastArbitrageResults or {}) do
+                local isSelected = panel.selectedArbitrage and panel.selectedArbitrage[row.inputItemID]
+                if (not hasAnySelection) or isSelected then
+                    Add(row.inputItemID)
+                end
+            end
+        end
+        return itemIDs
+    end
 
-            local ok, info
-            if MarketSync.ExportCraftMatsToAuctionator then
-                ok, info = MarketSync.ExportCraftMatsToAuctionator(exportRows)
-            else
-                ok, info = false, "Export unavailable"
-            end
-            if ok then
-                statusSummary:SetText(string.format("|cff00ff00Exported %d craft mats.|r", tonumber(info) or 0))
-            else
-                statusSummary:SetText("|cffff4444Export failed:|r " .. tostring(info or "unknown error"))
-            end
+    local exportMenu = CreateFrame("Frame", parentPrefix .. "ProcessingExportMenu", panel, "UIDropDownMenuTemplate")
+    exportMenu:Hide()
+
+    UIDropDownMenu_Initialize(exportMenu, function(self, level)
+        local itemIDs = GetExportItemIDs()
+        if #itemIDs == 0 then
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = "No items to export"
+            info.disabled = true
+            UIDropDownMenu_AddButton(info, level)
             return
         end
 
-        if not panel.lastArbitrageResults or #panel.lastArbitrageResults == 0 then
-            statusSummary:SetText("|cffff4444No arbitrage results to export.|r")
-            return
+        local header = UIDropDownMenu_CreateInfo()
+        header.text = string.format("Export %d Item(s) to:", #itemIDs)
+        header.isTitle = true
+        UIDropDownMenu_AddButton(header, level)
+
+        local lists = (MarketSync.Favorites and MarketSync.Favorites.GetLists and MarketSync.Favorites.GetLists()) or { "Favorites" }
+        for _, listName in ipairs(lists) do
+            local opt = UIDropDownMenu_CreateInfo()
+            opt.text = "  List: " .. listName
+            opt.func = function()
+                local count = 0
+                for _, id in ipairs(itemIDs) do
+                    if MarketSync.Favorites and MarketSync.Favorites.AddToList(listName, id) then
+                        count = count + 1
+                    end
+                end
+                statusSummary:SetText(string.format("|cff00ff00Added %d item(s) to '%s'.|r", count, listName))
+            end
+            UIDropDownMenu_AddButton(opt, level)
         end
 
-        local ok, info
-        if MarketSync.ExportArbitrageToAuctionator then
-            ok, info = MarketSync.ExportArbitrageToAuctionator(panel.lastArbitrageResults)
-        else
-            ok, info = false, "Export unavailable"
+        local newOpt = UIDropDownMenu_CreateInfo()
+        newOpt.text = "|cff00ff00+ Create New List...|r"
+        newOpt.func = function()
+            panel._pendingExportItemIDs = itemIDs
+            StaticPopup_Show("MARKETSYNC_PROCESSING_NEW_LIST")
         end
-        if ok then
-            statusSummary:SetText(string.format("|cff00ff00Exported %d list entries.|r", tonumber(info) or 0))
-        else
-            statusSummary:SetText("|cffff4444Export failed:|r " .. tostring(info or "unknown error"))
+        UIDropDownMenu_AddButton(newOpt, level)
+
+        if Auctionator or MarketSync.ExportCraftMatsToAuctionator or MarketSync.ExportArbitrageToAuctionator then
+            local aucOpt = UIDropDownMenu_CreateInfo()
+            aucOpt.text = "Export to Auctionator List"
+            aucOpt.func = function()
+                local ok, info
+                if panel.lastMode == "craft" and MarketSync.ExportCraftMatsToAuctionator then
+                    local exportRows = {}
+                    for _, row in ipairs(panel.lastCraftResults or {}) do
+                        if row and row.meetsMargin then
+                            exportRows[#exportRows + 1] = row
+                        end
+                    end
+                    ok, info = MarketSync.ExportCraftMatsToAuctionator(exportRows)
+                elseif MarketSync.ExportArbitrageToAuctionator then
+                    ok, info = MarketSync.ExportArbitrageToAuctionator(panel.lastArbitrageResults or {})
+                end
+                if ok then
+                    statusSummary:SetText(string.format("|cff00ff00Exported %d items to Auctionator.|r", tonumber(info) or 0))
+                else
+                    statusSummary:SetText("|cffff4444Export failed:|r " .. tostring(info or "unknown error"))
+                end
+            end
+            UIDropDownMenu_AddButton(aucOpt, level)
         end
     end)
 
-    btnTrack:SetScript("OnClick", function()
-        if not MarketSync.UpsertNotificationRequest then
-            statusSummary:SetText("|cffff4444Notifications module unavailable.|r")
-            return
-        end
+    btnExport:SetScript("OnClick", function(self)
+        ToggleDropDownMenu(1, nil, exportMenu, self, 0, 0)
+    end)
 
-        local tracked = 0
+    btnTrack:SetScript("OnClick", function()
+        local candidates = {}
         local seen = {}
 
-        local function AddTrack(itemID, thresholdCopper, fallbackName)
+        local function AddCandidate(itemID, thresholdCopper, liveCopper, fallbackName)
             local id = tonumber(itemID)
             local threshold = tonumber(thresholdCopper) or 0
-            if not id or id <= 0 or threshold <= 0 or seen[id] then
+            if not id or id <= 0 or seen[id] then
                 return
             end
             seen[id] = true
-
             local itemName = ResolveItemVisual(id, fallbackName)
-            local req = MarketSync.UpsertNotificationRequest({
+            candidates[#candidates + 1] = {
                 matchType = "itemID",
                 matchValue = id,
+                itemID = id,
                 displayName = itemName,
-                thresholdCopper = math.floor(threshold),
+                marketPrice = math.max(0, math.floor((tonumber(liveCopper) or 0) + 0.5)),
+                thresholdCopper = math.max(0, math.floor(threshold + 0.5)),
                 scope = "all",
-                variantMode = "any_suffix",
+                urgent = false,
                 enabled = true,
-            })
-            if req then
-                tracked = tracked + 1
-            end
+                selected = true,
+                listName = (panel.lastMode == "craft") and "Craft Materials" or "Processing Scan",
+            }
         end
 
         local hasArbitrageSelection = false
@@ -2100,13 +2203,11 @@ function MarketSync.CreateProcessingPanel(parent)
 
         if panel.lastMode == "craft" then
             for _, craft in ipairs(panel.lastCraftResults or {}) do
-                if craft and craft.meetsMargin then
-                    local name = craft.outputName or craft.recipeName or ("Item " .. tostring(craft.outputItemID or "?"))
-                    local isSelected = panel.selectedCrafts and panel.selectedCrafts[name]
-                    if (not hasCraftSelection) or isSelected then
-                        for _, mat in ipairs(craft.matsDetailed or {}) do
-                            AddTrack(mat.itemID, mat.capPrice or mat.price, nil)
-                        end
+                local name = craft.outputName or craft.recipeName or ("Item " .. tostring(craft.outputItemID or "?"))
+                local isSelected = panel.selectedCrafts and panel.selectedCrafts[name]
+                if (not hasCraftSelection) or isSelected then
+                    for _, mat in ipairs(craft.matsDetailed or {}) do
+                        AddCandidate(mat.itemID, mat.capPrice or mat.price, mat.price, nil)
                     end
                 end
             end
@@ -2114,16 +2215,34 @@ function MarketSync.CreateProcessingPanel(parent)
             for _, r in ipairs(panel.lastArbitrageResults or {}) do
                 local isSelected = panel.selectedArbitrage and panel.selectedArbitrage[r.inputItemID]
                 if (not hasArbitrageSelection) or isSelected then
-                    AddTrack(r.inputItemID, r.maxBuyPerUnit, r.inputName)
+                    AddCandidate(r.inputItemID, r.maxBuyPerUnit, r.livePrice, r.inputName)
                 end
             end
         end
 
-        if tracked > 0 then
-            statusSummary:SetText(string.format("|cff00ff00Tracked %d item(s).|r", tracked))
-        else
+        if #candidates == 0 then
             statusSummary:SetText("|cffff4444No valid rows to track.|r")
+            return
         end
+
+        if MarketSync.ShowBulkAlertImportPopup then
+            local listLabel = (panel.lastMode == "craft") and "Craft Materials" or "Processing Scan"
+            MarketSync.ShowBulkAlertImportPopup(listLabel, candidates, function(imported)
+                if imported and imported > 0 then
+                    statusSummary:SetText(string.format("|cff00ff00Imported %d alert(s) to Watchlist!|r", imported))
+                end
+            end)
+            return
+        end
+
+        local tracked = 0
+        for _, c in ipairs(candidates) do
+            if MarketSync.UpsertNotificationRequest then
+                local req = MarketSync.UpsertNotificationRequest(c)
+                if req then tracked = tracked + 1 end
+            end
+        end
+        statusSummary:SetText(string.format("|cff00ff00Tracked %d item(s).|r", tracked))
     end)
 
     btnResyncProf:SetScript("OnClick", function()

@@ -1061,6 +1061,7 @@ end
 -- ================================================================
 function MarketSync.FormatMoney(amount)
     if not amount then return "N/A" end
+    amount = math.floor((tonumber(amount) or 0) + 0.5)
     local gold = math.floor(amount / 10000)
     local silver = math.floor((amount % 10000) / 100)
     local copper = amount % 100
@@ -1073,6 +1074,7 @@ end
 
 function MarketSync.FormatMoneyColored(amount)
     if not amount or amount <= 0 then return "|cff8888880c|r" end
+    amount = math.floor((tonumber(amount) or 0) + 0.5)
     local gold = math.floor(amount / 10000)
     local silver = math.floor((amount % 10000) / 100)
     local copper = amount % 100

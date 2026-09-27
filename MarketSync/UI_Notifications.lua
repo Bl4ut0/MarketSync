@@ -504,6 +504,8 @@ local function ShowBulkImportPopup(listLabel, candidates, onSaved)
     bulkImportPopup:Show()
 end
 
+MarketSync.ShowBulkAlertImportPopup = ShowBulkImportPopup
+
 function MarketSync.CreateNotificationsPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local LEFT_X = isEmbedded and 12 or 20
