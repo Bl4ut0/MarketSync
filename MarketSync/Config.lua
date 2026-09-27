@@ -26,36 +26,24 @@ function MarketSync.RegisterEscapeFrame(frame)
         end
     end
 
-    -- 2. Frame-level ESC interception via OnKeyDown + SetPropagateKeyboardInput
-    -- Guarantees the frame closes on Escape even if UISpecialFrames is bypassed,
-    -- delayed, or shadowed by dialog strata on modern clients.
-    if frame.SetPropagateKeyboardInput and frame.EnableKeyboard then
+    -- 2. Frame-level ESC interception via OnKeyDown (no SetPropagateKeyboardInput —
+    -- that is a protected function and calling it from addon code causes
+    -- ADDON_ACTION_BLOCKED. UISpecialFrames above is the correct Blizzard-approved
+    -- method. EnableKeyboard lets us catch ESCAPE as a redundant safety net only.)
+    if frame.EnableKeyboard then
         frame:HookScript("OnShow", function(self)
             self:EnableKeyboard(true)
-            if self.SetPropagateKeyboardInput then
-                self:SetPropagateKeyboardInput(true)
-            end
         end)
         frame:HookScript("OnHide", function(self)
             self:EnableKeyboard(false)
         end)
         if frame:IsShown() then
             frame:EnableKeyboard(true)
-            if frame.SetPropagateKeyboardInput then
-                frame:SetPropagateKeyboardInput(true)
-            end
         end
 
         frame:SetScript("OnKeyDown", function(self, key)
             if key == "ESCAPE" then
-                if self.SetPropagateKeyboardInput then
-                    self:SetPropagateKeyboardInput(false)
-                end
                 self:Hide()
-            else
-                if self.SetPropagateKeyboardInput then
-                    self:SetPropagateKeyboardInput(true)
-                end
             end
         end)
     end

@@ -43,13 +43,17 @@ test('Escape registration reliably registers UISpecialFrames and frame-level OnK
     -- Re-registration should not duplicate entry
     MarketSync.RegisterEscapeFrame(frame)
     assert(#UISpecialFrames == 1, 'expected no duplicate in UISpecialFrames')
-    -- Verify OnKeyDown handles ESCAPE and hides frame while propagating other keys
+    -- Verify OnKeyDown handles ESCAPE and hides frame
     assert(type(frame.scripts['OnKeyDown']) == 'function', 'expected OnKeyDown handler')
+    -- Non-ESCAPE keys should NOT hide frame and should NOT call SetPropagateKeyboardInput
+    -- (removed to prevent ADDON_ACTION_BLOCKED — UISpecialFrames handles propagation)
+    frame.prop = nil
     frame.scripts['OnKeyDown'](frame, 'W')
-    assert(frame.prop == true, 'expected normal keys to propagate')
+    assert(frame.shown == true, 'expected non-ESCAPE key to leave frame visible')
+    assert(frame.prop == nil, 'SetPropagateKeyboardInput must NOT be called (protected function — causes ADDON_ACTION_BLOCKED)')
     frame.scripts['OnKeyDown'](frame, 'ESCAPE')
     assert(frame.shown == false, 'expected ESCAPE to hide frame')
-    assert(frame.prop == false, 'expected ESCAPE not to propagate to game menu')
+    assert(frame.prop == nil, 'SetPropagateKeyboardInput must NOT be called on ESCAPE either')
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
     throw new Error(to_jsstring(lua.lua_tostring(L, -1)));
