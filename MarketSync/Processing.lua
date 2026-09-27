@@ -1465,8 +1465,8 @@ function MarketSync.ListProcessingCustomSelections()
                 targetItemID = tonumber(entry.targetItemID),
                 processType = NormalizeProcessType(entry.processType),
                 profession = entry.profession and tostring(entry.profession) or nil,
-                marginPct = tonumber(entry.marginPct) or 10,
-                minCraftMarginGold = tonumber(entry.minCraftMarginGold) or 5,
+                marginPct = tonumber(entry.marginPct) or 0,
+                minCraftMarginGold = tonumber(entry.minCraftMarginGold) or 0,
             }
         end
     end
@@ -1503,8 +1503,8 @@ function MarketSync.UpsertProcessingCustomSelection(selection)
         targetItemID = tonumber(selection.targetItemID),
         processType = NormalizeProcessType(selection.processType),
         profession = selection.profession and tostring(selection.profession) or nil,
-        marginPct = tonumber(selection.marginPct) or 10,
-        minCraftMarginGold = tonumber(selection.minCraftMarginGold) or 5,
+        marginPct = tonumber(selection.marginPct) or 0,
+        minCraftMarginGold = tonumber(selection.minCraftMarginGold) or 0,
     }
 
     for i, existing in ipairs(store) do

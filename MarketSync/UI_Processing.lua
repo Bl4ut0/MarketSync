@@ -584,6 +584,9 @@ function MarketSync.CreateProcessingPanel(parent)
                 panel.selectedTargetID = t.itemID
                 targetInputBox:SetText(t.name or ("Item #" .. tostring(t.itemID)))
                 SetDropdownLabel(targetDropdown, Truncate(t.name or ("Item #" .. tostring(t.itemID)), 16))
+                if panel.activeMode == "target" and RunActiveMode then
+                    RunActiveMode()
+                end
             end
             UIDropDownMenu_AddButton(opt, level)
         end
@@ -592,11 +595,11 @@ function MarketSync.CreateProcessingPanel(parent)
     SetDropdownLabel(targetDropdown, "Select material...")
 
     local targetDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    targetDesc:SetPoint("TOPLEFT", 8, -145)
+    targetDesc:SetPoint("TOPLEFT", 8, -94)
     targetDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     targetDesc:SetJustifyH("LEFT")
     if targetDesc.SetJustifyV then targetDesc:SetJustifyV("TOP") end
-    targetDesc:SetText("|cff777777Compare this material's cost with its processing yields.|r")
+    targetDesc:SetText("|cff777777Shows all items that process into this material.|r")
 
     local processLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     processLabel:SetPoint("TOPLEFT", 8, -26)
@@ -614,6 +617,9 @@ function MarketSync.CreateProcessingPanel(parent)
             opt.func = function()
                 panel.selectedProcess = (p == "ALL") and nil or p
                 SetDropdownLabel(processDropdown, p)
+                if panel.activeMode == "process" and RunActiveMode then
+                    RunActiveMode()
+                end
             end
             UIDropDownMenu_AddButton(opt, level)
         end
@@ -622,11 +628,11 @@ function MarketSync.CreateProcessingPanel(parent)
     SetDropdownLabel(processDropdown, "ALL")
 
     local processDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    processDesc:SetPoint("TOPLEFT", 8, -126)
+    processDesc:SetPoint("TOPLEFT", 8, -72)
     processDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     processDesc:SetJustifyH("LEFT")
     if processDesc.SetJustifyV then processDesc:SetJustifyV("TOP") end
-    processDesc:SetText("|cff777777Compare AH materials by processing profit.|r")
+    processDesc:SetText("|cff777777Shows all items that can be processed.|r")
 
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
     panel.selectedProfession = "ALL"
@@ -663,33 +669,6 @@ function MarketSync.CreateProcessingPanel(parent)
     if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
     craftDesc:SetText("|cff777777Compare known recipes with current AH prices.|r")
 
-    local marginLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    marginLabel:SetPoint("TOPLEFT", 8, -94)
-    marginLabel:SetText("Desired Margin %")
-
-    local marginBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    marginBox:SetSize(34, 22)
-    marginBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -112)
-    marginBox:SetAutoFocus(false)
-    marginBox:SetNumeric(true)
-    marginBox:SetText("10")
-    if MarketSync.RegisterLinkAwareEditBox then
-        MarketSync.RegisterLinkAwareEditBox(marginBox)
-    end
-
-    local marginBtn10 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    marginBtn10:SetSize(36, 22)
-    marginBtn10:SetPoint("LEFT", marginBox, "RIGHT", 6, 0)
-    marginBtn10:SetText("10%")
-    StyleModernPillButton(marginBtn10, "10%")
-    marginBtn10:SetScript("OnClick", function() marginBox:SetText("10") end)
-
-    local marginBtn20 = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate,BackdropTemplate")
-    marginBtn20:SetSize(36, 22)
-    marginBtn20:SetPoint("LEFT", marginBtn10, "RIGHT", 4, 0)
-    marginBtn20:SetText("20%")
-    StyleModernPillButton(marginBtn20, "20%")
-    marginBtn20:SetScript("OnClick", function() marginBox:SetText("20") end)
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
@@ -744,16 +723,6 @@ function MarketSync.CreateProcessingPanel(parent)
             name = "Track",
             context = "Button",
             description = "Add selected items to tracking and alerts",
-        })
-        MarketSync.SetAccessibility(marginBox, {
-            name = "Margin Percentage",
-            context = "Edit Box",
-            description = "Minimum target profit margin percentage",
-        })
-        MarketSync.SetAccessibility(minMarginGoldBox, {
-            name = "Minimum Margin Gold",
-            context = "Edit Box",
-            description = "Minimum gold profit required for craft",
         })
     end
 
@@ -841,19 +810,19 @@ function MarketSync.CreateProcessingPanel(parent)
         { "Item", "Input item being purchased and processed." },
         { "Process", "Processing method." },
         { "Net EV", "Expected net resale value per input item after the 5% main Auction House sale cut." },
-        { "Max/ea", "Maximum buy price per input item after applying the selected safety margin." },
+        { "Max/ea", "Break-even buy price per input item (Net EV)." },
         { "AH/ea", "Current Auctionator price per input item." },
-        { "Edge", "Maximum buy price minus the current price, per input item." },
-        { "Status", "Partial/stale pricing state and whether the current input price is at or below the maximum buy price." },
+        { "Edge", "Net profit per input item (Net EV minus current AH price)." },
+        { "Status", "Partial/stale pricing state and whether the current input price is at or below break-even." },
     }
     local CRAFT_HEADERS = {
         { "Item", "Crafted output item." },
         { "Diff.", "Current profession difficulty reported for this recipe." },
         { "Profit", "Expected net revenue minus the complete material basket cost for one craft." },
-        { "Cap", "Maximum total material spend for one craft while preserving the selected minimum profit." },
+        { "Cap", "Break-even material spend for one craft (expected net revenue)." },
         { "Mats", "Current total Auctionator cost of the complete material basket for one craft." },
-        { "Room", "Material cost cap minus current material basket cost, per craft." },
-        { "Status", "Price freshness and whether the craft meets the selected minimum profit." },
+        { "Room", "Expected profit per craft (material cap minus material cost)." },
+        { "Status", "Price freshness and whether the craft is currently profitable." },
     }
 
     local function RefreshResultHeaders()
@@ -1327,10 +1296,6 @@ function MarketSync.CreateProcessingPanel(parent)
         SetControlVisible(craftDesc, isCraft)
         SetControlVisible(btnResyncProf, isCraft)
 
-        SetControlVisible(marginLabel, (isTarget or isProcess))
-        SetControlVisible(marginBox, (isTarget or isProcess))
-        SetControlVisible(marginBtn10, (isTarget or isProcess))
-        SetControlVisible(marginBtn20, (isTarget or isProcess))
         RefreshResultHeaders()
     end
 
@@ -1480,9 +1445,8 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local function BuildArbitrageDisplay(arbitrageResults)
         local rows = {}
-        local marginPct = ReadNumber(marginBox, 10)
-        marginPct = math.max(0, math.min(99, marginPct))
-        local marginMult = math.max(0.01, 1 - (marginPct / 100))
+        local marginPct = 0
+        local marginMult = 1.0
 
         for _, r in ipairs(arbitrageResults or {}) do
             local itemName, itemLink, icon = ResolveItemVisual(r.inputItemID, r.inputName)
@@ -1547,7 +1511,7 @@ function MarketSync.CreateProcessingPanel(parent)
             detailLines[#detailLines + 1] = string.format("%s %s %s",
                 ColorLabel(evBasisLabel), evText, ColorMuted("(after " .. tostring(ahCutPercent) .. "% main-AH cut)"))
             detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r %s",
-                ColorLabel("Max Buy/Input:"), MoneyText(maxBuy), ColorMuted("(" .. tostring(math.floor(marginPct + 0.5)) .. "% margin)"))
+                ColorLabel("Max Buy/Input:"), MoneyText(maxBuy), ColorMuted("(Net EV break-even)"))
             detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
                 ColorLabel("Live AH/Input:"), (livePrice > 0) and MoneyText(livePrice) or "Unavailable")
             detailLines[#detailLines + 1] = string.format("%s %s",
@@ -1804,11 +1768,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 return
             end
 
-            local marginPct = math.floor(ReadNumber(marginBox, 10) + 0.5)
-            marginPct = math.max(0, math.min(99, marginPct))
-            marginBox:SetText(tostring(marginPct))
-
-            local results = MarketSync.FindArbitrageByTarget and MarketSync.FindArbitrageByTarget(panel.selectedTargetID, marginPct) or {}
+            local results = MarketSync.FindArbitrageByTarget and MarketSync.FindArbitrageByTarget(panel.selectedTargetID, 0) or {}
             panel.lastMode = "target"
             panel.lastArbitrageResults = results
             panel.lastCraftResults = {}
@@ -1836,11 +1796,7 @@ function MarketSync.CreateProcessingPanel(parent)
         end
 
         if panel.activeMode == "process" then
-            local marginPct = math.floor(ReadNumber(marginBox, 10) + 0.5)
-            marginPct = math.max(0, math.min(99, marginPct))
-            marginBox:SetText(tostring(marginPct))
-
-            local results = MarketSync.FindArbitrageByProcess and MarketSync.FindArbitrageByProcess(panel.selectedProcess, marginPct) or {}
+            local results = MarketSync.FindArbitrageByProcess and MarketSync.FindArbitrageByProcess(panel.selectedProcess, 0) or {}
             panel.lastMode = "process"
             panel.lastArbitrageResults = results
             panel.lastCraftResults = {}
@@ -1897,12 +1853,12 @@ function MarketSync.CreateProcessingPanel(parent)
         local mode = tostring(selection.mode or "target")
         if mode == "target" then
             local target = FindTargetName(selection.targetItemID) or "(none)"
-            return string.format("Target: %s | Margin: %s%%", target, tostring(selection.marginPct or 10))
+            return string.format("Target: %s", target)
         end
         if mode == "process" then
-            return string.format("Process: %s | Margin: %s%%", tostring(selection.processType or "ALL"), tostring(selection.marginPct or 10))
+            return string.format("Process: %s", tostring(selection.processType or "ALL"))
         end
-        return string.format("Craft: %s | Min Margin: %sg", tostring(selection.profession or "(none)"), tostring(selection.minCraftMarginGold or 5))
+        return string.format("Craft: %s", tostring(selection.profession or "(none)"))
     end
 
     local function ApplySelection(selection)
@@ -1917,9 +1873,6 @@ function MarketSync.CreateProcessingPanel(parent)
         if selection.profession and tostring(selection.profession) ~= "" then
             panel.selectedProfession = tostring(selection.profession)
         end
-
-        marginBox:SetText(tostring(math.floor((tonumber(selection.marginPct) or 10) + 0.5)))
-        minMarginGoldBox:SetText(tostring(math.floor((tonumber(selection.minCraftMarginGold) or 5) + 0.5)))
 
         if panel.activeMode == "target" then
             local targetName = FindTargetName(panel.selectedTargetID)
@@ -2324,8 +2277,8 @@ function MarketSync.CreateProcessingPanel(parent)
             targetItemID = panel.selectedTargetID,
             processType = panel.selectedProcess,
             profession = panel.selectedProfession,
-            marginPct = math.floor(ReadNumber(marginBox, 10) + 0.5),
-            minCraftMarginGold = math.floor(ReadNumber(minMarginGoldBox, 5) + 0.5),
+            marginPct = 0,
+            minCraftMarginGold = 0,
         }
 
         local saved, err = MarketSync.UpsertProcessingCustomSelection(payload)
