@@ -2203,7 +2203,14 @@ test('Browse row hover and sidecar tooltips do not duplicate auction scan or pri
 
   const sidecarCode = fs.readFileSync(path.join(marketSyncDir, 'UI_AHSidecar.lua'), 'utf8');
   assert(!sidecarCode.includes('GameTooltip:AddLine("Market Price: |cff888888No data|r"'), 'UI_AHSidecar should not add empty No data price line');
+
+  const processingCode = fs.readFileSync(path.join(marketSyncDir, 'UI_Processing.lua'), 'utf8');
+  assert(!processingCode.includes('Deal Rating:'), 'UI_Processing should not display confusing Deal Rating');
+  assert(!processingCode.includes('Possible disenchant outputs:'), 'UI_Processing should not duplicate disenchant outputs already in item tooltip');
+  assert(!processingCode.includes('livePrice / evPerUnit'), 'UI_Processing must not invert ROI by dividing cost by EV');
+  assert(processingCode.includes('delta / livePrice * 100'), 'UI_Processing must compute standard ROI based on net profit over cost');
 });
+
 
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));

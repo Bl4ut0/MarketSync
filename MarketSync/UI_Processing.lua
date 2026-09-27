@@ -1498,28 +1498,25 @@ function MarketSync.CreateProcessingPanel(parent)
             if not evPerUnit then
                 evPerUnit = math.floor((maxBuy / marginMult) + 0.5)
             end
-            local delta = maxBuy - livePrice
+            local delta = evPerUnit - livePrice
 
-            local pctOfEV = (evPerUnit and evPerUnit > 0 and livePrice > 0) and math.floor((livePrice / evPerUnit * 100) + 0.5) or nil
+            local roiPct = (livePrice > 0) and math.floor((delta / livePrice * 100) + 0.5) or nil
             local pctColor = "|cff888888"
             local pctLabel = ""
-            if pctOfEV then
-                if pctOfEV <= 50 then
-                    pctColor = "|cff3399ff"
-                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
-                elseif pctOfEV <= 80 then
+            if roiPct then
+                local sign = (roiPct > 0) and "+" or ""
+                if roiPct >= 50 then
                     pctColor = "|cff00ff00"
-                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
-                elseif pctOfEV <= 105 then
+                elseif roiPct >= 20 then
+                    pctColor = "|cff33cc33"
+                elseif roiPct >= 0 then
                     pctColor = "|cffffd700"
-                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
-                elseif pctOfEV <= 130 then
+                elseif roiPct >= -20 then
                     pctColor = "|cffff8800"
-                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
                 else
                     pctColor = "|cffff4444"
-                    pctLabel = " " .. pctColor .. "(" .. pctOfEV .. "%)|r"
                 end
+                pctLabel = " " .. pctColor .. "(" .. sign .. roiPct .. "%)|r"
             end
 
             local status
@@ -1533,7 +1530,7 @@ function MarketSync.CreateProcessingPanel(parent)
             elseif livePrice <= 0 then
                 status = "|cff888888NO AH|r"
                 statusRank = 1
-            elseif r.profitable then
+            elseif delta >= 0 then
                 status = "|cff00ff00GOOD|r" .. pctLabel
                 statusRank = 3
             else
@@ -1542,73 +1539,59 @@ function MarketSync.CreateProcessingPanel(parent)
             end
 
             local detailLines = {}
-            if pctOfEV then
-                detailLines[#detailLines + 1] = string.format("%s %s%d%% of Net EV|r",
-                    ColorLabel("Deal Rating:"), pctColor, pctOfEV)
-            end
             local ahCutPercent = tonumber(r.ahCutPercent) or 5
-            local evBasisLabel = r.targetName and "Target-only Net EV/Input:"
-                or (r.partialEV and "Partial Net EV/Input:" or "Net EV/Input:")
-            local evText = r.partialEV and ColorWarn(MoneyText(evPerUnit)) or ColorGood(MoneyText(evPerUnit))
-            detailLines[#detailLines + 1] = string.format("%s %s %s",
-                ColorLabel(evBasisLabel), evText, ColorMuted("(after " .. tostring(ahCutPercent) .. "% main-AH cut)"))
-            detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r %s",
-                ColorLabel("Max Buy/Input:"), MoneyText(maxBuy), ColorMuted("(Net EV break-even)"))
-            detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
-                ColorLabel("Live AH/Input:"), (livePrice > 0) and MoneyText(livePrice) or "Unavailable")
-            detailLines[#detailLines + 1] = string.format("%s %s",
-                ColorLabel("Edge/Input:"), FormatDelta(delta))
-            if r.processType == "DISENCHANT" then
-                if r.lowNetPerAction and r.highNetPerAction then
-                    detailLines[#detailLines + 1] = string.format("%s %s / %s / %s",
-                        ColorLabel("Net materials (low / expected / high):"),
-                        MoneyText(r.lowNetPerAction), MoneyText(evPerUnit), MoneyText(r.highNetPerAction))
-                    detailLines[#detailLines + 1] = string.format("%s %s / %s / %s",
-                        ColorLabel("Profit after purchase (low / expected / high):"),
-                        FormatDelta(r.lowNetPerAction - livePrice),
-                        FormatDelta(evPerUnit - livePrice),
-                        FormatDelta(r.highNetPerAction - livePrice))
-                else
-                    detailLines[#detailLines + 1] = ColorWarn("Profit range unavailable until all possible materials have prices.")
+
+            -- 1. Net Profit & ROI
+            if livePrice > 0 then
+                local roiSuffix = ""
+                if roiPct then
+                    local roiSign = (roiPct > 0) and "+" or ""
+                    roiSuffix = string.format(" %s(%s%d%% ROI)|r", pctColor, roiSign, roiPct)
                 end
-                detailLines[#detailLines + 1] = ColorMuted("Possible disenchant outputs:")
-                local drops = {}
-                for _, drop in ipairs(r.disenchantDrops or {}) do drops[#drops + 1] = drop end
-                table.sort(drops, function(a, b) return (a.chance or 0) > (b.chance or 0) end)
-                for _, drop in ipairs(drops) do
-                    local name = ResolveItemVisual(drop.itemID)
-                    local minQty, maxQty
-                    for _, outcome in ipairs(drop.outcomes or {}) do
-                        local qty = tonumber(outcome.quantity) or 0
-                        if not minQty or qty < minQty then minQty = qty end
-                        if not maxQty or qty > maxQty then maxQty = qty end
-                    end
-                    detailLines[#detailLines + 1] = string.format("  %.1f%%  %s x%s%s",
-                        (drop.chance or 0) * 100, tostring(name), tostring(minQty or "?"),
-                        (maxQty and maxQty ~= minQty) and ("-" .. tostring(maxQty)) or "")
-                end
-                detailLines[#detailLines + 1] = ColorMuted("Odds are table estimates for this item's cached level; verify unusual Forever items in-game.")
+                detailLines[#detailLines + 1] = string.format("%s %s%s",
+                    ColorLabel("Net Profit/Input:"), FormatDelta(delta), roiSuffix)
             end
+
+            -- 2. Break-even Buy Cap
+            detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r %s",
+                ColorLabel("Break-even Buy:"), MoneyText(evPerUnit), ColorMuted("(after " .. tostring(ahCutPercent) .. "% AH cut)"))
+
+            -- 3. Yield & Profit range (only if variable yields)
+            if r.processType == "DISENCHANT" then
+                if r.lowNetPerAction and r.highNetPerAction and (r.lowNetPerAction ~= r.highNetPerAction) then
+                    detailLines[#detailLines + 1] = string.format("%s %s to %s",
+                        ColorLabel("Yield Range (Net):"),
+                        MoneyText(r.lowNetPerAction), MoneyText(r.highNetPerAction))
+                    if livePrice > 0 then
+                        detailLines[#detailLines + 1] = string.format("%s %s to %s",
+                            ColorLabel("Profit Range:"),
+                            FormatDelta(r.lowNetPerAction - livePrice),
+                            FormatDelta(r.highNetPerAction - livePrice))
+                    end
+                end
+            end
+
+            -- 4. Target specifics for Milling / Prospecting / Target searches
             if r.targetName then
                 detailLines[#detailLines + 1] = string.format("%s %s  %s %s",
-                    ColorLabel("Target AH/Each (gross):"), ColorInfo(r.targetName), ColorMuted("@"), ColorGood(MoneyText(r.targetPrice or 0)))
+                    ColorLabel("Target:"), ColorInfo(r.targetName), ColorMuted("@"), ColorGood(MoneyText(r.targetPrice or 0)))
+                if r.expectedTarget and r.expectedTarget > 0 then
+                    detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
+                        ColorLabel("Expected Yield:"), ExpectedQuantityText(r.expectedTarget))
+                end
             end
-            if r.expectedTarget then
-                detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
-                    ColorLabel("Expected Target/Action:"), ExpectedQuantityText(r.expectedTarget))
-            end
-            if r.evPerAction then
-                detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Net EV/Action:"), ColorGood(MoneyText(r.evPerAction)))
-            end
+
             if r.stackSize and tonumber(r.stackSize) and tonumber(r.stackSize) > 1 then
-                detailLines[#detailLines + 1] = string.format("%s |cffffffff%d|r", ColorLabel("Stack Size:"), tonumber(r.stackSize))
+                detailLines[#detailLines + 1] = string.format("%s |cffffffff%d|r", ColorLabel("Input Stack Size:"), tonumber(r.stackSize))
             end
+
+            -- 5. Warnings (only when relevant)
             if r.missingOutputs and tonumber(r.missingOutputs) and tonumber(r.missingOutputs) > 0 then
                 detailLines[#detailLines + 1] = string.format("%s |cffffffff%d|r", ColorWarn("Missing priced outputs:"), tonumber(r.missingOutputs))
                 detailLines[#detailLines + 1] = ColorWarn("Displayed EV is a conservative partial lower bound.")
             end
             if r.liveStale or r.evStale or r.targetStale then
-                detailLines[#detailLines + 1] = ColorWarn("One or more prices are stale.")
+                detailLines[#detailLines + 1] = ColorWarn("One or more prices are stale (>24h).")
             end
 
             rows[#rows + 1] = {
