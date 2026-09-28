@@ -1,7 +1,7 @@
 -- ================================================================
 -- MarketSync - Auction House Breakout Sidecar
 -- Integrated Shopping Lists (quick search & batch buy) +
--- Inventory-Based Bag Selling (auto-undercut & 1-click select/post)
+-- Inventory-Based Bag Selling (match lowest market price & 1-click select/post)
 -- ================================================================
 
 MarketSync = MarketSync or {}
@@ -942,13 +942,11 @@ function MarketSync.CreateAHSidecar(parent)
                         GameTooltip:AddLine(string.format("%s (Slot %d)", bag.name, item.slot), 0.8, 0.8, 0.8)
                         GameTooltip:AddLine(string.format("Stack Count: |cFFFFD100%d|r", item.stackCount), 1, 1, 1)
                         if item.marketPrice and item.marketPrice > 0 then
+                            local priceStr = MarketSync.FormatMoney and MarketSync.FormatMoney(item.marketPrice) or tostring(item.marketPrice)
                             if MarketSyncDB and MarketSyncDB.EnableTooltipAuctionPrice == false then
-                                local priceStr = MarketSync.FormatMoney and MarketSync.FormatMoney(item.marketPrice) or tostring(item.marketPrice)
                                 GameTooltip:AddLine(string.format("Market Price: %s", priceStr), 1, 1, 1)
                             end
-                            local under = math.max(1, item.marketPrice - 1)
-                            local underStr = MarketSync.FormatMoney and MarketSync.FormatMoney(under) or tostring(under)
-                            GameTooltip:AddLine(string.format("Suggested Undercut (-1c): %s", underStr), 0.4, 1.0, 0.4)
+                            GameTooltip:AddLine(string.format("Suggested Match Price: %s", priceStr), 0.4, 1.0, 0.4)
                         end
                         GameTooltip:AddLine(" ")
                         GameTooltip:AddLine("|cFF00FF00Left-Click|r: Select into AH Sell slot", 0.9, 0.9, 0.9)
@@ -986,13 +984,13 @@ function MarketSync.CreateAHSidecar(parent)
                             ClearCursor()
                         end
 
-                        -- 3. Set suggested undercut price (marketPrice - 1 copper)
-                        if item.marketPrice and item.marketPrice > 1 then
-                            local undercutPrice = item.marketPrice - 1
+                        -- 3. Set suggested match price (matches current lowest market price, no 1c undercut)
+                        if item.marketPrice and item.marketPrice > 0 then
+                            local postPrice = item.marketPrice
                             if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.PriceInput and AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount then
-                                pcall(AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount, AuctionHouseFrame.ItemSellFrame.PriceInput, undercutPrice)
+                                pcall(AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount, AuctionHouseFrame.ItemSellFrame.PriceInput, postPrice)
                             elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount then
-                                pcall(AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount, AuctionHouseFrame.CommoditiesSellFrame.UnitPrice, undercutPrice)
+                                pcall(AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount, AuctionHouseFrame.CommoditiesSellFrame.UnitPrice, postPrice)
                             end
                         end
                     end)
@@ -1006,8 +1004,7 @@ function MarketSync.CreateAHSidecar(parent)
                                 local priceDesc = ""
                                 if item.marketPrice and item.marketPrice > 0 then
                                     local pSpoken = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(item.marketPrice) or (item.marketPrice .. " copper")
-                                    local uSpoken = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(math.max(1, item.marketPrice - 1)) or (math.max(1, item.marketPrice - 1) .. " copper")
-                                    priceDesc = string.format("Market price %s, suggested undercut %s. ", pSpoken, uSpoken)
+                                    priceDesc = string.format("Market price %s. ", pSpoken)
                                 end
                                 return string.format("%s, %s, %s slot %d. %sLeft-click to select into sell slot, Right-click to search in Auction House.", item.name or "", countStr, bag.name or "Bag", item.slot or 1, priceDesc)
                             end,

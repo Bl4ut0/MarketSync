@@ -2673,27 +2673,53 @@ local function OnTooltipSetItem(tooltip, data)
                 
                 tooltip:AddDoubleLine("|cffffd700MarketSync AH:|r", priceStr)
                 
-                local stackCount = nil
-                if data and type(data.stackCount) == "number" and data.stackCount > 1 then
-                    stackCount = data.stackCount
-                elseif tooltip.GetItem then
-                    local focus = GetMouseFoci and GetMouseFoci()[1] or (GetMouseFocus and GetMouseFocus())
-                    if focus then
-                        if type(focus.stackCount) == "number" and focus.stackCount > 1 then
-                            stackCount = focus.stackCount
-                        elseif type(focus.count) == "number" and focus.count > 1 then
-                            stackCount = focus.count
-                        elseif type(focus.Count) == "number" and focus.Count > 1 then
-                            stackCount = focus.Count
-                        elseif type(focus.count) == "table" and focus.count.GetText then
-                            local n = tonumber(focus.count:GetText())
-                            if n and n > 1 then stackCount = n end
-                        elseif type(focus.Count) == "table" and focus.Count.GetText then
-                            local n = tonumber(focus.Count:GetText())
-                            if n and n > 1 then stackCount = n end
-                        end
+                local maxStack = 1
+                if itemID then
+                    if C_Item and C_Item.GetItemMaxStackSizeByID then
+                        local ok, s = pcall(C_Item.GetItemMaxStackSizeByID, itemID)
+                        if ok and type(s) == "number" then maxStack = s end
+                    end
+                    if maxStack <= 1 then
+                        local _, _, _, _, _, _, _, s = SafeGetItemInfo(itemID)
+                        if type(s) == "number" then maxStack = s end
                     end
                 end
+
+                local stackCount = nil
+                if maxStack > 1 then
+                    local focus = GetMouseFoci and GetMouseFoci()[1] or (GetMouseFocus and GetMouseFocus())
+                    if focus and focus.GetBagID and focus.GetID then
+                        local bag = focus:GetBagID()
+                        local slot = focus:GetID()
+                        if bag and slot then
+                            if C_Container and C_Container.GetContainerItemInfo then
+                                local info = C_Container.GetContainerItemInfo(bag, slot)
+                                if info and type(info.stackCount) == "number" and info.stackCount > 1 then
+                                    stackCount = info.stackCount
+                                end
+                            elseif GetContainerItemInfo then
+                                local _, count = GetContainerItemInfo(bag, slot)
+                                if type(count) == "number" and count > 1 then
+                                    stackCount = count
+                                end
+                            end
+                        end
+                    end
+                    if not stackCount and data and type(data.stackCount) == "number" and data.stackCount > 1 then
+                        stackCount = data.stackCount
+                    end
+                    if not stackCount and focus then
+                        if type(focus.stackCount) == "number" and focus.stackCount > 1 then
+                            stackCount = focus.stackCount
+                        elseif type(focus.count) == "number" and focus.count > 1 and focus.count <= maxStack then
+                            stackCount = focus.count
+                        end
+                    end
+                    if stackCount and stackCount > maxStack then
+                        stackCount = nil
+                    end
+                end
+
                 if stackCount and stackCount > 1 then
                     local stackPrice = priceInfo.price * stackCount
                     local stackStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(stackPrice) or MarketSync.FormatMoney(stackPrice)

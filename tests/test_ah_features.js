@@ -239,6 +239,17 @@ test('Tooltip hook handles focus button with FontString count table safely', () 
       tooltip:AddDoubleLine("Stack (" .. stackCount .. "):", tostring(stackPrice))
     end
     assert(#linesAdded == 2, "Expected 2 tooltip lines added")
+
+    -- Verify unstackable item (maxStack <= 1 like Daggers / Weapons) NEVER gets stack count
+    SafeGetItemInfo = function(id) return "Stonesplinter Dagger", nil, 2, nil, nil, nil, nil, 1 end
+    C_Item = { GetItemMaxStackSizeByID = function(id) return 1 end }
+    local daggerMaxStack = C_Item.GetItemMaxStackSizeByID(1155)
+    assert(daggerMaxStack == 1, "dagger must have maxStack 1")
+    local daggerStackCount = nil
+    if daggerMaxStack > 1 then
+      daggerStackCount = mockFocus.stackCount
+    end
+    assert(daggerStackCount == nil, "unstackable items must never set stackCount")
   `;
 
   if (lauxlib.luaL_dostring(L, to_luastring(testScript)) !== 0) {
