@@ -13,7 +13,7 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require(path.join(de
 
 const marketSyncDir = path.resolve(__dirname, '../MarketSync');
 
-test('Escape registration reliably registers UISpecialFrames and frame-level OnKeyDown handler', () => {
+test('Escape registration reliably registers UISpecialFrames without capturing keyboard', () => {
   const source = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
   const start = source.indexOf('function MarketSync.RegisterEscapeFrame(frame)');
   const end = source.indexOf('local ADDON_NAME =', start);
@@ -44,17 +44,8 @@ test('Escape registration reliably registers UISpecialFrames and frame-level OnK
     MarketSync.RegisterEscapeFrame(frame)
     assert(#UISpecialFrames == 1, 'expected no duplicate in UISpecialFrames')
     assert(frame.keyboardEnabled == nil, 'EnableKeyboard must NOT be called because it steals all WASD movement and hotkeys')
-    -- Verify OnKeyDown handles ESCAPE and hides frame
-    assert(type(frame.scripts['OnKeyDown']) == 'function', 'expected OnKeyDown handler')
-    -- Non-ESCAPE keys should NOT hide frame and should NOT call SetPropagateKeyboardInput
-    -- (removed to prevent ADDON_ACTION_BLOCKED — UISpecialFrames handles propagation)
-    frame.prop = nil
-    frame.scripts['OnKeyDown'](frame, 'W')
-    assert(frame.shown == true, 'expected non-ESCAPE key to leave frame visible')
-    assert(frame.prop == nil, 'SetPropagateKeyboardInput must NOT be called (protected function — causes ADDON_ACTION_BLOCKED)')
-    frame.scripts['OnKeyDown'](frame, 'ESCAPE')
-    assert(frame.shown == false, 'expected ESCAPE to hide frame')
-    assert(frame.prop == nil, 'SetPropagateKeyboardInput must NOT be called on ESCAPE either')
+    -- Verify OnKeyDown is NOT set on frames (so it does not capture typing, chat, or hotkeys)
+    assert(frame.scripts['OnKeyDown'] == nil, 'OnKeyDown must NOT be set on frames (it steals keyboard focus and blocks chat/movement)')
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
     throw new Error(to_jsstring(lua.lua_tostring(L, -1)));

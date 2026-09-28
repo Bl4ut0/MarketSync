@@ -12,7 +12,9 @@ function MarketSync.RegisterEscapeFrame(frame)
     if not frame then return end
     local name = frame.GetName and frame:GetName()
 
-    -- 1. Register with Blizzard UISpecialFrames (standard engine Esc-to-close)
+    -- Register with Blizzard UISpecialFrames (standard engine Esc-to-close)
+    -- This allows Escape to close the window without capturing keyboard input,
+    -- allowing full player movement, hotkeys, and normal chat typing.
     if name and UISpecialFrames then
         local found = false
         for _, n in ipairs(UISpecialFrames) do
@@ -24,20 +26,6 @@ function MarketSync.RegisterEscapeFrame(frame)
         if not found then
             table.insert(UISpecialFrames, name)
         end
-    end
-
-    -- 2. Frame-level ESC interception
-    -- Note: We intentionally avoid calling frame:EnableKeyboard(true)! Calling
-    -- EnableKeyboard(true) swallows all player keystrokes (WASD movement, action bar
-    -- keybinds) while the frame is open. UISpecialFrames handles closing on ESC natively
-    -- while preserving full player movement and keybinds. We retain the OnKeyDown
-    -- handler for environments and test runners that invoke it directly.
-    if frame.SetScript then
-        frame:SetScript("OnKeyDown", function(self, key)
-            if key == "ESCAPE" then
-                self:Hide()
-            end
-        end)
     end
 end
 
@@ -174,7 +162,6 @@ end
 -- ================================================================
 local _msLinkAware = {
     installed = false,
-    originalInsertLink = nil,
     activeEditBox = nil,
     registry = setmetatable({}, { __mode = "k" }),
 }
@@ -182,34 +169,22 @@ local _msLinkAware = {
 local function InstallLinkAwareInsertHook()
     if _msLinkAware.installed then return end
     _msLinkAware.installed = true
-    _msLinkAware.originalInsertLink = ChatEdit_InsertLink
 
-    ChatEdit_InsertLink = function(text, ...)
-        -- If chat has focus, never interfere.
-        local activeChat = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow() or nil
-        if activeChat and activeChat:IsShown() and activeChat:HasFocus() and _msLinkAware.originalInsertLink then
-            return _msLinkAware.originalInsertLink(text, ...)
-        end
-
-        local editBox = _msLinkAware.activeEditBox
-        local opts = editBox and _msLinkAware.registry[editBox] or nil
-        if editBox and opts and text and editBox:IsShown() and editBox:HasFocus() then
-            if type(opts.onInsertLink) == "function" then
-                local ok, handled = pcall(opts.onInsertLink, editBox, text)
-                if ok and handled then
-                    return true
+    -- Hook HandleModifiedItemClick securely without overwriting ChatEdit_InsertLink.
+    -- Overwriting ChatEdit_InsertLink causes taint on the chat edit box and prevents
+    -- messages from being sent.
+    if type(hooksecurefunc) == "function" and type(HandleModifiedItemClick) == "function" then
+        hooksecurefunc("HandleModifiedItemClick", function(link)
+            local editBox = _msLinkAware.activeEditBox
+            if editBox and editBox:IsShown() and editBox:HasFocus() and link then
+                local opts = _msLinkAware.registry[editBox]
+                if opts and type(opts.onInsertLink) == "function" then
+                    pcall(opts.onInsertLink, editBox, link)
+                elseif editBox.Insert then
+                    editBox:Insert(link)
                 end
             end
-            if editBox.Insert then
-                editBox:Insert(text)
-                return true
-            end
-        end
-
-        if _msLinkAware.originalInsertLink then
-            return _msLinkAware.originalInsertLink(text, ...)
-        end
-        return false
+        end)
     end
 end
 

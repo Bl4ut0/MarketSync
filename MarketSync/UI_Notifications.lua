@@ -696,8 +696,7 @@ function MarketSync.CreateNotificationsPanel(parent)
             ClearCursor()
         elseif button == "RightButton" then
             ClearEditorForm()
-        elseif panel.editorItemLink and IsModifiedClick("CHATLINK") then
-            ChatEdit_InsertLink(panel.editorItemLink)
+        elseif panel.editorItemLink and (HandleModifiedItemClick(panel.editorItemLink) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(panel.editorItemLink))) then
         end
     end)
 

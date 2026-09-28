@@ -255,7 +255,8 @@ local function ResolveItemVisual(itemID, fallbackName)
     end
     name = name or fallbackName or ("Item " .. tostring(id or "?"))
     if not link and id then
-        link = "|Hitem:" .. id .. "|h[" .. name .. "]|h"
+        local hex = (rarity and RARITY_HEX and RARITY_HEX[rarity]) or "ffffffff"
+        link = "|c" .. hex .. "|Hitem:" .. id .. ":0:0:0:0:0:0:0:0:0:0:0:0|h[" .. name .. "]|h|r"
     end
     icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
     return name, link, icon
@@ -908,8 +909,7 @@ function MarketSync.CreateProcessingPanel(parent)
             GameTooltip:Hide()
         end)
         local function HandleRowClick(button)
-            if row.link and IsModifiedClick("CHATLINK") then
-                ChatEdit_InsertLink(row.link)
+            if row.link and (HandleModifiedItemClick(row.link) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(row.link))) then
                 return
             end
             

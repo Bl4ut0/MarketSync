@@ -190,7 +190,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         subClassID = cached.s
         -- Reconstruct item link from cached data
         local hex = RARITY_HEX[rarity] or RARITY_HEX[1]
-        link = "|c" .. hex .. "|Hitem:" .. itemID .. "|h[" .. name .. "]|h|r"
+        link = "|c" .. hex .. "|Hitem:" .. itemID .. ":0:0:0:0:0:0:0:0:0:0:0:0|h[" .. name .. "]|h|r"
     else
         -- 2. Fall back to WoW API (may trigger server request)
         local itemType, itemSubType
@@ -251,7 +251,20 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
     end
 
     local hex = RARITY_HEX[rarity] or RARITY_HEX[1]
-    link = "|c" .. hex .. "|H" .. itemLinkString .. "|h[" .. displayName .. "]|h|r"
+    local validLink = link
+    if not validLink or not validLink:find("item:%d+:") then
+        local _, realLink = MarketSync.GetItemInfo(itemID)
+        if realLink and realLink:find("item:%d+:") then
+            validLink = realLink
+        end
+    end
+    if not validLink then
+        local fullItemString = suffixID and suffixID ~= 0
+            and string.format("item:%d:0:0:0:0:0:%d:0:0:0:0:0:0", itemID, suffixID)
+            or string.format("item:%d:0:0:0:0:0:0:0:0:0:0:0:0", itemID)
+        validLink = "|c" .. hex .. "|H" .. fullItemString .. "|h[" .. displayName .. "]|h|r"
+    end
+    link = validLink
 
     local price = 0
     local dbDay = MarketSync.GetCurrentScanDay()
@@ -1829,8 +1842,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     price = row.itemData.price,
                     dbKey = row.itemData.dbKey,
                 })
-            elseif row.link and IsModifiedClick("CHATLINK") then
-                ChatEdit_InsertLink(row.link)
+            elseif row.link and (HandleModifiedItemClick(row.link) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(row.link))) then
             elseif panel.dataSource ~= "neutral" and row.itemData and MarketSync.ShowItemHistory then
                 MarketSync.ShowItemHistory(
                     row.itemData.dbKey,
@@ -1854,8 +1866,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     price = self.itemData.price,
                     dbKey = self.itemData.dbKey,
                 })
-            elseif self.link and IsModifiedClick("CHATLINK") then
-                ChatEdit_InsertLink(self.link)
+            elseif self.link and (HandleModifiedItemClick(self.link) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(self.link))) then
             elseif panel.dataSource ~= "neutral" and self.itemData and MarketSync.ShowItemHistory then
                 MarketSync.ShowItemHistory(
                     self.itemData.dbKey,
