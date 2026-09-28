@@ -282,159 +282,10 @@ local function CreateBox(parent, x, y, width, height)
     return box
 end
 
-local function StripBlizzardTextures(btn)
-    if not btn then return end
-    if btn.Left then btn.Left:SetAlpha(0) end
-    if btn.Middle then btn.Middle:SetAlpha(0) end
-    if btn.Right then btn.Right:SetAlpha(0) end
-    if btn.TopLeft then btn.TopLeft:SetAlpha(0) end
-    if btn.TopRight then btn.TopRight:SetAlpha(0) end
-    if btn.BottomLeft then btn.BottomLeft:SetAlpha(0) end
-    if btn.BottomRight then btn.BottomRight:SetAlpha(0) end
-    if btn.TopMiddle then btn.TopMiddle:SetAlpha(0) end
-    if btn.BottomMiddle then btn.BottomMiddle:SetAlpha(0) end
-    if btn.MiddleLeft then btn.MiddleLeft:SetAlpha(0) end
-    if btn.MiddleRight then btn.MiddleRight:SetAlpha(0) end
-    local nt = btn.GetNormalTexture and btn:GetNormalTexture()
-    if nt then nt:SetAlpha(0) end
-    local pt = btn.GetPushedTexture and btn:GetPushedTexture()
-    if pt then pt:SetAlpha(0) end
-    local dt = btn.GetDisabledTexture and btn:GetDisabledTexture()
-    if dt then dt:SetAlpha(0) end
-    local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
-    if ht then ht:SetAlpha(0) end
-end
-
-local function StyleModernPillButton(btn, text, isGold)
+local function StyleStandardGameButton(btn, text)
     if not btn then return btn end
-    StripBlizzardTextures(btn)
-    if btn.SetBackdrop then
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        if isGold then
-            btn:SetBackdropColor(0.26, 0.20, 0.08, 0.95)
-            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
-        else
-            btn:SetBackdropColor(0.12, 0.11, 0.09, 0.92)
-            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
-        end
-    end
-    local fs = btn.GetFontString and btn:GetFontString()
-    if not fs and btn.CreateFontString and btn.SetFontString then
-        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("CENTER", 0, 0)
-        btn:SetFontString(fs)
-    end
-    if fs and fs.SetTextColor then
-        if isGold then
-            fs:SetTextColor(1.0, 0.88, 0.35)
-        else
-            fs:SetTextColor(0.85, 0.80, 0.70)
-        end
-    end
     if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
-    if not btn._hookedPill and btn.HookScript then
-        btn._hookedPill = true
-        btn:HookScript("OnEnter", function(self)
-            StripBlizzardTextures(self)
-            if self.SetBackdropColor then
-                if isGold then
-                    self:SetBackdropColor(0.34, 0.26, 0.10, 0.98)
-                    self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
-                else
-                    self:SetBackdropColor(0.20, 0.17, 0.13, 0.95)
-                    self:SetBackdropBorderColor(0.70, 0.58, 0.25, 0.95)
-                end
-            end
-            local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then s:SetTextColor(1.0, 0.95, 0.60) end
-        end)
-        btn:HookScript("OnLeave", function(self)
-            StripBlizzardTextures(self)
-            if self.SetBackdropColor then
-                if isGold then
-                    self:SetBackdropColor(0.26, 0.20, 0.08, 0.95)
-                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
-                else
-                    self:SetBackdropColor(0.12, 0.11, 0.09, 0.92)
-                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
-                end
-            end
-            local s = self.GetFontString and self:GetFontString()
-            if s and s.SetTextColor then
-                if isGold then
-                    s:SetTextColor(1.0, 0.88, 0.35)
-                else
-                    s:SetTextColor(0.85, 0.80, 0.70)
-                end
-            end
-        end)
-    end
     return btn
-end
-
-local function StyleModernSubTab(btn, isActive, text)
-    if not btn then return end
-    StripBlizzardTextures(btn)
-    if btn.SetBackdrop then
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        if isActive then
-            btn:SetBackdropColor(0.26, 0.20, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
-        else
-            btn:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
-            btn:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
-        end
-    end
-    local fs = btn.GetFontString and btn:GetFontString()
-    if not fs and btn.CreateFontString and btn.SetFontString then
-        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("CENTER", 0, 0)
-        btn:SetFontString(fs)
-    end
-    if fs and fs.SetTextColor then
-        if isActive then
-            fs:SetTextColor(1.0, 0.82, 0.0)
-        else
-            fs:SetTextColor(0.65, 0.60, 0.50)
-        end
-    end
-    if text and btn.SetText then btn:SetText(text) end
-    btn._isActive = isActive
-    if not btn._hookedTab and btn.HookScript then
-        btn._hookedTab = true
-        btn:HookScript("OnEnter", function(self)
-            StripBlizzardTextures(self)
-            if not self._isActive then
-                if self.SetBackdropColor then
-                    self:SetBackdropColor(0.18, 0.15, 0.10, 0.90)
-                    self:SetBackdropBorderColor(0.55, 0.45, 0.20, 0.90)
-                end
-                local s = self.GetFontString and self:GetFontString()
-                if s and s.SetTextColor then s:SetTextColor(1.0, 0.92, 0.60) end
-            end
-        end)
-        btn:HookScript("OnLeave", function(self)
-            StripBlizzardTextures(self)
-            if not self._isActive then
-                if self.SetBackdropColor then
-                    self:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
-                    self:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
-                end
-                local s = self.GetFontString and self:GetFontString()
-                if s and s.SetTextColor then s:SetTextColor(0.65, 0.60, 0.50) end
-            end
-        end)
-    end
 end
 
 function MarketSync.CreateProcessingPanel(parent)
@@ -522,7 +373,13 @@ function MarketSync.CreateProcessingPanel(parent)
             local btn = modeButtons[def.key]
             if btn then
                 local isActive = (def.key == panel.activeMode)
-                StyleModernSubTab(btn, isActive, def.label)
+                if isActive then
+                    btn:SetText("|cffffd700" .. def.label .. "|r")
+                    if btn.LockHighlight then btn:LockHighlight() end
+                else
+                    btn:SetText(def.label)
+                    if btn.UnlockHighlight then btn:UnlockHighlight() end
+                end
             end
         end
         if leftTopTitle then
@@ -538,7 +395,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     -- Top Sub-Tab Mode Buttons (Target Material / Process Scan / Craft Profit)
     local function CreateModeTab(def, index)
-        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         btn:SetSize(isEmbedded and 114 or 124, 24)
         if index == 1 then
             btn:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, isEmbedded and -8 or -34)
@@ -737,9 +594,9 @@ function MarketSync.CreateProcessingPanel(parent)
     craftDesc:SetText("|cff777777Compare known recipes with current AH prices.|r")
 
 
-    btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
-    local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
-    local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 
     if isEmbedded then
@@ -770,9 +627,6 @@ function MarketSync.CreateProcessingPanel(parent)
     if statusSummary.SetWordWrap then statusSummary:SetWordWrap(false) end
     btnExport:SetText("Export")
     btnTrack:SetText("Track")
-    StyleModernPillButton(btnRun, nil, true)
-    StyleModernPillButton(btnExport, "Export")
-    StyleModernPillButton(btnTrack, "Track")
     statusSummary:SetText("|cff888888Ready|r")
 
     if MarketSync.SetAccessibility then
@@ -1217,11 +1071,10 @@ function MarketSync.CreateProcessingPanel(parent)
     customNameLabel:SetPoint("TOPLEFT", 8, -28)
     customNameLabel:SetText("Preset")
 
-    local btnSaveCustom = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate,BackdropTemplate")
+    local btnSaveCustom = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
     btnSaveCustom:SetSize(48, 22)
     btnSaveCustom:SetPoint("TOPRIGHT", leftBottomBox, "TOPRIGHT", -8, -26)
     btnSaveCustom:SetText("Save")
-    StyleModernPillButton(btnSaveCustom, "Save")
 
     local customNameBox = CreateFrame("EditBox", nil, leftBottomBox, "InputBoxTemplate")
     customNameBox:SetPoint("LEFT", customNameLabel, "RIGHT", 5, 0)
