@@ -559,6 +559,9 @@ function MarketSync.CreateAHSidecar(parent)
             self:SetText("Drop item or enter name/ID...")
         end
     end)
+    addBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
     addBox:SetScript("OnEnterPressed", function(self)
         local text = self:GetText()
         if text and text ~= "" and text ~= "Drop item or enter name/ID..." and MarketSync.Favorites then
@@ -767,6 +770,9 @@ function MarketSync.CreateAHSidecar(parent)
     end)
     sellFilterBox:SetScript("OnTextChanged", function()
         if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
+    end)
+    sellFilterBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
     end)
 
     local refreshBagsBtn = CreateFrame("Button", nil, sellContainer, "UIPanelButtonTemplate")

@@ -43,6 +43,7 @@ test('Escape registration reliably registers UISpecialFrames and frame-level OnK
     -- Re-registration should not duplicate entry
     MarketSync.RegisterEscapeFrame(frame)
     assert(#UISpecialFrames == 1, 'expected no duplicate in UISpecialFrames')
+    assert(frame.keyboardEnabled == nil, 'EnableKeyboard must NOT be called because it steals all WASD movement and hotkeys')
     -- Verify OnKeyDown handles ESCAPE and hides frame
     assert(type(frame.scripts['OnKeyDown']) == 'function', 'expected OnKeyDown handler')
     -- Non-ESCAPE keys should NOT hide frame and should NOT call SetPropagateKeyboardInput

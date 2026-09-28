@@ -241,6 +241,8 @@ function MarketSync.CreateItemDetailPanel(parent)
     local cooldownBox = CreateFrame("EditBox", nil, alertsBox, "InputBoxTemplate")
     cooldownBox:SetSize(60, 20); cooldownBox:SetPoint("TOPLEFT", 150, -35); cooldownBox:SetAutoFocus(false); cooldownBox:SetNumeric(true)
     panel.cooldownBox = cooldownBox
+    thresholdBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    cooldownBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
     local enabledCheck = CreateFrame("CheckButton", nil, alertsBox, "InterfaceOptionsCheckButtonTemplate")
     enabledCheck:SetPoint("TOPLEFT", 230, -30)

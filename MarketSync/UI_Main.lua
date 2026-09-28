@@ -1376,6 +1376,9 @@ local function CreateMainFrame()
     addBox:SetScript("OnTextChanged", function(self)
         if self:GetText() == "" then addPlaceholder:Show() else addPlaceholder:Hide() end
     end)
+    addBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
 
     local addBtn = CreateFrame("Button", nil, userMgmtFrame, "UIPanelButtonTemplate")
     addBtn:SetSize(90, 22)

@@ -440,6 +440,9 @@ function MarketSync.CreateAnalyticsPanel(parent)
         if HandleItemDrop() then self:ClearFocus() end
     end)
 
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
     searchBox:SetScript("OnEnterPressed", function(self)
         local text = self:GetText()
         if text and text ~= "" and text ~= "Drop item or enter name/ID..." then

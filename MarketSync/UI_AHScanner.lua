@@ -214,6 +214,9 @@ function MarketSync.CreateAHScannerPanel(parent)
     addBox:SetScript("OnEditFocusLost", function(self)
         if self:GetText() == "" then self:SetText("Drop item or enter ID...") end
     end)
+    addBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
 
     addBox:SetScript("OnEnterPressed", function(self)
         local text = self:GetText()

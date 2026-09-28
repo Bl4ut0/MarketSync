@@ -26,21 +26,13 @@ function MarketSync.RegisterEscapeFrame(frame)
         end
     end
 
-    -- 2. Frame-level ESC interception via OnKeyDown (no SetPropagateKeyboardInput —
-    -- that is a protected function and calling it from addon code causes
-    -- ADDON_ACTION_BLOCKED. UISpecialFrames above is the correct Blizzard-approved
-    -- method. EnableKeyboard lets us catch ESCAPE as a redundant safety net only.)
-    if frame.EnableKeyboard then
-        frame:HookScript("OnShow", function(self)
-            self:EnableKeyboard(true)
-        end)
-        frame:HookScript("OnHide", function(self)
-            self:EnableKeyboard(false)
-        end)
-        if frame:IsShown() then
-            frame:EnableKeyboard(true)
-        end
-
+    -- 2. Frame-level ESC interception
+    -- Note: We intentionally avoid calling frame:EnableKeyboard(true)! Calling
+    -- EnableKeyboard(true) swallows all player keystrokes (WASD movement, action bar
+    -- keybinds) while the frame is open. UISpecialFrames handles closing on ESC natively
+    -- while preserving full player movement and keybinds. We retain the OnKeyDown
+    -- handler for environments and test runners that invoke it directly.
+    if frame.SetScript then
         frame:SetScript("OnKeyDown", function(self, key)
             if key == "ESCAPE" then
                 self:Hide()
@@ -239,6 +231,15 @@ function MarketSync.RegisterLinkAwareEditBox(editBox, opts)
             _msLinkAware.activeEditBox = nil
         end
     end)
+    if editBox.HookScript then
+        editBox:HookScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+        end)
+    elseif editBox.SetScript and not editBox:GetScript("OnEscapePressed") then
+        editBox:SetScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+        end)
+    end
 end
 
 -- ================================================================

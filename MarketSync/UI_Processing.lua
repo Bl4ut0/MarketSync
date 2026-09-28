@@ -447,6 +447,15 @@ function MarketSync.CreateProcessingPanel(parent)
     targetInputBox:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
+    targetInputBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+    targetInputBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        if panel.activeMode == "target" and RunActiveMode then
+            RunActiveMode()
+        end
+    end)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(targetInputBox, {
             onInsertLink = function(box, text)
@@ -1081,6 +1090,12 @@ function MarketSync.CreateProcessingPanel(parent)
     customNameBox:SetPoint("RIGHT", btnSaveCustom, "LEFT", -4, 0)
     customNameBox:SetHeight(20)
     customNameBox:SetAutoFocus(false)
+    customNameBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+    customNameBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+    end)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(customNameBox)
     end

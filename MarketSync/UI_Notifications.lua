@@ -352,6 +352,7 @@ local function ShowBulkImportPopup(listLabel, candidates, onSaved)
             for _, box in ipairs({ row.gold, row.silver, row.copper }) do
                 box:SetScript("OnTextChanged", SaveThreshold)
                 box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); SaveThreshold() end)
+                box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
             end
 
             row.scope = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
@@ -807,6 +808,9 @@ function MarketSync.CreateNotificationsPanel(parent)
     goldBox:SetScript("OnTabPressed", function() silverBox:SetFocus() end)
     silverBox:SetScript("OnTabPressed", function() copperBox:SetFocus() end)
     copperBox:SetScript("OnTabPressed", function() goldBox:SetFocus() end)
+    goldBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    silverBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    copperBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
     local function GetThresholdCopper()
         local g = tonumber(goldBox:GetText()) or 0
