@@ -307,9 +307,73 @@ end
 
 local function StyleModernPillButton(btn, text, isGold)
     if not btn then return btn end
-    -- Keep the native Auction House button art and hover/click behavior,
-    -- matching the shopping-list sidecar rather than drawing grey pills.
+    StripBlizzardTextures(btn)
+    if btn.SetBackdrop then
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        if isGold then
+            btn:SetBackdropColor(0.26, 0.20, 0.08, 0.95)
+            btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+        else
+            btn:SetBackdropColor(0.12, 0.11, 0.09, 0.92)
+            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+        end
+    end
+    local fs = btn.GetFontString and btn:GetFontString()
+    if not fs and btn.CreateFontString and btn.SetFontString then
+        fs = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("CENTER", 0, 0)
+        btn:SetFontString(fs)
+    end
+    if fs and fs.SetTextColor then
+        if isGold then
+            fs:SetTextColor(1.0, 0.88, 0.35)
+        else
+            fs:SetTextColor(0.85, 0.80, 0.70)
+        end
+    end
     if (type(text) == "string" or type(text) == "number") and btn.SetText then btn:SetText(text) end
+    if not btn._hookedPill and btn.HookScript then
+        btn._hookedPill = true
+        btn:HookScript("OnEnter", function(self)
+            StripBlizzardTextures(self)
+            if self.SetBackdropColor then
+                if isGold then
+                    self:SetBackdropColor(0.34, 0.26, 0.10, 0.98)
+                    self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
+                else
+                    self:SetBackdropColor(0.20, 0.17, 0.13, 0.95)
+                    self:SetBackdropBorderColor(0.70, 0.58, 0.25, 0.95)
+                end
+            end
+            local s = self.GetFontString and self:GetFontString()
+            if s and s.SetTextColor then s:SetTextColor(1.0, 0.95, 0.60) end
+        end)
+        btn:HookScript("OnLeave", function(self)
+            StripBlizzardTextures(self)
+            if self.SetBackdropColor then
+                if isGold then
+                    self:SetBackdropColor(0.26, 0.20, 0.08, 0.95)
+                    self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
+                else
+                    self:SetBackdropColor(0.12, 0.11, 0.09, 0.92)
+                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+                end
+            end
+            local s = self.GetFontString and self:GetFontString()
+            if s and s.SetTextColor then
+                if isGold then
+                    s:SetTextColor(1.0, 0.88, 0.35)
+                else
+                    s:SetTextColor(0.85, 0.80, 0.70)
+                end
+            end
+        end)
+    end
     return btn
 end
 
@@ -319,16 +383,16 @@ local function StyleModernSubTab(btn, isActive, text)
     if btn.SetBackdrop then
         btn:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = 1,
-            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
         })
         if isActive then
-            btn:SetBackdropColor(0.38, 0.28, 0.10, 0.98)
-            btn:SetBackdropBorderColor(1.0, 0.85, 0.20, 1.0)
+            btn:SetBackdropColor(0.26, 0.20, 0.10, 0.95)
+            btn:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
         else
-            btn:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
-            btn:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
+            btn:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
+            btn:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
         end
     end
     local fs = btn.GetFontString and btn:GetFontString()
@@ -339,9 +403,9 @@ local function StyleModernSubTab(btn, isActive, text)
     end
     if fs and fs.SetTextColor then
         if isActive then
-            fs:SetTextColor(1.0, 0.95, 0.70)
+            fs:SetTextColor(1.0, 0.82, 0.0)
         else
-            fs:SetTextColor(0.75, 0.70, 0.60)
+            fs:SetTextColor(0.65, 0.60, 0.50)
         end
     end
     if text and btn.SetText then btn:SetText(text) end
@@ -352,22 +416,22 @@ local function StyleModernSubTab(btn, isActive, text)
             StripBlizzardTextures(self)
             if not self._isActive then
                 if self.SetBackdropColor then
-                    self:SetBackdropColor(0.20, 0.17, 0.12, 0.95)
-                    self:SetBackdropBorderColor(0.70, 0.58, 0.25, 0.95)
+                    self:SetBackdropColor(0.18, 0.15, 0.10, 0.90)
+                    self:SetBackdropBorderColor(0.55, 0.45, 0.20, 0.90)
                 end
                 local s = self.GetFontString and self:GetFontString()
-                if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.60) end
+                if s and s.SetTextColor then s:SetTextColor(1.0, 0.92, 0.60) end
             end
         end)
         btn:HookScript("OnLeave", function(self)
             StripBlizzardTextures(self)
             if not self._isActive then
                 if self.SetBackdropColor then
-                    self:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
-                    self:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
+                    self:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
+                    self:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
                 end
                 local s = self.GetFontString and self:GetFontString()
-                if s and s.SetTextColor then s:SetTextColor(0.75, 0.70, 0.60) end
+                if s and s.SetTextColor then s:SetTextColor(0.65, 0.60, 0.50) end
             end
         end)
     end

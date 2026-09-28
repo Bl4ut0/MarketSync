@@ -771,6 +771,14 @@ function MarketSync.CreateAnalyticsPanel(parent)
         end)
     end
 
+    if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1 and MarketSync.ObservationAPI.v1.Register then
+        MarketSync.ObservationAPI.v1.Register(function(event)
+            if event and (event.type == "DATA" or event.type == "FINISH") then
+                if panel:IsShown() then RefreshItemsList() end
+            end
+        end)
+    end
+
     local itemInfoListener = CreateFrame("Frame", nil, panel)
     if itemInfoListener.RegisterEvent then
         itemInfoListener:RegisterEvent("GET_ITEM_INFO_RECEIVED")
