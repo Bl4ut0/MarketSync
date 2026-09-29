@@ -34,6 +34,10 @@ def build(output, interface=None):
 
     toc_name = ADDON + "/" + ADDON + ".toc"
     toc = files[toc_name].decode("utf-8")
+    version_match = re.search(r"^## Version:\s*(\S+)\s*$", toc, flags=re.M)
+    if not version_match:
+        raise ValueError("MarketSync.toc is missing a Version field")
+    version = version_match.group(1)
     if interface is not None:
         toc = re.sub(r"^## Interface:.*$", f"## Interface: {interface}", toc, flags=re.M)
         files[toc_name] = toc.encode("utf-8")
@@ -47,7 +51,7 @@ def build(output, interface=None):
 
     manifest = {
         "addon": "MarketSync",
-        "version": "0.9.2",
+        "version": version,
         "targetVersion": "1.60.1",
         "targetBuild": "69893",
         "interface": interface,
