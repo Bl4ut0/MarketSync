@@ -446,7 +446,7 @@ local function PopulateAddonSettings(panel)
     sAudio:SetText("Audible alert triggers and visual deal notifications.")
 
     local UpdateAudioAndAlertsCard
-    local chkBetaAlerts, undercutSlider
+    local chkBetaAlerts
 
     local lockedAudioNotice = cardAudio:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     lockedAudioNotice:SetPoint("TOPLEFT", 14, -38)
@@ -552,14 +552,6 @@ local function PopulateAddonSettings(panel)
 
     UpdateAudioAndAlertsCard = function()
         local alertsEnabled = MarketSyncDB and (MarketSyncDB.EnableAlertsTab == true)
-        if undercutSlider then
-            if alertsEnabled then
-                undercutSlider:Show()
-            else
-                undercutSlider:Hide()
-            end
-        end
-
         if not alertsEnabled then
             if lockedAudioNotice then lockedAudioNotice:Show() end
             if btnUnlockAudio then btnUnlockAudio:Show() end
@@ -702,31 +694,6 @@ local function PopulateAddonSettings(panel)
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
             if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
         end)
-
-    -- Default Undercut Slider (for Price Alerts)
-    undercutSlider = CreateFrame("Slider", "MarketSyncAddonUndercutSlider", cardBeta, "OptionsSliderTemplate")
-    undercutSlider:SetPoint("TOPLEFT", 320, -64)
-    undercutSlider:SetWidth(130)
-    undercutSlider:SetMinMaxValues(1, 50)
-    undercutSlider:SetValueStep(1)
-    if undercutSlider.SetObeyStepOnDrag then undercutSlider:SetObeyStepOnDrag(true) end
-    if undercutSlider.Low then undercutSlider.Low:SetText("1%") end
-    if undercutSlider.High then undercutSlider.High:SetText("50%") end
-    if undercutSlider.Text then undercutSlider.Text:SetText("Default Undercut %") end
-
-    undercutSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value + 0.5)
-        if MarketSyncDB then MarketSyncDB.AlertUndercutPct = val end
-        if self.Text then self.Text:SetText(string.format("Default Undercut: %d%%", val)) end
-        if MarketSync.RefreshNotificationUndercutButtons then MarketSync.RefreshNotificationUndercutButtons() end
-    end)
-    local function RefreshUndercut()
-        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        undercutSlider:SetValue(val)
-        if undercutSlider.Text then undercutSlider.Text:SetText(string.format("Default Undercut: %d%%", val)) end
-        if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
-    end
-    table.insert(refreshControls, RefreshUndercut)
 
     CreateOptCheckbox(cardBeta, 12, -90, "Enable Debug Diagnostics",
         "Print verbose synchronization, retention, and scanning diagnostics in chat.",

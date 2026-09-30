@@ -1526,6 +1526,8 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
   const check = `
     local mainFrame = MarketSync.CreateMainFrame()
     assert(mainFrame ~= nil, "MainFrame should exist")
+    assert(_G.MarketSyncMainUndercutSlider == nil,
+      "Portable Settings should not create an undercut slider")
     local syncAnchor = mainFrame.syncButton and mainFrame.syncButton.points[1]
     assert(syncAnchor and syncAnchor[1] == "TOPRIGHT" and syncAnchor[5] == -3,
       "Network status must sit within the title strip, clear of its lower border")
@@ -2179,6 +2181,8 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
       MarketSync.SettingsPanel:GetScript("OnShow")(MarketSync.SettingsPanel)
     end
     assert(MarketSync.SettingsPanel.initialized == true, "SettingsPanel should initialize controls on show")
+    assert(_G.MarketSyncAddonUndercutSlider == nil,
+      "Blizzard AddOn Settings should not create an undercut slider")
     if MarketSync.SettingsPanel.RefreshSettingsValues then
       MarketSyncDB.EnableAlertsTab = false
       MarketSync.SettingsPanel.RefreshSettingsValues()

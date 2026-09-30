@@ -866,8 +866,7 @@ local function CreateMainFrame()
 
     -- Forward declarations for dynamic visibility across columns
     local UpdateAudioSettingsVisibility
-    local UpdateBetaSettingsVisibility
-    local chkBetaAlerts, undercutHeader, undercutSlider
+    local chkBetaAlerts
 
     -- ================================================================
     -- COLUMN 3: AUDIO & NOTIFICATIONS
@@ -902,7 +901,6 @@ local function CreateMainFrame()
         if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
         if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
         if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
-        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
 
     local chkNotifSound = CreateCheckbox(boxAudio, boxAudio, "TOPLEFT",
@@ -1169,69 +1167,21 @@ local function CreateMainFrame()
         if MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
         if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
         if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
-        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
     chkBetaAlerts:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.EnableAlertsTab == true) end
-        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
 
-    undercutHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    undercutHeader:SetPoint("TOPLEFT", chkBetaAlerts, "BOTTOMLEFT", 6, -4)
-    undercutHeader:SetText("Alert Undercut:")
-
-    undercutSlider = CreateFrame("Slider", "MarketSyncMainUndercutSlider", betaBox, "OptionsSliderTemplate")
-    undercutSlider:SetPoint("LEFT", undercutHeader, "RIGHT", 6, 0)
-    undercutSlider:SetWidth(80)
-    undercutSlider:SetHeight(14)
-    undercutSlider:SetMinMaxValues(1, 50)
-    undercutSlider:SetValueStep(1)
-    undercutSlider:SetObeyStepOnDrag(true)
-    undercutSlider.Low:SetText("1%")
-    undercutSlider.High:SetText("50%")
-    undercutSlider.Text:SetText("10%")
-
-    undercutSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value + 0.5)
-        MarketSyncDB.AlertUndercutPct = val
-        self.Text:SetText(string.format("%d%%", val))
-        if MarketSync.RefreshNotificationUndercutButtons then MarketSync.RefreshNotificationUndercutButtons() end
-    end)
-    undercutSlider:SetScript("OnShow", function(self)
-        local val = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        self:SetValue(val)
-        self.Text:SetText(string.format("%d%%", val))
-    end)
-
-    local chkDebug = CreateCheckbox(betaBox, undercutHeader, "BOTTOMLEFT",
+    local chkDebug = CreateCheckbox(betaBox, chkBetaAlerts, "BOTTOMLEFT",
         "Debug Messages", "Print verbose synchronization and scanner diagnostics in chat.")
     chkDebug:ClearAllPoints()
-    chkDebug:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", -6, -8)
+    chkDebug:SetPoint("TOPLEFT", chkBetaAlerts, "BOTTOMLEFT", 0, -8)
     chkDebug:SetScript("OnClick", function(self)
         MarketSyncDB.DebugMode = self:GetChecked()
     end)
     chkDebug:SetScript("OnShow", function(self)
         if MarketSyncDB then self:SetChecked(MarketSyncDB.DebugMode == true) end
     end)
-
-    UpdateBetaSettingsVisibility = function()
-        local alertsEnabled = MarketSyncDB and (MarketSyncDB.EnableAlertsTab == true)
-        if alertsEnabled then
-            if undercutHeader then undercutHeader:Show() end
-            if undercutSlider then undercutSlider:Show() end
-            if chkDebug then
-                chkDebug:ClearAllPoints()
-                chkDebug:SetPoint("TOPLEFT", undercutHeader, "BOTTOMLEFT", -6, -8)
-            end
-        else
-            if undercutHeader then undercutHeader:Hide() end
-            if undercutSlider then undercutSlider:Hide() end
-            if chkDebug then
-                chkDebug:ClearAllPoints()
-                chkDebug:SetPoint("TOPLEFT", chkBetaAlerts, "BOTTOMLEFT", 0, -4)
-            end
-        end
-    end
 
     -- ================================================================
     -- Gold Bar Buttons & Labels
@@ -1678,7 +1628,6 @@ local function CreateMainFrame()
         UpdateSettingsStats()
         if UpdateMemorySettingsVisibility then UpdateMemorySettingsVisibility() end
         if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
-        if UpdateBetaSettingsVisibility then UpdateBetaSettingsVisibility() end
     end)
 
     -- ================================================================
