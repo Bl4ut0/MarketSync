@@ -4,7 +4,7 @@
 
 ## One-time setup
 
-1. The `curseforge-beta` environment exists and allows deployments only from `main`. Add the CurseForge author upload token there as a secret named `CF_API_TOKEN` under **Settings > Environments > curseforge-beta**. Do not commit or paste the token into repository files.
+1. The `curseforge-beta` environment exists, allows deployments only from `main`, and has a `CF_API_TOKEN` environment secret for CurseForge uploads. Do not commit the token into repository files. If it is rotated, replace that GitHub secret before the next release candidate.
 2. Consider requiring a reviewer for that environment. With approval enabled, a push to `main` packages immediately but waits for approval before the CurseForge upload. No reviewer is currently required.
 3. Protect `main` with a pull-request and passing-check requirement if you want promotion to require review. Neither branch protection nor environment approval is configured by the workflow file itself.
 
