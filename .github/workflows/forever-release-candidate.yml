@@ -8,6 +8,12 @@ on:
     tags:
       - 'v*-beta.*'
   workflow_dispatch:
+    inputs:
+      publish_existing_version:
+        description: 'Retry the current main version upload after checking CurseForge for duplicates'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -116,8 +122,8 @@ jobs:
             --notes-file "RELEASE-$VERSION.md"
 
   publish-curseforge-prerelease:
-    # Development and manual runs never publish. Promotion to main is the release gate.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate-and-package.outputs.release_ready == 'true'
+    # Manual publication is an explicit recovery path for a failed upload of the current main version.
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && needs.validate-and-package.outputs.release_ready == 'true') || (github.event_name == 'workflow_dispatch' && inputs.publish_existing_version == true))
     needs: validate-and-package
     runs-on: ubuntu-latest
     environment: curseforge-beta
@@ -149,13 +155,13 @@ jobs:
             echo "Exact CurseForge Forever version $FOREVER_VERSION was not found; upload stopped." >&2
             exit 1
           fi
-          metadata=$(jq -n \
+          metadata=$(jq -cn \
             --arg name "MarketSync Pre-Release $VERSION" \
             --arg changelog "$(cat "RELEASE-$VERSION.md")" \
             --argjson gameVersionId "$game_version_id" \
             '{displayName: $name, gameVersions: [$gameVersionId], releaseType: "release", changelog: $changelog, changelogType: "markdown"}')
           curl --fail-with-body --silent --show-error \
             -H "x-api-token: $CF_API_TOKEN" \
-            -F "metadata=$metadata" \
+            --form-string "metadata=$metadata" \
             -F "file=@dist/MarketSync-$VERSION.zip" \
             https://wow.curseforge.com/api/projects/1466264/upload-file
