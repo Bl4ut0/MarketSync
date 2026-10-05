@@ -1,0 +1,121 @@
+name: Forever release candidate
+
+on:
+  push:
+    branches:
+      - forever
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forever-release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      forever_version: ${{ steps.metadata.outputs.forever_version }}
+      release_ready: ${{ steps.metadata.outputs.release_ready }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
+      - name: Run addon tests
+        run: npm test
+      - name: Validate release metadata
+        id: metadata
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^## Version: //p' MarketSync/MarketSync.toc)
+          forever_version=$(sed -n 's/^## X-Forever-Target: \([^ ]*\).*/\1/p' MarketSync/MarketSync.toc)
+          interface=$(sed -n 's/^## Interface: //p' MarketSync/MarketSync.toc)
+          test -n "$version" && test -n "$forever_version"
+          [[ ",$interface," == *",16001,"* ]]
+          test "$(node -p 'require("./package.json").version')" = "$version"
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            test -f "RELEASE-$version.md"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "forever_version=$forever_version" >> "$GITHUB_OUTPUT"
+          release_ready=false
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]]; then
+            previous=$(git show "$BEFORE_SHA:MarketSync/MarketSync.toc" 2>/dev/null | sed -n 's/^## Version: //p' || true)
+            if [[ "$version" != "$previous" ]]; then
+              release_ready=true
+            fi
+          fi
+          echo "release_ready=$release_ready" >> "$GITHUB_OUTPUT"
+      - name: Package addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}.zip"
+          cd dist
+          sha256sum --check "MarketSync-${{ steps.metadata.outputs.version }}.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marketsync-${{ steps.metadata.outputs.version }}-${{ github.sha }}
+          path: dist/MarketSync-${{ steps.metadata.outputs.version }}.zip*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-curseforge-beta:
+    # Development and manual runs never publish. Promotion to main is the release gate.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate-and-package.outputs.release_ready == 'true'
+    needs: validate-and-package
+    runs-on: ubuntu-latest
+    environment: curseforge-beta
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: marketsync-${{ needs.validate-and-package.outputs.version }}-${{ github.sha }}
+          path: dist
+      - name: Upload Forever beta to CurseForge
+        shell: bash
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          VERSION: ${{ needs.validate-and-package.outputs.version }}
+          FOREVER_VERSION: ${{ needs.validate-and-package.outputs.forever_version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CF_API_TOKEN" ]]; then
+            echo 'CF_API_TOKEN is missing. Add it as a secret in the curseforge-beta environment.' >&2
+            exit 1
+          fi
+          versions=$(curl --fail-with-body --silent --show-error --retry 3 \
+            -H "x-api-token: $CF_API_TOKEN" \
+            https://wow.curseforge.com/api/game/wow/versions)
+          game_version_id=$(jq -r --arg version "$FOREVER_VERSION" \
+            '[.[] | select(.gameVersionTypeID == 88568 and .name == $version)] | if length == 1 then .[0].id else empty end' \
+            <<< "$versions")
+          if [[ -z "$game_version_id" ]]; then
+            echo "Exact CurseForge Forever version $FOREVER_VERSION was not found; upload stopped." >&2
+            exit 1
+          fi
+          metadata=$(jq -n \
+            --arg name "MarketSync $VERSION RC (Forever)" \
+            --arg changelog "$(cat "RELEASE-$VERSION.md")" \
+            --argjson gameVersionId "$game_version_id" \
+            '{displayName: $name, gameVersions: [$gameVersionId], releaseType: "beta", changelog: $changelog, changelogType: "markdown"}')
+          curl --fail-with-body --silent --show-error \
+            -H "x-api-token: $CF_API_TOKEN" \
+            -F "metadata=$metadata" \
+            -F "file=@dist/MarketSync-$VERSION.zip" \
+            https://wow.curseforge.com/api/projects/1466264/upload-file
