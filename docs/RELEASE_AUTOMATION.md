@@ -1,6 +1,6 @@
 # Forever release automation
 
-`forever` is the development branch. Pushes to it run tests and create a downloadable Actions artifact, but do not publish to CurseForge. `main` is the promotion branch. When a reviewed release candidate with a **new TOC version** is merged or pushed to `main`, the same validation runs and the resulting ZIP is uploaded to the MarketSync CurseForge project as a **beta** file for Forever. Later pushes with the same version do not upload a duplicate.
+`forever` is the development branch. Ordinary pushes to it run tests and create a downloadable Actions artifact, but do not publish to CurseForge. A `v<version>-beta.<number>` tag on a `forever` commit creates a **GitHub prerelease only**. `main` is the promotion branch. When a reviewed candidate with a **new TOC version** is merged or pushed to `main`, the same validation runs and the resulting ZIP is uploaded to the MarketSync CurseForge project as a **Release-type** file for Forever, with a `Pre-Release` display title. Later pushes with the same version do not upload a duplicate.
 
 ## One-time setup
 
@@ -10,10 +10,13 @@
 
 The workflow checks that the TOC and `package.json` versions agree, the TOC includes Forever interface `16001`, and `RELEASE-<version>.md` exists. It uses `tools/package.py` to build the same addon layout as local releases, and it requires an exact CurseForge Forever version match rather than silently choosing another game version. The CurseForge project ID is 1466264.
 
+The CurseForge file is named `MarketSync-<version>.zip`, its display name is `MarketSync Pre-Release <version>`, its file type is `Release` (matching the existing CurseForge posting style), and the **What's New** section comes from `RELEASE-<version>.md`. The release notes must begin with `# MarketSync <version>` so the heading matches the posted version. Beta tags use the same ZIP and notes but are marked as GitHub prereleases; they never upload to CurseForge.
+
 ## Promotion sequence
 
 1. Finish and test changes on `forever`; bump the TOC and package version plus `RELEASE-<version>.md`.
-2. Merge a reviewed `forever` release candidate into `main`. Do not use `main` for ongoing development.
-3. Check the **Forever release candidate** workflow. The build artifact is downloadable from Actions. Once the `curseforge-beta` gate and token are in place, the upload job creates a beta file on CurseForge.
+2. For an optional GitHub-only beta, tag the tested `forever` commit `v<version>-beta.1`, then use `.2`, `.3`, etc. for further beta builds of that version. These create GitHub prereleases and do not touch CurseForge.
+3. When ready for a CurseForge posting, merge the reviewed `forever` candidate with its bumped version into `main`. Do not use `main` for ongoing development.
+4. Check the **Forever release candidate** workflow. The build artifact is downloadable from Actions; the main-branch upload job creates a Release-type file on CurseForge using the Pre-Release title.
 
-The workflow does **not** publish a stable CurseForge release or create a GitHub release/tag. Those remain deliberate release steps after client validation. Check CurseForge before manually retrying a failed upload; the server may have accepted a request even if the workflow did not receive its response.
+The workflow does **not** create a full GitHub release or create tags automatically. A GitHub beta prerelease requires an explicit beta tag. The full 1.0.0 release process remains a deliberate step after client validation. Check CurseForge before manually retrying a failed upload; the server may have accepted a request even if the workflow did not receive its response.

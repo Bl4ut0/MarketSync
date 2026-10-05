@@ -5,6 +5,8 @@ on:
     branches:
       - forever
       - main
+    tags:
+      - 'v*-beta.*'
   workflow_dispatch:
 
 permissions:
@@ -24,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -48,8 +50,16 @@ jobs:
           test -n "$version" && test -n "$forever_version"
           [[ ",$interface," == *",16001,"* ]]
           test "$(node -p 'require("./package.json").version')" = "$version"
-          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+          if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v*-beta.* ]]; then
             test -f "RELEASE-$version.md"
+            grep -Fxq "# MarketSync $version" "RELEASE-$version.md"
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v*-beta.* ]]; then
+            tag=${GITHUB_REF#refs/tags/}
+            [[ "$tag" == "v${version}-beta."* ]]
+            beta_number=${tag##*.}
+            [[ "$beta_number" =~ ^[1-9][0-9]*$ ]]
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/forever
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "forever_version=$forever_version" >> "$GITHUB_OUTPUT"
@@ -75,7 +85,35 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  publish-curseforge-beta:
+  publish-github-beta:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: validate-and-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: marketsync-${{ needs.validate-and-package.outputs.version }}-${{ github.sha }}
+          path: dist
+      - name: Publish GitHub beta prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate-and-package.outputs.version }}
+        run: |
+          set -euo pipefail
+          beta_number=${GITHUB_REF_NAME##*.}
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/MarketSync-$VERSION.zip" \
+            "dist/MarketSync-$VERSION.zip.sha256" \
+            "dist/MarketSync-$VERSION.zip.manifest.json" \
+            --verify-tag --prerelease \
+            --title "MarketSync $VERSION Beta $beta_number" \
+            --notes-file "RELEASE-$VERSION.md"
+
+  publish-curseforge-prerelease:
     # Development and manual runs never publish. Promotion to main is the release gate.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate-and-package.outputs.release_ready == 'true'
     needs: validate-and-package
@@ -87,7 +125,7 @@ jobs:
         with:
           name: marketsync-${{ needs.validate-and-package.outputs.version }}-${{ github.sha }}
           path: dist
-      - name: Upload Forever beta to CurseForge
+      - name: Upload Forever pre-release to CurseForge
         shell: bash
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -110,10 +148,10 @@ jobs:
             exit 1
           fi
           metadata=$(jq -n \
-            --arg name "MarketSync $VERSION RC (Forever)" \
+            --arg name "MarketSync Pre-Release $VERSION" \
             --arg changelog "$(cat "RELEASE-$VERSION.md")" \
             --argjson gameVersionId "$game_version_id" \
-            '{displayName: $name, gameVersions: [$gameVersionId], releaseType: "beta", changelog: $changelog, changelogType: "markdown"}')
+            '{displayName: $name, gameVersions: [$gameVersionId], releaseType: "release", changelog: $changelog, changelogType: "markdown"}')
           curl --fail-with-body --silent --show-error \
             -H "x-api-token: $CF_API_TOKEN" \
             -F "metadata=$metadata" \

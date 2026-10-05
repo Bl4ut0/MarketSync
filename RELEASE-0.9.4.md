@@ -1,4 +1,4 @@
-# MarketSync 0.9.4 prerelease - Forever
+# MarketSync 0.9.4
 
 This prerelease updates MarketSync for the current Forever 1.60.1 client (build 70205).
 
