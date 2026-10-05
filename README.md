@@ -1,8 +1,8 @@
-# MarketSync 0.9.3 — Forever
+# MarketSync 0.9.4 — Forever
 
 **Scan once. Share prices with your guild. Browse the market away from the Auction House.**
 
-MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, shopping lists, and analytics. Version 0.9.3 targets Forever 1.60.1 (build 69893).
+MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, shopping lists, and analytics. Version 0.9.4 targets Forever 1.60.1 (build 70205).
 
 Auctionator is optional: MarketSync includes its own native, frame-sliced auction scanner, or can seamlessly capture Auctionator full scans when both addons are installed.
 

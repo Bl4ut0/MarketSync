@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-10-05
+
 ### Changed
 - Removed the global alert-discount sliders from both Settings interfaces. Alert prices remain editable per item, and the below-market preset remains in the Alerts editor.
+
+### Fixed
+- Added Forever's `16001` interface number to the TOC so the current Forever client no longer marks MarketSync incompatible. Updated the tested target build to 1.60.1.70205.
 
 ## [0.9.3] - 2026-09-29
 

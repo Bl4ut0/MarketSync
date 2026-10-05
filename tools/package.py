@@ -14,8 +14,8 @@ def build(output, interface=None):
     output = Path(output).resolve()
     if output.exists() or output.with_suffix(output.suffix + ".manifest.json").exists():
         raise ValueError("Output already exists; choose a new file")
-    if interface is not None and (not 1 <= interface <= 999999 or interface == 69893):
-        raise ValueError("Supply the fourth GetBuildInfo() value; build 69893 is not an Interface number")
+    if interface is not None and (not 1 <= interface <= 999999 or interface == 70205):
+        raise ValueError("Supply the fourth GetBuildInfo() value; build 70205 is not an Interface number")
 
     files = {}
     addon_dir = ROOT / ADDON
@@ -53,7 +53,7 @@ def build(output, interface=None):
         "addon": "MarketSync",
         "version": version,
         "targetVersion": "1.60.1",
-        "targetBuild": "69893",
+        "targetBuild": "70205",
         "interface": interface,
         "auctionHouseEntry": "embedded-tab",
         "embeddedAuctionHousePanel": True,

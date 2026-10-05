@@ -1,6 +1,6 @@
 {
   "name": "marketsync",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "MarketSync development and test tooling",
   "private": true,
   "scripts": {
