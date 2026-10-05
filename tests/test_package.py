@@ -16,7 +16,7 @@ class PackageTests(unittest.TestCase):
             output = Path(folder) / "MarketSync.zip"
             manifest = module.build(output)
             self.assertEqual(manifest["addon"], "MarketSync")
-            self.assertEqual(manifest["version"], "0.9.3")
+            self.assertEqual(manifest["version"], "0.9.4")
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
                 self.assertTrue(all(n.startswith("MarketSync/") for n in names))
@@ -30,7 +30,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("MarketSync/UI_AHScanner.lua", names)
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
                 self.assertIn("## AllowLoadGameType: camelot", toc)
-                self.assertIn("## Version: 0.9.3", toc)
+                self.assertIn("## Version: 0.9.4", toc)
             self.assertEqual(manifest["auctionHouseEntry"], "embedded-tab")
             self.assertTrue(manifest["embeddedAuctionHousePanel"])
             self.assertTrue(manifest["nativeScanner"])
@@ -47,7 +47,7 @@ class PackageTests(unittest.TestCase):
 
     def test_rejects_known_build_id_and_invalid_interface_values(self):
         with tempfile.TemporaryDirectory() as folder:
-            for value in [69893, 0, -1, 1000000]:
+            for value in [69893, 70205, 0, -1, 1000000]:
                 with self.subTest(value=value), self.assertRaises(ValueError):
                     module.build(Path(folder) / (str(value) + ".zip"), value)
 

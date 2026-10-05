@@ -14,8 +14,8 @@ def build(output, interface=None):
     output = Path(output).resolve()
     if output.exists() or output.with_suffix(output.suffix + ".manifest.json").exists():
         raise ValueError("Output already exists; choose a new file")
-    if interface is not None and (not 1 <= interface <= 999999 or interface == 70205):
-        raise ValueError("Supply the fourth GetBuildInfo() value; build 70205 is not an Interface number")
+    if interface is not None and (not 1 <= interface <= 999999 or interface in (69893, 70205)):
+        raise ValueError("Supply an Interface number, not a GetBuildInfo() build number")
 
     files = {}
     addon_dir = ROOT / ADDON
