@@ -1,4 +1,4 @@
-## Interface: 120001, 120000, 50503, 38000, 20506, 20505, 11509, 11508
+## Interface: 16001, 120001, 120000, 50503, 38000, 20506, 20505, 11509, 11508
 ## Title: MarketSync
 ## Notes: The Guild Auction DB - Sync prices, check history, and browse offline.
 ## Author: Gemini
@@ -6,7 +6,7 @@
 ## SavedVariables: MarketSyncDB
 ## OptionalDeps: Auctionator
 ## AllowLoadGameType: camelot
-## X-Forever-Target: 1.60.1 (69893)
+## X-Forever-Target: 1.60.1 (70205)
 
 # Libs
 Libs\Libs.xml
