@@ -130,7 +130,8 @@ local function Suffix(link)
     local itemString = link:match("|H(item:[^|]+)|h") or link:match("(item:%d+[^%s|]*)")
     if not itemString then return 0 end
     local fields = {}
-    for field in itemString:gmatch("([^:]+)") do fields[#fields + 1] = field end
+    -- Empty enchant/gem fields are significant: skipping them shifts suffixID.
+    for field in (itemString .. ":"):gmatch("(.-):") do fields[#fields + 1] = field end
     return tonumber(fields[8]) or 0
 end
 
@@ -221,9 +222,10 @@ function S.StartScan(itemsOrKeys, label)
     local seen = {}
     for _, item in ipairs(itemsOrKeys or {}) do
         local key = S.ToItemKey(item)
-        if key and not seen[key.itemID] then
+        local identity = key and string.format("%d:%d", key.itemID, key.itemSuffix or 0)
+        if key and not seen[identity] then
             if type(item) == "table" then key.name = item.name end
-            seen[key.itemID] = true
+            seen[identity] = true
             S.Queue[#S.Queue + 1] = key
         end
     end

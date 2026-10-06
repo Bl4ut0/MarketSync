@@ -84,12 +84,17 @@ jobs:
         run: |
           set -euo pipefail
           python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}.zip"
+          # Legacy archives are CI test artifacts until installed-client checks
+          # confirm their Interface numbers and runtime Auction House behavior.
+          python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}-Era-test.zip" --interface 11509 --flavor era
+          python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}-SoD-test.zip" --interface 11509 --flavor sod
+          python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}-TBC-test.zip" --interface 20506 --flavor tbc
           cd dist
-          sha256sum --check "MarketSync-${{ steps.metadata.outputs.version }}.zip.sha256"
+          for checksum in *.zip.sha256; do sha256sum --check "$checksum"; done
       - uses: actions/upload-artifact@v4
         with:
           name: marketsync-${{ steps.metadata.outputs.version }}-${{ github.sha }}
-          path: dist/MarketSync-${{ steps.metadata.outputs.version }}.zip*
+          path: dist/MarketSync-${{ steps.metadata.outputs.version }}*.zip*
           if-no-files-found: error
           retention-days: 30
 

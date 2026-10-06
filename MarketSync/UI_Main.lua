@@ -625,7 +625,11 @@ local function CreateMainFrame()
         local scannerHost = CreateFrame("Frame", nil, MainFrame)
         scannerHost:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 12, -63)
         scannerHost:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -12, 29)
-        MarketSync.CreateAHScannerPanel(scannerHost)
+        scannerHost.Content = MarketSync.CreateAHScannerPanel(scannerHost)
+        MainFrame.legacyScannerPanel = scannerHost.Content
+        scannerHost:SetScript("OnShow", function()
+            if scannerHost.Content and scannerHost.Content.OnShow then scannerHost.Content.OnShow() end
+        end)
         scannerHost:Hide()
         table.insert(contentFrames, scannerHost)
     end
@@ -848,6 +852,12 @@ local function CreateMainFrame()
         end
         if MarketSync.Provider then MarketSync.Provider.Select() end
         if isChecked and MarketSync.RegisterAuctionatorHooks then MarketSync.RegisterAuctionatorHooks() end
+        if MainFrame.legacyScannerPanel and MainFrame.legacyScannerPanel.RefreshScannerState then
+            MainFrame.legacyScannerPanel.RefreshScannerState()
+        end
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then
+            MarketSync.AuctionHouse.RefreshTabVisibility()
+        end
         print("|cFF00FF00[MarketSync]|r Auctionator Scanning " .. (isChecked and "Enabled" or "Disabled"))
     end)
     chkAuctionatorScan:SetScript("OnShow", function(self)

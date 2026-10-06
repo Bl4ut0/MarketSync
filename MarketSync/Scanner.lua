@@ -126,7 +126,7 @@ local function GetItemSuffixFromLink(itemLink)
     if not itemString then return 0 end
 
     local fields = {}
-    for field in itemString:gmatch("([^:]+)") do
+    for field in (itemString .. ":"):gmatch("(.-):") do
         fields[#fields + 1] = field
     end
     -- Item links use: item:id:enchant:gem1:gem2:gem3:gem4:suffix:unique:...

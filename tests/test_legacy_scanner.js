@@ -94,6 +94,19 @@ run(`
   RunTimers()
   assert(#recorded == 1 and recorded[1].price == 77 and recorded[1].full == false)
   assert(MarketSync.Scanner.Active == false)
+  recorded = {}
+  assert(MarketSync.Scanner.StartFullScan() == true)
+  results = {
+    {id = 100, name = "Test Ore", count = 1, buyout = 90,
+      link = "|cff1eff00|Hitem:100:0:0:0:0:0:-12:0|h[Test Ore of Power]|h|r"},
+    {id = 100, name = "Test Ore", count = 2, buyout = 120,
+      link = "|cff1eff00|Hitem:100:0:0:0:0:0:-13:0|h[Test Ore of Speed]|h|r"},
+  }
+  resultTotal = 2
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  RunTimers()
+  assert(#recorded == 2, "suffix variants must be stored separately")
+  assert(recorded[1].key.itemSuffix == -12 and recorded[2].key.itemSuffix == -13)
   observations = {}
   MarketSync.ObservationAPI = { v1 = {
     HasListeners = function() return true end,
@@ -113,5 +126,25 @@ run(`
   RunTimers()
   assert(neutralCompleted == true and observations[#observations].scope == "neutral")
   assert(MarketSyncDB.FullScanTime == mainScanTime, "neutral scan must not advance main freshness")
+  MarketSync.IsNeutralAHOpen = false
+  observations = {}
+  recorded = {}
+  assert(MarketSync.Scanner.StartScan({100}, "Paged Target") == true)
+  results = {
+    {id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"},
+    {id = 100, name = "Test Ore", count = 1, buyout = 0, link = "item:100"},
+  }
+  resultTotal = 51
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(queries[#queries].page == 1, "target scan must request later result pages")
+  assert(#recorded == 0, "target scan must wait for every page before saving")
+  results = {{id = 100, name = "Test Ore", count = 3, buyout = 240, link = "item:100"}}
+  resultTotal = 51
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  RunTimers()
+  assert(#recorded == 1 and recorded[1].price == 80 and recorded[1].qty == 5,
+    "paged target scan must aggregate rows and ignore auctions without buyout: " ..
+    tostring(#recorded) .. " " .. tostring(recorded[1] and recorded[1].price) ..
+    " " .. tostring(recorded[1] and recorded[1].qty))
 `);
 console.log('PASS legacy full, targeted, and neutral scan transport');

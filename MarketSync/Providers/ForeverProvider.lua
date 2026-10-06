@@ -57,7 +57,7 @@ function ForeverProvider.ToItemKey(keyOrLink)
         if itemID then
             local itemString = keyOrLink:match("|H(item:[^|]+)|h") or keyOrLink:match("(item:%d+[^%s|]*)")
             local itemFields = {}
-            for field in (itemString or ""):gmatch("([^:]+)") do
+            for field in ((itemString or "") .. ":"):gmatch("(.-):") do
                 itemFields[#itemFields + 1] = field
             end
             local suffixID = tonumber(itemFields[8]) or 0

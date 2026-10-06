@@ -10,7 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = "MarketSync"
 
 
-def build(output, interface=None, game_type=None):
+FLAVORS = {
+    "forever": "camelot",
+    "era": "classic",
+    "sod": "classic",
+    "tbc": "tbc",
+}
+
+
+def build(output, interface=None, game_type=None, flavor=None):
     output = Path(output).resolve()
     if output.exists() or output.with_suffix(output.suffix + ".manifest.json").exists():
         raise ValueError("Output already exists; choose a new file")
@@ -18,6 +26,13 @@ def build(output, interface=None, game_type=None):
         raise ValueError("Supply an Interface number, not a GetBuildInfo() build number")
     if game_type not in (None, "camelot", "classic", "tbc"):
         raise ValueError("Unsupported game type")
+    if flavor not in (None, *FLAVORS):
+        raise ValueError("Unsupported flavor")
+    if flavor is not None:
+        expected_type = FLAVORS[flavor]
+        if game_type is not None and game_type != expected_type:
+            raise ValueError("Flavor and game type disagree")
+        game_type = expected_type
     if game_type in ("classic", "tbc") and interface is None:
         raise ValueError("Legacy packages require an explicit client Interface number")
 
@@ -61,9 +76,10 @@ def build(output, interface=None, game_type=None):
         "targetVersion": "1.60.1" if game_type in (None, "camelot") else game_type,
         "targetBuild": "70205" if game_type in (None, "camelot") else None,
         "gameType": game_type or "multi",
+        "flavor": flavor or "multi",
         "interface": interface,
-        "auctionHouseEntry": "embedded-tab",
-        "embeddedAuctionHousePanel": True,
+        "auctionHouseEntry": "embedded-tab" if game_type in (None, "camelot") else "portable-scanner",
+        "embeddedAuctionHousePanel": game_type in (None, "camelot"),
         "portableWindow": True,
         "nativeScanner": True,
         "preferredLists": True,
@@ -81,9 +97,10 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--interface", type=int)
     parser.add_argument("--game-type", choices=["camelot", "classic", "tbc"])
+    parser.add_argument("--flavor", choices=list(FLAVORS))
     args = parser.parse_args()
     try:
-        result = build(args.output, args.interface, args.game_type)
+        result = build(args.output, args.interface, args.game_type, args.flavor)
     except (ValueError, OSError) as error:
         parser.exit(1, str(error) + "\n")
     print(json.dumps(result, indent=2))

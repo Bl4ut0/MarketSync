@@ -58,7 +58,9 @@ local function CreateCustomCheckBox(parent, onClick)
 end
 
 function MarketSync.CreateAHScannerPanel(parent)
-    local panel = CreateFrame("Frame", "MarketSyncAHScannerFrame", parent)
+    -- The portable legacy window and embedded modern AH can each own a scanner
+    -- panel in one session. A global frame name would collide on the second one.
+    local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
 
     -- Left Pane: Scan Lists Management (260px wide)
@@ -117,7 +119,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     delListBtn:SetText("Delete")
 
     -- Multi-list checklist scroll area
-    local listScroll = CreateFrame("ScrollFrame", "MarketSyncScanListScroll", leftInset, "UIPanelScrollFrameTemplate")
+    local listScroll = CreateFrame("ScrollFrame", nil, leftInset, "UIPanelScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", leftHeader, "BOTTOMLEFT", 0, -4)
     listScroll:SetPoint("RIGHT", -14, 0)
     listScroll:SetHeight(130)
@@ -176,7 +178,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     end
 
     -- Active List Items ScrollFrame
-    local itemsScroll = CreateFrame("ScrollFrame", "MarketSyncScanItemsScroll", leftInset, "UIPanelScrollFrameTemplate")
+    local itemsScroll = CreateFrame("ScrollFrame", nil, leftInset, "UIPanelScrollFrameTemplate")
     itemsScroll:SetPoint("TOPLEFT", activeListLabel, "BOTTOMLEFT", 0, -4)
     itemsScroll:SetPoint("BOTTOMRIGHT", -14, 34)
     if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(itemsScroll) end
@@ -530,6 +532,20 @@ function MarketSync.CreateAHScannerPanel(parent)
     statusText:SetWordWrap(false)
     statusText:SetText("Ready to scan")
 
+    -- Legacy clients browse stored observations in Personal Scan. Keep that
+    -- one-click route beside the live feed instead of presenting a second,
+    -- conflicting search page over Blizzard's or Auctionator's AH UI.
+    if MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH then
+        local browseBtn = CreateFrame("Button", nil, rightInset, "UIPanelButtonTemplate")
+        browseBtn:SetSize(150, 22)
+        browseBtn:SetPoint("BOTTOMLEFT", rightInset, "BOTTOMLEFT", 10, 8)
+        browseBtn:SetText("Browse Saved Scan")
+        browseBtn:SetScript("OnClick", function()
+            if MarketSync.SelectMainFrameTab then MarketSync.SelectMainFrameTab(1) end
+        end)
+        panel.browseSavedButton = browseBtn
+    end
+
     scanAllBtn:SetScript("OnClick", function()
         if MarketSync.Scanner and MarketSync.Scanner.StartFullScan then
             MarketSync.Scanner.StartFullScan()
@@ -670,9 +686,9 @@ function MarketSync.CreateAHScannerPanel(parent)
     end
 
     -- Results Scroll Frame
-    local resultsScroll = CreateFrame("ScrollFrame", "MarketSyncAHScanResultsScroll", rightInset, "UIPanelScrollFrameTemplate")
+    local resultsScroll = CreateFrame("ScrollFrame", nil, rightInset, "UIPanelScrollFrameTemplate")
     resultsScroll:SetPoint("TOPLEFT", colContainer, "BOTTOMLEFT", 0, -4)
-    resultsScroll:SetPoint("BOTTOMRIGHT", -14, 10)
+    resultsScroll:SetPoint("BOTTOMRIGHT", -14, panel.browseSavedButton and 36 or 10)
     if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(resultsScroll) end
 
     local resultsContent = CreateFrame("Frame", nil, resultsScroll)
@@ -870,6 +886,21 @@ function MarketSync.CreateAHScannerPanel(parent)
         local scanner = MarketSync.Scanner
         if not scanner then return end
 
+        local auctionatorOwnsScan = scanner.IsDisabledByAuctionator and scanner.IsDisabledByAuctionator()
+        if auctionatorOwnsScan then
+            statusText:SetText("Auctionator handles scanning. MarketSync imports its prices; browse saved results in Personal Scan.")
+            stopBtn:Disable()
+            scanWatchedBtn:Disable()
+            scanAllBtn:Disable()
+            scanSelectedBtn:Disable()
+            progressLabel:SetText("Auctionator scanning")
+            if displayedResultsRevision ~= scanner.ResultsRevision then
+                displayedResultsRevision = scanner.ResultsRevision
+                UpdateResultsTable()
+            end
+            return
+        end
+
         statusText:SetText(scanner.Status or "Ready")
 
         -- Cooldown timer check on Scan All button
@@ -922,6 +953,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     if MarketSync.Scanner then
         MarketSync.Scanner.RegisterCallback(UpdateScannerState)
     end
+    panel.RefreshScannerState = UpdateScannerState
     if MarketSync.Favorites then
         MarketSync.Favorites.RegisterCallback(function()
             RefreshListsView()
@@ -935,7 +967,10 @@ function MarketSync.CreateAHScannerPanel(parent)
         tickerTime = tickerTime + elapsed
         if tickerTime >= 1.0 then
             tickerTime = 0
-            if panel:IsShown() and MarketSync.Scanner and not MarketSync.Scanner.Active then
+            -- Auctionator may load while the portable panel is already open.
+            if panel:IsShown() then UpdateScannerState() end
+            if panel:IsShown() and MarketSync.Scanner and not MarketSync.Scanner.Active
+                and not (MarketSync.Scanner.IsDisabledByAuctionator and MarketSync.Scanner.IsDisabledByAuctionator()) then
                 local cd = (MarketSync.Scanner.GetFullScanCooldownRemaining and MarketSync.Scanner.GetFullScanCooldownRemaining()) or 0
                 if cd > 0 then
                     local mins = math.floor(cd / 60)
