@@ -110,7 +110,7 @@ local function Query(name, page, getAll)
         legacy.requestID = legacy.requestID + 1
         local requestID = legacy.requestID
         local ok = pcall(QueryAuctionItems, name or "", nil, nil, page or 0,
-            nil, nil, getAll == true, not getAll, nil)
+            nil, nil, getAll == true, false, nil)
         if not ok then
             S.Cancel("Auction House query failed")
             return
@@ -134,7 +134,7 @@ local function Suffix(link)
     return tonumber(fields[8]) or 0
 end
 
-local function ReadRow(index, targetID)
+local function ReadRow(index, targetID, targetSuffix)
     local name, texture, count, quality, _, level, _, _, _, buyout,
         _, _, _, _, _, _, itemID = GetAuctionItemInfo("list", index)
     local link = GetAuctionItemLink and GetAuctionItemLink("list", index) or nil
@@ -143,6 +143,7 @@ local function ReadRow(index, targetID)
     if not itemID or (targetID and itemID ~= targetID) or not count or count <= 0
         or not buyout or buyout <= 0 then return end
     local suffix = Suffix(link)
+    if targetSuffix and targetSuffix ~= 0 and suffix ~= targetSuffix then return end
     local key = suffix ~= 0 and string.format("p:%d:%d", itemID, suffix) or tostring(itemID)
     local price = math.floor(buyout / count)
     if price <= 0 then return end
@@ -272,12 +273,13 @@ frame:SetScript("OnEvent", function(_, event)
     count, total = tonumber(count) or 0, tonumber(total) or 0
     local generation = S.Generation
     local targetID = legacy.mode == "target" and S.Pending and S.Pending.itemID or nil
+    local targetSuffix = legacy.mode == "target" and S.Pending and S.Pending.itemSuffix or nil
     local index = 1
     if legacy.mode == "full" then S.Progress.total = count end
     local function ReadBatch()
         if not S.Active or S.Generation ~= generation then return end
         local stop = math.min(count, index + 249)
-        for i = index, stop do ReadRow(i, targetID) end
+        for i = index, stop do ReadRow(i, targetID, targetSuffix) end
         index = stop + 1
         if legacy.mode == "full" then
             S.Progress.current = stop
