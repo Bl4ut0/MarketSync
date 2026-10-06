@@ -5,6 +5,14 @@
 
 MarketSync = MarketSync or {}
 
+function MarketSync.GetCheckedScannerLists(checkedLists, availableLists)
+    local selected = {}
+    for _, name in ipairs(availableLists or {}) do
+        if checkedLists and checkedLists[name] then selected[#selected + 1] = name end
+    end
+    return selected
+end
+
 local function SafeGetItemInfo(item)
     if not item then return nil end
     if MarketSync and MarketSync.GetItemInfo then
@@ -136,17 +144,17 @@ function MarketSync.CreateAHScannerPanel(parent)
     listScrollContent:SetSize(leftWidth - 28, 1)
     listScroll:SetScrollChild(listScrollContent)
 
-    -- Batch selection and scan CTA toolbar
+    -- List selection stays in the narrow rail; scan actions live in the wider header.
     local toggleSelectBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
     toggleSelectBtn:SetSize(78, 22)
     toggleSelectBtn:SetPoint("TOPLEFT", listScroll, "BOTTOMLEFT", 2, -6)
     toggleSelectBtn:SetText("Select All")
 
-    local scanSelectedBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
-    scanSelectedBtn:SetPoint("LEFT", toggleSelectBtn, "RIGHT", 4, 0)
-    scanSelectedBtn:SetPoint("RIGHT", -6, 0)
-    scanSelectedBtn:SetHeight(22)
-    scanSelectedBtn:SetText("Scan Selected")
+    local selectedCountText = leftInset:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    selectedCountText:SetPoint("LEFT", toggleSelectBtn, "RIGHT", 8, 0)
+    selectedCountText:SetPoint("RIGHT", leftInset, "RIGHT", -8, 0)
+    selectedCountText:SetJustifyH("RIGHT")
+    selectedCountText:SetText("0 items")
 
     -- Divider between Lists Checklist and Active List Items
     local divider = leftInset:CreateTexture(nil, "ARTWORK")
@@ -292,6 +300,7 @@ function MarketSync.CreateAHScannerPanel(parent)
         local lists = (MarketSync.Favorites and MarketSync.Favorites.GetLists()) or { "Favorites" }
         local rowH = 24
         local totalSelectedItems = 0
+        local selectedIDs = {}
 
         for i = 1, math.max(#lists, #checklistRows) do
             local row = checklistRows[i]
@@ -333,7 +342,12 @@ function MarketSync.CreateAHScannerPanel(parent)
                 local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(listName) or {}
                 local count = #items
                 if checkedLists[listName] then
-                    totalSelectedItems = totalSelectedItems + count
+                    for _, item in ipairs(items) do
+                        if item.itemID and not selectedIDs[item.itemID] then
+                            selectedIDs[item.itemID] = true
+                            totalSelectedItems = totalSelectedItems + 1
+                        end
+                    end
                 end
 
                 row.cb:SetCheckedState(checkedLists[listName] or false)
@@ -388,7 +402,7 @@ function MarketSync.CreateAHScannerPanel(parent)
         toggleSelectBtn:SetText(allChecked and "Clear All" or "Select All")
 
         listScrollContent:SetHeight(math.max(1, #lists * rowH))
-        scanSelectedBtn:SetText(string.format("Scan Selected (%d items)", totalSelectedItems))
+        selectedCountText:SetText(string.format("%d items", totalSelectedItems))
         activeListLabel:SetText(string.format("List Items: |cFFFFD100%s|r", selectedListName))
     end
 
@@ -485,20 +499,6 @@ function MarketSync.CreateAHScannerPanel(parent)
         RefreshListsView()
     end)
 
-    scanSelectedBtn:SetScript("OnClick", function()
-        if MarketSync.Scanner then
-            local activeNames = {}
-            for name, isChecked in pairs(checkedLists) do
-                if isChecked then table.insert(activeNames, name) end
-            end
-            if #activeNames > 0 then
-                MarketSync.Scanner.ScanMultipleLists(activeNames)
-            else
-                print("|cFFFF4444[MarketSync]|r Please check at least one list to scan.")
-            end
-        end
-    end)
-
     -- ================================================================
     -- RIGHT PANE: SCAN CONTROLS & LIVE RESULTS FEED
     -- ================================================================
@@ -519,17 +519,17 @@ function MarketSync.CreateAHScannerPanel(parent)
     stopBtn:SetText("Stop")
     stopBtn:Disable()
 
-    -- Scan Watched Button
-    local scanWatchedBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
-    scanWatchedBtn:SetSize(102, 22)
-    scanWatchedBtn:SetPoint("RIGHT", stopBtn, "LEFT", -5, 0)
-    scanWatchedBtn:SetText("Scan Watched")
+    -- Selected-list scan uses exactly the checkboxes in the left rail.
+    local scanSelectedBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
+    scanSelectedBtn:SetSize(112, 22)
+    scanSelectedBtn:SetPoint("RIGHT", stopBtn, "LEFT", -5, 0)
+    scanSelectedBtn:SetText("Scan Selected")
 
-    -- Scan All (Full AH) Button
+    -- The only other scan action is the full Auction House scan.
     local scanAllBtn = CreateFrame("Button", nil, rightHeader, "UIPanelButtonTemplate")
-    scanAllBtn:SetSize(136, 22)
-    scanAllBtn:SetPoint("RIGHT", scanWatchedBtn, "LEFT", -5, 0)
-    scanAllBtn:SetText("Scan All (Full AH)")
+    scanAllBtn:SetSize(112, 22)
+    scanAllBtn:SetPoint("RIGHT", scanSelectedBtn, "LEFT", -5, 0)
+    scanAllBtn:SetText("Full AH Scan")
 
     -- Row 2: Status Text (Full width across header below buttons)
     local statusText = rightHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -559,9 +559,15 @@ function MarketSync.CreateAHScannerPanel(parent)
         end
     end)
 
-    scanWatchedBtn:SetScript("OnClick", function()
+    scanSelectedBtn:SetScript("OnClick", function()
         if MarketSync.Scanner then
-            MarketSync.Scanner.ScanWatched()
+            local lists = MarketSync.Favorites and MarketSync.Favorites.GetLists() or {}
+            local activeNames = MarketSync.GetCheckedScannerLists(checkedLists, lists)
+            if #activeNames > 0 then
+                MarketSync.Scanner.ScanMultipleLists(activeNames)
+            else
+                print("|cFFFF4444[MarketSync]|r Check at least one list before scanning.")
+            end
         end
     end)
 
@@ -594,13 +600,6 @@ function MarketSync.CreateAHScannerPanel(parent)
             tooltipTitle = "Toggle Selection",
             tooltipText = "Select all lists or clear selection.",
         })
-        MarketSync.SetAccessibility(scanSelectedBtn, {
-            name = function() return scanSelectedBtn:GetText() or "Scan Selected Lists" end,
-            context = "Button",
-            description = "Queries the Auction House for all items across checked shopping lists.",
-            tooltipTitle = "Scan Selected Lists",
-            tooltipText = "Scans market prices for all items in checked lists.",
-        })
         MarketSync.SetAccessibility(addBox, {
             name = "Quick Add Item",
             context = "Edit Box",
@@ -615,15 +614,15 @@ function MarketSync.CreateAHScannerPanel(parent)
             tooltipTitle = "Stop Scan",
             tooltipText = "Cancel the active scan in progress.",
         })
-        MarketSync.SetAccessibility(scanWatchedBtn, {
-            name = "Scan Watched Items",
+        MarketSync.SetAccessibility(scanSelectedBtn, {
+            name = "Scan Selected Lists",
             context = "Button",
-            description = "Queries the Auction House for all items currently on your active watchlist.",
-            tooltipTitle = "Scan Watched Items",
-            tooltipText = "Queries the Auction House for all items on your Watchlist.",
+            description = "Queries the Auction House for the items in the checked lists on the left.",
+            tooltipTitle = "Scan Selected Lists",
+            tooltipText = "Scans only the checked shopping lists.",
         })
         MarketSync.SetAccessibility(scanAllBtn, {
-            name = "Scan All Auctions",
+            name = "Full Auction House Scan",
             context = "Button",
             description = function()
                 local cd = (MarketSync.Scanner and MarketSync.Scanner.GetFullScanCooldownRemaining and MarketSync.Scanner.GetFullScanCooldownRemaining()) or 0
@@ -632,7 +631,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                 end
                 return "Replicates all realm auctions. Ready to scan."
             end,
-            tooltipTitle = "Scan All (Full AH)",
+            tooltipTitle = "Full AH Scan",
             tooltipText = "Performs a full Auction House replication scan. Subject to a 15-minute server cooldown.",
         })
     end
@@ -897,7 +896,6 @@ function MarketSync.CreateAHScannerPanel(parent)
         if auctionatorOwnsScan then
             statusText:SetText("Auctionator handles scanning. MarketSync imports its prices; browse saved results in Personal Scan.")
             stopBtn:Disable()
-            scanWatchedBtn:Disable()
             scanAllBtn:Disable()
             scanSelectedBtn:Disable()
             progressLabel:SetText("Auctionator scanning")
@@ -914,7 +912,6 @@ function MarketSync.CreateAHScannerPanel(parent)
         local cd = (scanner.GetFullScanCooldownRemaining and scanner.GetFullScanCooldownRemaining()) or 0
         if scanner.Active then
             stopBtn:Enable()
-            scanWatchedBtn:Disable()
             scanAllBtn:Disable()
             scanSelectedBtn:Disable()
             if scanner.Progress and scanner.Progress.total > 0 then
@@ -929,17 +926,14 @@ function MarketSync.CreateAHScannerPanel(parent)
             end
         else
             stopBtn:Disable()
-            scanWatchedBtn:Enable()
             scanSelectedBtn:Enable()
 
             if cd > 0 then
                 scanAllBtn:Disable()
-                local mins = math.floor(cd / 60)
-                local secs = cd % 60
-                scanAllBtn:SetText(string.format("Scan All (%dm %02ds)", mins, secs))
+                scanAllBtn:SetText(string.format("Full AH (%dm)", math.ceil(cd / 60)))
             else
                 scanAllBtn:Enable()
-                scanAllBtn:SetText("Scan All (Full AH)")
+                scanAllBtn:SetText("Full AH Scan")
             end
 
             if scanner.Progress and scanner.Progress.total and scanner.Progress.total > 0 then
@@ -980,12 +974,10 @@ function MarketSync.CreateAHScannerPanel(parent)
                 and not (MarketSync.Scanner.IsDisabledByAuctionator and MarketSync.Scanner.IsDisabledByAuctionator()) then
                 local cd = (MarketSync.Scanner.GetFullScanCooldownRemaining and MarketSync.Scanner.GetFullScanCooldownRemaining()) or 0
                 if cd > 0 then
-                    local mins = math.floor(cd / 60)
-                    local secs = cd % 60
-                    scanAllBtn:SetText(string.format("Scan All (%dm %02ds)", mins, secs))
+                    scanAllBtn:SetText(string.format("Full AH (%dm)", math.ceil(cd / 60)))
                 else
                     scanAllBtn:Enable()
-                    scanAllBtn:SetText("Scan All (Full AH)")
+                    scanAllBtn:SetText("Full AH Scan")
                 end
             end
         end

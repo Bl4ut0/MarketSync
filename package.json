@@ -4,7 +4,7 @@
   "description": "MarketSync development and test tooling",
   "private": true,
   "scripts": {
-    "test": "node tests/test_observation_api.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_provider.js && node tests/test_legacy_scanner.js && node tests/test_legacy_ah_tabs.js && node tests/test_legacy_sidecar.js && node tests/test_legacy_posting.js"
+    "test": "node tests/test_observation_api.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_provider.js && node tests/test_legacy_scanner.js && node tests/test_legacy_ah_tabs.js && node tests/test_legacy_sidecar.js && node tests/test_scanner_ui_selection.js && node tests/test_legacy_posting.js"
   },
   "devDependencies": {
     "fengari": "^0.1.4",
