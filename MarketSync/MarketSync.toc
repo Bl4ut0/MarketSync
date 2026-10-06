@@ -5,7 +5,7 @@
 ## Version: 0.9.4
 ## SavedVariables: MarketSyncDB
 ## OptionalDeps: Auctionator
-## AllowLoadGameType: camelot
+## AllowLoadGameType: camelot, classic, tbc
 ## X-Forever-Target: 1.60.1 (70205)
 
 # Libs
@@ -25,6 +25,7 @@ Favorites.lua
 
 # Native Auction House Scanner
 Scanner.lua
+LegacyScanner.lua
 
 # Notifications: threshold tracking + list alerts
 Notifications.lua

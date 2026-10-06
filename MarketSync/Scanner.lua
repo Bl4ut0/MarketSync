@@ -189,14 +189,19 @@ function S.KeyID(key)
 end
 
 function S.Cancel(reason)
+    if S.Active and S.FullScanMode and S.ScanScope == "neutral" and MarketSync.FailNeutralFullScan then
+        MarketSync.FailNeutralFullScan()
+    end
     if S.Active and S.ObservationScanID and MarketSync.ObservationAPI then
         local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
         MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = S.ObservationScanID,
-            source = "local", scope = "main", scanTime = S.ScanTime or now,
+            source = "local", scope = S.ScanScope or "main", scanTime = S.ScanTime or now,
             reason = reason or "cancelled" })
     end
     S.ObservationScanID = nil
     S.ScanTime = nil
+    S.ScanScope = nil
+    S.FullScanMode = nil
     S.Generation = S.Generation + 1
     S.Active = false
     StopDebugProgressTicker()
@@ -250,6 +255,45 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     normalizedKey.dbKey = dbKey
 
     local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+
+    -- Native scans at a neutral Auction House must never enter PersonalData.
+    -- Only a completed full neutral scan becomes eligible for outbound sync.
+    local isNeutral = MarketSync.IsNeutralAHOpen == true
+        or (MarketSync.IsNeutralAHSession and MarketSync.IsNeutralAHSession())
+    if isNeutral then
+        if not MarketSync.UpdateLocalNeutralDBByKey then return end
+        local day = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(now / 86400)
+        MarketSync.UpdateLocalNeutralDBByKey(dbKey, unitPrice, day, available or 0,
+            UnitName and UnitName("player") or "Personal", true, false)
+        if MarketSync.MarkNeutralFullScanKey then MarketSync.MarkNeutralFullScanKey(dbKey) end
+        local observationAPI = MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
+        if observationAPI and observationAPI.HasListeners() then
+            local scanID = S.ObservationScanID or observationAPI.NewScanID("local")
+            if not S.ObservationScanID then
+                observationAPI.Emit({ event = "start", scanId = scanID, source = "local",
+                    scope = "neutral", scanTime = now })
+            end
+            observationAPI.Emit({ event = "observation", scanId = scanID, source = "local",
+                scope = "neutral", scanTime = S.ScanTime or now, key = dbKey,
+                itemID = itemID, itemSuffix = normalizedKey.itemSuffix,
+                unitPrice = unitPrice, quantity = tonumber(available) and available > 0 and available or nil,
+                observedAt = now, observedTime = now, timePrecision = "exact" })
+            if not S.ObservationScanID then
+                observationAPI.Emit({ event = "finish", scanId = scanID, source = "local",
+                    scope = "neutral", scanTime = now })
+            end
+        end
+        table.insert(S.RecentResults, 1, {
+            itemID = itemID, itemKey = normalizedKey, dbKey = dbKey,
+            name = normalizedKey.name or ("Item #" .. itemID),
+            icon = normalizedKey.icon or 134400, quality = normalizedKey.quality or 1,
+            unitPrice = unitPrice, available = available or 0, time = now, isCommodity = isCommodity or false,
+        })
+        if #S.RecentResults > 50 then table.remove(S.RecentResults) end
+        S.ResultsRevision = (S.ResultsRevision or 0) + 1
+        if not deferNotify then S.Notify() end
+        return
+    end
 
     -- Debounce duplicate event bursts for identical observation within 2 seconds
     if not isFullScan then
@@ -551,17 +595,19 @@ function S.ScheduleNext()
 
         if #S.Queue == 0 then
             S.Active = false
+            local scope = S.ScanScope
             if S.ObservationScanID and MarketSync.ObservationAPI then
                 MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = S.ObservationScanID,
-                    source = "local", scope = "main", scanTime = S.ScanTime or (MarketSync.GetServerTime and MarketSync.GetServerTime() or time()) })
+                    source = "local", scope = scope or "main", scanTime = S.ScanTime or (MarketSync.GetServerTime and MarketSync.GetServerTime() or time()) })
                 S.ObservationScanID = nil
             end
             S.ScanTime = nil
+            S.ScanScope = nil
             StopDebugProgressTicker()
             S.Pending = nil
             S.Status = "Scan Complete"
             if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-            if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+            if scope ~= "neutral" and MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
                 C_Timer.After(2, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
             end
             MarketSync.Debug("Scanner complete: " .. S.Status)
@@ -613,6 +659,7 @@ function S.StartScan(itemsOrKeys, label)
 
     S.Generation = S.Generation + 1
     S.Active = true
+    S.FullScanMode = false
     S.ReplicateProcessing = false
     S.FullScanMetadataAttempted = {}
     S.Scheduled = false
@@ -640,10 +687,12 @@ function S.StartScan(itemsOrKeys, label)
     S.Progress.total = #S.Queue
     local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
     S.ScanTime = now
+    S.ScanScope = (MarketSync.IsNeutralAHOpen == true
+        or (MarketSync.IsNeutralAHSession and MarketSync.IsNeutralAHSession())) and "neutral" or "main"
     if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
         S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
         MarketSync.ObservationAPI.v1.Emit({ event = "start", scanId = S.ObservationScanID,
-            source = "local", scope = "main", scanTime = now })
+            source = "local", scope = S.ScanScope, scanTime = now })
     end
     S.Progress.current = 0
     S.Status = label or string.format("Starting scan of %d items...", S.Progress.total)
@@ -756,6 +805,7 @@ function S.StartFullScan()
 
     S.Generation = S.Generation + 1
     S.Active = true
+    S.FullScanMode = true
     S.ReplicateProcessing = false
     S.FullScanMetadataAttempted = {}
     S.Pending = nil
@@ -769,10 +819,15 @@ function S.StartFullScan()
     S.Status = "Requesting full AH snapshot from server..."
     local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
     S.ScanTime = now
+    S.ScanScope = (MarketSync.IsNeutralAHOpen == true
+        or (MarketSync.IsNeutralAHSession and MarketSync.IsNeutralAHSession())) and "neutral" or "main"
+    if S.ScanScope == "neutral" and MarketSync.BeginNeutralFullScan then
+        MarketSync.BeginNeutralFullScan()
+    end
     if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1.HasListeners() then
         S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
         MarketSync.ObservationAPI.v1.Emit({ event = "start", scanId = S.ObservationScanID,
-            source = "local", scope = "main", scanTime = now })
+            source = "local", scope = S.ScanScope, scanTime = now })
     end
     StartDebugProgressTicker()
     S.Notify()
@@ -781,10 +836,12 @@ function S.StartFullScan()
     if not ok or requestResult == false then
         if S.ObservationScanID and MarketSync.ObservationAPI then
             MarketSync.ObservationAPI.v1.Emit({ event = "cancel", scanId = S.ObservationScanID,
-                source = "local", scope = "main", scanTime = S.ScanTime or now, reason = "request failed" })
+                source = "local", scope = S.ScanScope, scanTime = S.ScanTime or now, reason = "request failed" })
             S.ObservationScanID = nil
         end
         S.ScanTime = nil
+        if S.ScanScope == "neutral" and MarketSync.FailNeutralFullScan then MarketSync.FailNeutralFullScan() end
+        S.ScanScope, S.FullScanMode = nil, nil
         S.Active = false
         StopDebugProgressTicker()
         S.Status = "ReplicateItems request failed"
@@ -800,10 +857,7 @@ function S.StartFullScan()
     local requestGeneration = S.Generation
     C_Timer.After(30, function()
         if S.Active and S.Generation == requestGeneration and not S.ReplicateProcessing then
-            S.Active = false
-            StopDebugProgressTicker()
-            S.FullScanMetadataAttempted = nil
-            S.Status = "Full scan timed out waiting for the auction snapshot"
+            S.Cancel("Full scan timed out waiting for the auction snapshot")
             S.Progress.current = 0
             S.Progress.total = 0
             S.Notify()
@@ -848,12 +902,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         S.ReplicateProcessing = true
         local totalItems = getNumFunc() or 0
         if totalItems == 0 then
-            S.Status = "Replicate returned 0 items"
-            S.Active = false
-            S.ReplicateProcessing = false
-            StopDebugProgressTicker()
-            S.FullScanMetadataAttempted = nil
-            S.Notify()
+            S.Cancel("Replicate returned 0 items")
             return
         end
 
@@ -875,15 +924,20 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         local function FinishFullScan()
             local finishTime = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+            local scope = S.ScanScope or "main"
+            if scope == "neutral" and MarketSync.CompleteNeutralFullScan then
+                MarketSync.CompleteNeutralFullScan()
+            end
             if S.ObservationScanID and MarketSync.ObservationAPI then
                 MarketSync.ObservationAPI.v1.Emit({ event = "finish", scanId = S.ObservationScanID,
-                    source = "local", scope = "main", scanTime = S.ScanTime or finishTime })
+                    source = "local", scope = scope, scanTime = S.ScanTime or finishTime })
                 S.ObservationScanID = nil
             end
             S.ScanTime = nil
+            S.ScanScope, S.FullScanMode = nil, nil
             MarketSyncDB.LastFullScanAt = finishTime
             local realmDB = MarketSync.GetRealmDB()
-            if realmDB then
+            if realmDB and scope ~= "neutral" then
                 realmDB.FullScanTime = finishTime
                 realmDB.PersonalScanTime = finishTime
                 realmDB.SwarmTSF = finishTime
@@ -895,7 +949,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             S.Status = string.format("Full Scan Complete: %d item variants recorded", S.FullScanRecordedCount or 0)
             S.FullScanRecordedCount = nil
             if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
-            if MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
+            if scope ~= "neutral" and MarketSyncDB and MarketSyncDB.PassiveSync and MarketSync.SendAdvertisement then
                 C_Timer.After(1, function() if MarketSync.SendAdvertisement then MarketSync.SendAdvertisement() end end)
             end
             if S.ResolveRecentResultsItem then

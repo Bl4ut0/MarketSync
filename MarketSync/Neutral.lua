@@ -196,6 +196,15 @@ function MarketSync.BeginNeutralFullScan()
     return true
 end
 
+function MarketSync.MarkNeutralFullScanKey(dbKey)
+    if not neutralSessionActive then return end
+    if not neutralSessionSeenKeys[dbKey] then
+        neutralSessionSeenKeys[dbKey] = true
+        neutralSessionCaptureCount = neutralSessionCaptureCount + 1
+    end
+    if neutralFullScanActive then neutralFullScanKeys[dbKey] = true end
+end
+
 function MarketSync.FailNeutralFullScan()
     neutralFullScanActive = false
     wipe(neutralFullScanKeys)
@@ -317,9 +326,9 @@ function MarketSync.EndNeutralSession()
 end
 
 function MarketSync.HandleAuctionHouseShown()
-    if not MarketSync.SetupNeutralCaptureHook or not MarketSync.SetupNeutralCaptureHook() then
-        return false
-    end
+    -- Auctionator's SetPrice hook is optional. Native scans still need the
+    -- same neutral-AH classification and isolated database.
+    if MarketSync.SetupNeutralCaptureHook then MarketSync.SetupNeutralCaptureHook() end
     local isNeutral = ResolveNeutralAuctionContext()
     if isNeutral then
         MarketSync.BeginNeutralSession()

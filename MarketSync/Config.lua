@@ -89,6 +89,27 @@ function MarketSync.GetItemIcon(item)
     return nil
 end
 
+function MarketSync.RequestItemData(itemID)
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        return C_Item.RequestLoadItemDataByID(itemID)
+    elseif GetItemInfo then
+        -- Legacy GetItemInfo starts an asynchronous cache lookup if needed.
+        return GetItemInfo(itemID)
+    end
+end
+
+function MarketSync.RegisterAddonPrefix(prefix)
+    local register = C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix or RegisterAddonMessagePrefix
+    if register then return register(prefix) end
+    return false
+end
+
+function MarketSync.SendAddonMessage(prefix, text, channel, target)
+    local send = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+    if send then return send(prefix, text, channel, target) end
+    return false
+end
+
 -- ================================================================
 -- BASE-36 ENCODING / DECODING
 -- Compresses numeric payloads by ~30% (e.g. "50000" -> "11cg")
@@ -137,14 +158,14 @@ function MarketSync.GetCurrentBucket()
 end
 
 -- Main prefix for control messages (ADV, PULL, ACCEPT, REQ, RES, ERR)
-C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+MarketSync.RegisterAddonPrefix(PREFIX)
 
 -- Data channel prefixes for parallel BRES bulk transfers.
 -- Each prefix gets its own token bucket (10 burst, 1/sec regen).
 -- 5 channels = 5 msg/sec sustained = ~80 items/sec with base-36 encoding.
 MarketSync.DATA_PREFIXES = { "MSyncD1", "MSyncD2", "MSyncD3", "MSyncD4", "MSyncD5" }
 for _, dp in ipairs(MarketSync.DATA_PREFIXES) do
-    C_ChatInfo.RegisterAddonMessagePrefix(dp)
+    MarketSync.RegisterAddonPrefix(dp)
 end
 
 -- ================================================================

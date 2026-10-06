@@ -815,7 +815,8 @@ local function InitModernProfessionsHook()
         end
 
         local recipeID = recipeInfo.recipeID
-        local schematic = C_TradeSkillUI.GetRecipeSchematic(recipeID, false)
+        local schematic = C_TradeSkillUI and C_TradeSkillUI.GetRecipeSchematic
+            and C_TradeSkillUI.GetRecipeSchematic(recipeID, false)
         if not schematic or not schematic.reagentSlotSchematics or #schematic.reagentSlotSchematics == 0 then
             infoFrame:Hide()
             return

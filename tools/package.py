@@ -10,12 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = "MarketSync"
 
 
-def build(output, interface=None):
+def build(output, interface=None, game_type=None):
     output = Path(output).resolve()
     if output.exists() or output.with_suffix(output.suffix + ".manifest.json").exists():
         raise ValueError("Output already exists; choose a new file")
     if interface is not None and (not 1 <= interface <= 999999 or interface in (69893, 70205)):
         raise ValueError("Supply an Interface number, not a GetBuildInfo() build number")
+    if game_type not in (None, "camelot", "classic", "tbc"):
+        raise ValueError("Unsupported game type")
+    if game_type in ("classic", "tbc") and interface is None:
+        raise ValueError("Legacy packages require an explicit client Interface number")
 
     files = {}
     addon_dir = ROOT / ADDON
@@ -40,7 +44,9 @@ def build(output, interface=None):
     version = version_match.group(1)
     if interface is not None:
         toc = re.sub(r"^## Interface:.*$", f"## Interface: {interface}", toc, flags=re.M)
-        files[toc_name] = toc.encode("utf-8")
+    if game_type is not None:
+        toc = re.sub(r"^## AllowLoadGameType:.*$", f"## AllowLoadGameType: {game_type}", toc, flags=re.M)
+    files[toc_name] = toc.encode("utf-8")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -52,8 +58,9 @@ def build(output, interface=None):
     manifest = {
         "addon": "MarketSync",
         "version": version,
-        "targetVersion": "1.60.1",
-        "targetBuild": "70205",
+        "targetVersion": "1.60.1" if game_type in (None, "camelot") else game_type,
+        "targetBuild": "70205" if game_type in (None, "camelot") else None,
+        "gameType": game_type or "multi",
         "interface": interface,
         "auctionHouseEntry": "embedded-tab",
         "embeddedAuctionHousePanel": True,
@@ -73,9 +80,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--interface", type=int)
+    parser.add_argument("--game-type", choices=["camelot", "classic", "tbc"])
     args = parser.parse_args()
     try:
-        result = build(args.output, args.interface)
+        result = build(args.output, args.interface, args.game_type)
     except (ValueError, OSError) as error:
         parser.exit(1, str(error) + "\n")
     print(json.dumps(result, indent=2))

@@ -266,7 +266,7 @@ local function SendPriceCheckClaim(event, channelID, itemID, senderKey)
     if not distribution or not itemID or not senderKey then
         return false
     end
-    local ok = pcall(C_ChatInfo.SendAddonMessage, PREFIX, string.format("CLAIM;%d;%s", tonumber(itemID) or 0, tostring(senderKey)), distribution, target)
+    local ok = pcall(MarketSync.SendAddonMessage, PREFIX, string.format("CLAIM;%d;%s", tonumber(itemID) or 0, tostring(senderKey)), distribution, target)
     return ok
 end
 
@@ -1650,7 +1650,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     local jitter = math.random(1, 20)
                     C_Timer.After(jitter, function()
                         if IsInGuild() then
-                            C_ChatInfo.SendAddonMessage("MSync", string.format("ACK;%d;%s", rxCount, myName), "GUILD")
+                            MarketSync.SendAddonMessage("MSync", string.format("ACK;%d;%s", rxCount, myName), "GUILD")
                         end
                     end)
                 end
@@ -1840,7 +1840,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     -- Match both raw escape-coded links and rendered item links to be safe across WoW versions.
     local replyLink = msg:match("(|c%x+|Hitem:.-|h%[.-%]|h|r):") or msg:match("(%[.-%]):.*%d+[gsc]")
     if replyLink and querySender ~= UnitName("player") then
-        local itemID = tonumber(replyLink:match("item:(%d+)")) or tonumber(replyLink:match("%[(.-)%]") and select(1, C_Item.GetItemInfoInstant(replyLink:match("%[(.-)%]"))) or 0)
+        local itemID = tonumber(replyLink:match("item:(%d+)")) or tonumber(replyLink:match("%[(.-)%]") and select(1, MarketSync.GetItemInfoInstant(replyLink:match("%[(.-)%]"))) or 0)
         if itemID and itemID > 0 then
             CancelPendingQueriesByItem(itemID, "beaten by " .. tostring(querySender) .. " via chat")
         end
@@ -2016,7 +2016,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     end
 
                     output = output .. extraInfo
-                    C_ChatInfo.SendChatMessage(output, "WHISPER", nil, sender)
+                    local sendChat = C_ChatInfo and C_ChatInfo.SendChatMessage or SendChatMessage
+                    if sendChat then sendChat(output, "WHISPER", nil, sender) end
                 end)
             end)
         end

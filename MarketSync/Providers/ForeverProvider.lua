@@ -215,7 +215,12 @@ function ForeverProvider.GetMarketID()
     end
     local realm = GetNormalizedRealmName and (GetNormalizedRealmName() or GetRealmName()) or "UnknownRealm"
     local faction = UnitFactionGroup and UnitFactionGroup("player") or "Neutral"
-    return "forever-" .. realm .. "-" .. faction
+    local api = C_AuctionHouse or _G.C_AuctionHouse
+    local interface = GetBuildInfo and select(4, GetBuildInfo())
+    local client = tonumber(interface) == 16001 and "forever"
+        or (interface == nil and api and type(api.SendSearchQuery) == "function" and "forever")
+        or "legacy"
+    return client .. "-" .. realm .. "-" .. faction
 end
 
 function ForeverProvider.GetLiveStore()

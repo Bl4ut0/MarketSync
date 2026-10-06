@@ -194,7 +194,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
     else
         -- 2. Fall back to WoW API (may trigger server request)
         local itemType, itemSubType
-        name, link, rarity, ilvl, minLevel, itemType, itemSubType, _, _, icon, _, classID, subClassID = C_Item.GetItemInfo(itemID)
+        name, link, rarity, ilvl, minLevel, itemType, itemSubType, _, _, icon, _, classID, subClassID = MarketSync.GetItemInfo(itemID)
         if not name then
             if allowFallback then
                 name = "Item #" .. itemID
@@ -798,19 +798,19 @@ local function BuildSearchIndex(callback)
         local requested = 0
         for dbKey, itemID in pairs(PersonalPending) do
             if requested >= preset.requests then break end
-            C_Item.RequestLoadItemDataByID(itemID)
+            MarketSync.RequestItemData(itemID)
             requested = requested + 1
         end
         for dbKey, itemID in pairs(GuildPending) do
             if requested >= preset.requests then break end
             if not PersonalPending[dbKey] then
-                C_Item.RequestLoadItemDataByID(itemID)
+                MarketSync.RequestItemData(itemID)
                 requested = requested + 1
             end
         end
         for dbKey, itemID in pairs(NeutralPending) do
             if requested >= preset.requests then break end
-            C_Item.RequestLoadItemDataByID(itemID)
+            MarketSync.RequestItemData(itemID)
             requested = requested + 1
         end
 
@@ -868,7 +868,7 @@ function MarketSync.AddToGuildIncoming(dbKey)
             -- Mark for incoming resolution
             GuildPending[dbKey] = itemID
         end
-        C_Item.RequestLoadItemDataByID(itemID)
+        MarketSync.RequestItemData(itemID)
     end
 end
 
@@ -947,7 +947,7 @@ function MarketSync.AddToNeutralIncoming(dbKey)
         end
     else
         NeutralPending[dbKey] = itemID
-        C_Item.RequestLoadItemDataByID(itemID)
+        MarketSync.RequestItemData(itemID)
     end
 end
 

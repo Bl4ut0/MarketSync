@@ -1224,6 +1224,18 @@ test('Individual scan observation, item normalization, HistoryLog logging, and i
     assert(MarketSync.Scanner.RecentResults[1].name == "Bristlebark Boots", "RecentResults name should update from fallback to real name")
     assert(MarketSync.Scanner.RecentResults[1].icon == 132219, "RecentResults icon should update from fallback to real icon")
     assert(MarketSync.Scanner.RecentResults[1].quality == 2, "RecentResults quality should update to real quality")
+
+    -- Native neutral scans must not contaminate the faction PersonalData pool.
+    local neutralRecord
+    MarketSync.IsNeutralAHOpen = true
+    MarketSync.UpdateLocalNeutralDBByKey = function(key, price, day, quantity)
+      neutralRecord = { key = key, price = price, day = day, quantity = quantity }
+    end
+    MarketSync.RecordScanObservation({itemID = 5555, name = "Neutral Item"}, 900, 4, false, true)
+    assert(realmDB.PersonalData["5555"] == nil, "neutral price leaked into PersonalData")
+    assert(neutralRecord and neutralRecord.key == "5555" and neutralRecord.price == 900)
+    assert(observationEvents[#observationEvents - 1].scope == "neutral")
+    MarketSync.IsNeutralAHOpen = false
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Individual scan observation test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

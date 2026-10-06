@@ -29,7 +29,9 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("MarketSync/AuctionHouse.lua", names)
                 self.assertIn("MarketSync/UI_AHScanner.lua", names)
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
-                self.assertIn("## AllowLoadGameType: camelot", toc)
+                self.assertIn("## AllowLoadGameType: camelot, classic, tbc", toc)
+                self.assertIn("LegacyScanner.lua", toc)
+                self.assertIn("MarketSync/LegacyScanner.lua", names)
                 self.assertIn("## Version: 0.9.4", toc)
             self.assertEqual(manifest["auctionHouseEntry"], "embedded-tab")
             self.assertTrue(manifest["embeddedAuctionHousePanel"])
@@ -44,6 +46,20 @@ class PackageTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
                 self.assertIn("## Interface: 11509", toc)
+
+    def test_legacy_flavor_package(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "MarketSync-Era.zip"
+            manifest = module.build(output, 11509, "classic")
+            self.assertEqual(manifest["gameType"], "classic")
+            self.assertIsNone(manifest["targetBuild"])
+            with zipfile.ZipFile(output) as archive:
+                toc = archive.read("MarketSync/MarketSync.toc").decode()
+                self.assertIn("## Interface: 11509", toc)
+                self.assertIn("## AllowLoadGameType: classic", toc)
+                self.assertIn("LegacyScanner.lua", toc)
+            with self.assertRaises(ValueError):
+                module.build(Path(folder) / "no-interface.zip", game_type="tbc")
 
     def test_rejects_known_build_id_and_invalid_interface_values(self):
         with tempfile.TemporaryDirectory() as folder:

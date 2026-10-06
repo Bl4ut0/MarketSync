@@ -128,7 +128,7 @@ end)
 local function SendAddonMessage(prefix, text, chatType, target)
     -- We removed MarketSync.TxBytes counting from here because the hooksecurefunc
     -- above will catch the _SendAddonMessage call below automatically.
-    C_ChatInfo.SendAddonMessage(prefix, text, chatType, target)
+    MarketSync.SendAddonMessage(prefix, text, chatType, target)
 end
 
 local function SetTransientBlockedState(reason)
@@ -2676,10 +2676,10 @@ function MarketSync.BroadcastRecentData()
 
                     if itemID then
                         local itemLink
-                        local _, _, _, _, _, _, _, _, _, _, _, classID = C_Item.GetItemInfo(itemID)
+                        local _, _, _, _, _, _, _, _, _, _, _, classID = MarketSync.GetItemInfo(itemID)
                         
                         if classID then
-                             _, itemLink = C_Item.GetItemInfo(itemID)
+                             _, itemLink = MarketSync.GetItemInfo(itemID)
                         end
                         
                         if not itemLink then 
@@ -2789,7 +2789,7 @@ function MarketSync.SearchLocalDB(query)
         end
 
         if itemID then
-            local name, link = C_Item.GetItemInfo(itemID)
+            local name, link = MarketSync.GetItemInfo(itemID)
             if name and name:lower():find(query) then
                 local price = Auctionator.Database:GetPrice(dbKey)
                 local age = Auctionator.Database:GetPriceAge(dbKey)

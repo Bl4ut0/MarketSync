@@ -326,7 +326,9 @@ local function CreateMainFrame()
     -- ================================================================
     -- BOTTOM TABS
     -- ================================================================
+    local legacyAH = MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH == true
     local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Settings"}
+    if legacyAH then tabNames[#tabNames + 1] = "Scanner" end
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -404,7 +406,8 @@ local function CreateMainFrame()
             "Analytics",
             "Processing",
             "Alerts",
-            "Settings"
+            "Settings",
+            "Scanner"
         }
         
         local tooltips = {
@@ -415,6 +418,7 @@ local function CreateMainFrame()
             "Organized controls on the left, auction-style arbitrage and crafting results on the right.",
             "Track targets by threshold and watch lists.",
             "Configure MarketSync background settings, caches, and UI behaviors.",
+            "Scan the legacy Auction House and inspect recent results.",
         }
 
         local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
@@ -503,7 +507,9 @@ local function CreateMainFrame()
         -- 6 tabs: 112px (span ~660px)
         -- <=5 tabs: 120px (span ~590px)
         local tabWidth = 104
-        if numVisible <= 5 then
+        if numVisible >= 8 then
+            tabWidth = 96
+        elseif numVisible <= 5 then
             tabWidth = 120
         elseif numVisible == 6 then
             tabWidth = 112
@@ -612,6 +618,17 @@ local function CreateMainFrame()
     SettingsContent:SetAllPoints()
     SettingsContent:Hide()
     table.insert(contentFrames, SettingsContent)
+
+    -- Legacy Auction Houses have no modern embedded tab. Reuse the scanner
+    -- feed and list controls in the portable window instead.
+    if legacyAH and MarketSync.CreateAHScannerPanel then
+        local scannerHost = CreateFrame("Frame", nil, MainFrame)
+        scannerHost:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 12, -63)
+        scannerHost:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -12, 29)
+        MarketSync.CreateAHScannerPanel(scannerHost)
+        scannerHost:Hide()
+        table.insert(contentFrames, scannerHost)
+    end
 
     -- --- SETTINGS UI FRAMES ---
     local function CreateBox(parent, w, h, x, y)
