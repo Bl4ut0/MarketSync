@@ -499,4 +499,84 @@ test('handles cyclic dependencies gracefully without infinite recursion', () => 
   `);
 });
 
+test('classic crafting info never creates a reagent-label anchor cycle', () => {
+  const L = createLuaState();
+  execLua(L, `
+    local function region(parent)
+      local r = { parent = parent, points = {}, scripts = {}, shown = false }
+      function r:SetPoint(point, relativeTo, relativePoint, x, y)
+        local dependency = relativeTo
+        while dependency do
+          assert(dependency ~= self, "Cannot anchor to a region dependent on it")
+          local anchor = dependency.points and dependency.points[1]
+          dependency = anchor and anchor[2] or nil
+        end
+        self.points[1] = { point, relativeTo, relativePoint, x, y }
+      end
+      function r:GetPoint(index)
+        local anchor = self.points[index or 1]
+        if anchor then return table.unpack(anchor) end
+      end
+      function r:ClearAllPoints() self.points = {} end
+      function r:SetSize() end
+      function r:SetWidth() end
+      function r:SetText() end
+      function r:SetJustifyH() end
+      function r:SetFrameLevel() end
+      function r:GetFrameLevel() return 1 end
+      function r:EnableMouse() end
+      function r:SetNormalFontObject() end
+      function r:SetHighlightFontObject() end
+      function r:SetScript(name, fn) self.scripts[name] = fn end
+      function r:RegisterEvent() end
+      function r:CreateFontString() return region(self) end
+      function r:Show()
+        if self.shown then return end
+        self.shown = true
+        if self.scripts.OnShow then self.scripts.OnShow(self) end
+      end
+      function r:Hide() self.shown = false end
+      function r:IsShown() return self.shown end
+      return r
+    end
+    CreateFrame = function(_, name, parent)
+      local frame = region(parent)
+      if name then _G[name] = frame end
+      return frame
+    end
+    TradeSkillFrame = CreateFrame("Frame", "TradeSkillFrame")
+    TradeSkillReagentLabel = CreateFrame("Frame", "TradeSkillReagentLabel", TradeSkillFrame)
+    TradeSkillReagentLabel:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 210, -120)
+    hooksecurefunc = function(name, fn) if name == "TradeSkillFrame_SetSelection" then onSelection = fn end end
+    GetTradeSkillSelectionIndex = function() return 2 end
+    GetTradeSkillNumReagents = function() return 1 end
+    GetTradeSkillItemLink = function() return "|Hitem:232436|h[Darkclaw Bisque]|h" end
+    GetTradeSkillReagentItemLink = function() return "|Hitem:123|h[Reagent]|h" end
+    GetTradeSkillReagentInfo = function() return "Reagent", nil, 1 end
+    GetTradeSkillInfo = function() return "Darkclaw Bisque" end
+    GetTradeSkillNumMade = function() return 1 end
+    MarketSyncDB.EnableProfessionCraftInfo = true
+    MarketSync.CalculateRecipeProfit = function()
+      return { costData = { directCraftCost = 0, groundUpCost = 0, optimalSavings = 0 },
+        outputPrice = 0, hasWarnings = false, warnings = {} }
+    end
+  `);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `
+    onSelection()
+    onSelection()
+    local _, infoRelative = MarketSyncCraftingInfo:GetPoint(1)
+    local _, reagentRelative = TradeSkillReagentLabel:GetPoint(1)
+    assert(infoRelative == TradeSkillFrame, "Crafting info should use the saved stable Blizzard anchor")
+    assert(reagentRelative == MarketSyncCraftingInfo, "Reagent label should sit below crafting info")
+
+    AuctionatorCraftingInfo = CreateFrame("Frame", "AuctionatorCraftingInfo", TradeSkillFrame)
+    AuctionatorCraftingInfo:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 210, -100)
+    AuctionatorCraftingInfo:Show()
+    onSelection()
+    local _, restoredRelative = TradeSkillReagentLabel:GetPoint(1)
+    assert(restoredRelative == TradeSkillFrame, "Auctionator layout should restore the native reagent anchor")
+  `);
+});
+
 console.log(`\nAll ${passed} profession tests passed successfully!`);

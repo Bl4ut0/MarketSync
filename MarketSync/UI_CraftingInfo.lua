@@ -720,12 +720,34 @@ local function InitClassicTradeSkillHook()
         infoFrame:ClearAllPoints()
         local originalFirstLine = TradeSkillDescription or TradeSkillReagentLabel
         if AuctionatorCraftingInfo and AuctionatorCraftingInfo:IsShown() then
+            -- Auctionator owns this part of the layout. Undo our previous
+            -- shift before anchoring to its panel, if that shift is still live.
+            if infoFrame.shiftedDescription and infoFrame.origPoint then
+                local _, relativeTo = infoFrame.shiftedDescription:GetPoint(1)
+                if relativeTo == infoFrame then
+                    local anchor = infoFrame.origPoint
+                    infoFrame.shiftedDescription:ClearAllPoints()
+                    infoFrame.shiftedDescription:SetPoint(anchor[1], anchor[2], anchor[3], anchor[4], anchor[5])
+                end
+            end
             infoFrame:SetPoint("TOPLEFT", AuctionatorCraftingInfo, "BOTTOMLEFT", 0, -2)
         elseif originalFirstLine then
-            infoFrame:SetPoint("TOPLEFT", originalFirstLine, "TOPLEFT", 0, 0)
-            if not infoFrame.hasShiftedDescription then
-                infoFrame.hasShiftedDescription = true
-                infoFrame.origPoint = { originalFirstLine:GetPoint(1) }
+            local point, relativeTo, relativePoint, x, y = originalFirstLine:GetPoint(1)
+            if relativeTo ~= infoFrame or infoFrame.shiftedDescription ~= originalFirstLine then
+                -- Blizzard may reset this anchor on recipe changes. Save the
+                -- current native point before moving the label below us.
+                infoFrame.origPoint = { point, relativeTo, relativePoint, x, y }
+                infoFrame.shiftedDescription = originalFirstLine
+            end
+            local anchor = infoFrame.origPoint
+            if anchor and anchor[1] and anchor[2] and anchor[2] ~= originalFirstLine then
+                -- Never anchor MarketSync to the label we move beneath it:
+                -- doing so creates a dependency cycle on the next refresh.
+                infoFrame:SetPoint(anchor[1], anchor[2], anchor[3], anchor[4], anchor[5])
+            else
+                infoFrame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 210, -120)
+            end
+            if relativeTo ~= infoFrame then
                 originalFirstLine:ClearAllPoints()
                 originalFirstLine:SetPoint("TOPLEFT", infoFrame, "BOTTOMLEFT", 0, -6)
             end

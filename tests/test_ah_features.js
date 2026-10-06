@@ -1940,9 +1940,16 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     ahProcContainer:SetSize(756, 447)
     local procAH = MarketSync.CreateProcessingPanel(ahProcContainer)
     assert(procAH.resultRows[1].width == 550, "Embedded AH processing row width should be 550, got: " .. tostring(procAH.resultRows[1].width))
-    assert(#procAH.resultRows == 11, "Embedded AH processing rows should be 11, got: " .. tostring(#procAH.resultRows))
+    assert(#procAH.resultRows == 9, "Embedded AH processing rows should reserve footer space, got: " .. tostring(#procAH.resultRows))
     -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
     assert(198 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
+
+    -- Classic AH is wider but shorter: use its width and reduce the visible page.
+    local classicHost = CreateFrame("Frame", "ClassicAHProcessingHost")
+    classicHost:SetSize(900, 400)
+    local classicProc = MarketSync.CreateProcessingPanel(classicHost)
+    assert(classicProc.resultRows[1].width == 694, "Classic AH processing should fill its available width")
+    assert(#classicProc.resultRows == 8, "Classic AH processing rows must stay above the footer")
 
     -- Test mouse wheel scrolling on processing panel
     procMain.displayRows = {}

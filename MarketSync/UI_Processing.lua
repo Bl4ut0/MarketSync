@@ -294,7 +294,12 @@ function MarketSync.CreateProcessingPanel(parent)
     local LEFT_X = isEmbedded and 10 or 14
     local LEFT_W = isEmbedded and 170 or 164
     local RESULTS_X = isEmbedded and 188 or 186
-    local ROW_WIDTH = isEmbedded and 550 or 632
+    -- The classic Auction House hosts this panel in a shorter but wider area
+    -- than the portable window. Use the actual host width instead of leaving
+    -- unused space to the right of the price columns.
+    local parentWidth = parent.GetWidth and parent:GetWidth() or 0
+    local parentHeight = parent.GetHeight and parent:GetHeight() or 0
+    local ROW_WIDTH = isEmbedded and math.max(550, parentWidth - RESULTS_X - 18) or 632
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
@@ -660,14 +665,19 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.sortField = "valueSort"
     panel.sortAscending = false
 
+    local extraWidth = ROW_WIDTH - 550
+    local itemWidth = 175 + math.floor(extraWidth * 0.18)
+    local typeWidth = 65 + math.floor(extraWidth * 0.08)
+    local priceWidth = 62 + math.floor(extraWidth * 0.12)
+    local statusWidth = ROW_WIDTH - itemWidth - typeWidth - (priceWidth * 4)
     local colDefs = isEmbedded and {
-        { name = "Item",     width = 175, sortKey = "itemSort"   },
-        { name = "Type",     width = 65,  sortKey = "typeSort"   },
-        { name = "Net EV",   width = 62,  sortKey = "valueSort"  },
-        { name = "Max/ea",   width = 62,  sortKey = "maxSort"    },
-        { name = "AH/ea",    width = 62,  sortKey = "liveSort"   },
-        { name = "Edge",     width = 62,  sortKey = "deltaSort"  },
-        { name = "Status",   width = 62,  sortKey = "statusSort" },
+        { name = "Item",     width = itemWidth,   sortKey = "itemSort"   },
+        { name = "Type",     width = typeWidth,   sortKey = "typeSort"   },
+        { name = "Net EV",   width = priceWidth,  sortKey = "valueSort"  },
+        { name = "Max/ea",   width = priceWidth,  sortKey = "maxSort"    },
+        { name = "AH/ea",    width = priceWidth,  sortKey = "liveSort"   },
+        { name = "Edge",     width = priceWidth,  sortKey = "deltaSort"  },
+        { name = "Status",   width = statusWidth, sortKey = "statusSort" },
     } or {
         { name = "Item",     width = 224, sortKey = "itemSort"   },
         { name = "Type",     width = 68,  sortKey = "typeSort"   },
@@ -696,7 +706,11 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end
 
-    local numResultsPerPage = isEmbedded and 11 or 8
+    -- Reserve the footer and native AH tab strip. Eleven fixed rows extend
+    -- below the shorter classic host when a full result page is populated.
+    local numResultsPerPage = isEmbedded
+        and math.max(1, math.min(11, math.floor(((parentHeight > 0 and parentHeight or 410) - 92) / 36)))
+        or 8
     local rowHeight = isEmbedded and 36 or 37
     local hdrY = isEmbedded and -32 or -70
     local rowStartY = isEmbedded and -54 or -94
@@ -850,6 +864,9 @@ function MarketSync.CreateProcessingPanel(parent)
         row.statusText:SetPoint("LEFT", row, "LEFT", c6 + 4, 0)
         row.statusText:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         row.statusText:SetJustifyH("LEFT")
+        for _, label in ipairs({ row.typeText, row.valueText, row.maxText, row.liveText, row.deltaText, row.statusText }) do
+            if label.SetWordWrap then label:SetWordWrap(false) end
+        end
 
         local selectedBg = row:CreateTexture(nil, "BACKGROUND")
         selectedBg:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
