@@ -13,6 +13,7 @@ ADDON = "MarketSync"
 FLAVORS = {
     "forever": "camelot",
     "era": "classic",
+    "anniversary": "classic",
     "sod": "classic",
     "tbc": "tbc",
 }

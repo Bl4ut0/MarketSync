@@ -66,6 +66,7 @@ class PackageTests(unittest.TestCase):
         flavors = (
             ("forever", 16001, "camelot", True),
             ("era", 11509, "classic", False),
+            ("anniversary", 11509, "classic", False),
             ("sod", 11509, "classic", False),
             ("tbc", 20506, "tbc", False),
         )
