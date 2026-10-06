@@ -32,11 +32,12 @@ local function Start(label, mode)
     S.Active = true
     S.Pending = nil
     S.Queue = {}
-    if mode ~= "search" then
+    if mode ~= "search" and mode ~= "purchase" then
         S.RecentResults = {}
         S.ResultsRevision = (S.ResultsRevision or 0) + 1
     end
     S.Progress = { current = 0, total = 0 }
+    S.PurchaseReady = nil
     S.Status = label
     S.ScanTime = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
     S.ScanScope = (MarketSync.IsNeutralAHOpen == true
@@ -48,7 +49,7 @@ local function Start(label, mode)
         S.LiveSearchResults = {}
         S.LiveSearchRevision = (S.LiveSearchRevision or 0) + 1
     end
-    if mode ~= "search" and MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
+    if mode ~= "search" and mode ~= "purchase" and MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
         and MarketSync.ObservationAPI.v1.HasListeners() then
         S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
         Emit("start")
@@ -108,7 +109,7 @@ local function ReadSearchRow(index)
         row = { itemID = itemID, itemSuffix = suffix, link = link, name = name,
             icon = texture, quality = quality, level = level, stackSize = count,
             buyout = buyout, unitPrice = math.ceil(buyout / count),
-            auctions = 1, available = count }
+            auctions = 1, available = count, page = legacy.page, query = legacy.query }
         legacy.data[identity] = row
         S.LiveSearchResults[#S.LiveSearchResults + 1] = row
     end
@@ -122,6 +123,7 @@ function S.Cancel(reason)
     legacy.requestID = legacy.requestID + 1
     Emit("cancel", reason)
     oldCancel(reason)
+    S.PurchaseReady = nil
     S.ScanScope = nil
 end
 
@@ -332,11 +334,55 @@ function S.StartLiveSearch(query)
     return true
 end
 
+local function MatchesPurchase(row, index)
+    if not row or not index then return false end
+    local name, _, count, _, _, _, _, _, _, buyout, bidAmount,
+        _, _, owner, _, _, itemID = GetAuctionItemInfo("list", index)
+    local link = GetAuctionItemLink and GetAuctionItemLink("list", index) or nil
+    itemID = tonumber(itemID) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
+    return itemID == row.itemID and Suffix(link) == row.itemSuffix
+        and tonumber(count) == row.stackSize and tonumber(buyout) == row.buyout
+        and (not row.link or row.link == link) and tonumber(bidAmount) ~= row.buyout
+        and owner ~= (UnitName and UnitName("player"))
+end
+
+-- A grouped search result is only a quote. Re-query its source page before
+-- enabling purchase; the final click checks the live row again.
+function S.PrepareLivePurchase(row)
+    if type(row) ~= "table" or not row.query or row.page == nil then return false end
+    if S.IsDisabledByAuctionator and S.IsDisabledByAuctionator() then return false end
+    if S.Active then S.Cancel("replaced by purchase check") end
+    if not S.IsAvailable() then return false end
+    Start("Checking selected auction...", "purchase")
+    legacy.purchaseTarget = row
+    legacy.page = row.page
+    Query(row.query, row.page, false)
+    return true
+end
+
+function S.BuyPreparedLivePurchase(row)
+    local ready = S.PurchaseReady
+    if not ready or ready.row ~= row or S.Active or not S.IsAvailable() then return false end
+    if type(PlaceAuctionBid) ~= "function" or not MatchesPurchase(row, ready.index) then
+        S.PurchaseReady = nil
+        S.Status = "Auction changed. Select it again to refresh the price."
+        Notify()
+        return false
+    end
+    if type(GetMoney) == "function" and GetMoney() < row.buyout then return false end
+    S.PurchaseReady = nil
+    PlaceAuctionBid("list", ready.index, row.buyout)
+    S.Status = "Purchase submitted; confirm delivery in your mailbox."
+    Notify()
+    return true
+end
+
 local frame = CreateFrame("Frame")
 pcall(frame.RegisterEvent, frame, "AUCTION_ITEM_LIST_UPDATE")
 pcall(frame.RegisterEvent, frame, "AUCTION_HOUSE_CLOSED")
 frame:SetScript("OnEvent", function(_, event)
     if event == "AUCTION_HOUSE_CLOSED" then
+        S.PurchaseReady = nil
         if S.Active then S.Cancel("Auctioneer closed") end
         return
     end
@@ -344,6 +390,22 @@ frame:SetScript("OnEvent", function(_, event)
     legacy.waiting = false
     local count, total = GetNumAuctionItems("list")
     count, total = tonumber(count) or 0, tonumber(total) or 0
+    if legacy.mode == "purchase" then
+        local target = legacy.purchaseTarget
+        S.PurchaseReady = nil
+        for i = 1, count do
+            if MatchesPurchase(target, i) then
+                S.PurchaseReady = { row = target, index = i }
+                break
+            end
+        end
+        S.Active = false
+        legacy.mode, legacy.purchaseTarget = nil, nil
+        S.Status = S.PurchaseReady and "Exact stack found. Review and buy one stack."
+            or "That exact stack is no longer available. Search again."
+        Notify()
+        return
+    end
     local generation = S.Generation
     local targetID = legacy.mode == "target" and S.Pending and S.Pending.itemID or nil
     local targetSuffix = legacy.mode == "target" and S.Pending and S.Pending.itemSuffix or nil

@@ -1308,7 +1308,8 @@ end
 -- ================================================================
 function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price)
     -- 1. If native AH is open, activate AH Analytics tab
-    if AuctionHouseFrame and AuctionHouseFrame:IsShown() and MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
+    if ((AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (AuctionFrame and AuctionFrame:IsShown()))
+        and MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
         MarketSync.AuctionHouse.ShowAuctionHousePanel("analytics")
     elseif MarketSync.MainFrame then
         if not MarketSync.MainFrame:IsShown() then

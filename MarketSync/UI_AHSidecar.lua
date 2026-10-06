@@ -40,7 +40,34 @@ end
 -- ================================================================
 function MarketSync.SearchInAuctionHouse(itemOrName)
     if MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH then
-        return MarketSync.OpenLegacySearch and MarketSync.OpenLegacySearch(itemOrName) or false
+        local name = type(itemOrName) == "string" and itemOrName or nil
+        local itemID = tonumber(itemOrName)
+        if not name and itemID then
+            name = SafeGetItemInfo(itemID)
+            if not name and MarketSyncDB and MarketSyncDB.ItemInfoCache
+                and MarketSyncDB.ItemInfoCache[itemID] then
+                name = MarketSyncDB.ItemInfoCache[itemID].n
+            end
+        end
+        if not name or name == "" then return false end
+        name = name:match("%[(.-)%]") or name
+        local selectedTab = AuctionFrame and PanelTemplates_GetSelectedTab
+            and PanelTemplates_GetSelectedTab(AuctionFrame)
+        local auctionatorShopping = _G.AuctionatorTabs_Shopping
+        local useAuctionator = Auctionator and Auctionator.API and Auctionator.API.v1
+            and type(Auctionator.API.v1.MultiSearchExact) == "function"
+            and ((MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true)
+                or (auctionatorShopping and selectedTab == auctionatorShopping:GetID()))
+        if useAuctionator then
+            local ok = pcall(Auctionator.API.v1.MultiSearchExact, "MarketSync", { name })
+            if ok then return true end
+        end
+        if selectedTab == 1 and _G.BrowseName and _G.BrowseSearchButton then
+            _G.BrowseName:SetText(name)
+            _G.BrowseSearchButton:Click()
+            return true
+        end
+        return MarketSync.OpenLegacySearch and MarketSync.OpenLegacySearch(name) or false
     end
     if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then return false end
     local name = type(itemOrName) == "string" and itemOrName or nil
@@ -199,20 +226,23 @@ function MarketSync.CreateAHSidecar(parent)
 
     local ahFrame = parent or AuctionHouseFrame
     if not ahFrame then return nil end
+    local legacyAH = MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH
 
     -- 1. Drawer Toggle Tab on AH right edge (shown ONLY when sidecar is closed)
     local toggleBtn = CreateFrame("Button", "MarketSyncAHSidecarToggleBtn", ahFrame, "BackdropTemplate")
     toggleBtn:SetSize(22, 70)
     toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -60)
-    toggleBtn:SetFrameLevel(ahFrame:GetFrameLevel() + 5)
+    toggleBtn:SetFrameLevel(ahFrame:GetFrameLevel() + (legacyAH and 31 or 5))
     toggleBtn:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    toggleBtn:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-    toggleBtn:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.90)
+    toggleBtn:SetBackdropColor(legacyAH and 0.08 or 0.12, legacyAH and 0.09 or 0.11,
+        legacyAH and 0.10 or 0.10, 0.95)
+    toggleBtn:SetBackdropBorderColor(legacyAH and 0.31 or 0.45, legacyAH and 0.32 or 0.38,
+        legacyAH and 0.34 or 0.22, 0.90)
     toggleBtn:EnableMouse(true)
     toggleBtn:RegisterForClicks("LeftButtonUp")
 
@@ -221,14 +251,16 @@ function MarketSync.CreateAHSidecar(parent)
     toggleArrow:SetText("|cFFFFD100>|r")
 
     toggleBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.24, 0.20, 0.12, 0.95)
+        self:SetBackdropColor(legacyAH and 0.20 or 0.24, legacyAH and 0.22 or 0.20,
+            legacyAH and 0.24 or 0.12, 0.95)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("MarketSync Sidecar", 1, 0.82, 0)
         GameTooltip:AddLine("Click to open Shopping Lists & Bag Selling", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     toggleBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+        self:SetBackdropColor(legacyAH and 0.08 or 0.12, legacyAH and 0.09 or 0.11,
+            legacyAH and 0.10 or 0.10, 0.95)
         GameTooltip:Hide()
     end)
     if MarketSync.SetAccessibility then
@@ -247,15 +279,25 @@ function MarketSync.CreateAHSidecar(parent)
     frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -28)
     frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", -2, 28)
     frame:SetFrameStrata(ahFrame:GetFrameStrata())
-    frame:SetFrameLevel(ahFrame:GetFrameLevel() + 1)
+    frame:SetFrameLevel(ahFrame:GetFrameLevel() + (legacyAH and 30 or 1))
+    if legacyAH then
+        frame:SetClampedToScreen(true)
+        frame:SetMovable(true)
+        frame:EnableMouse(true)
+        frame:RegisterForDrag("LeftButton")
+        frame:SetScript("OnDragStart", frame.StartMoving)
+        frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    end
     frame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(0.075, 0.070, 0.065, 0.98)
-    frame:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.95)
+    frame:SetBackdropColor(legacyAH and 0.055 or 0.075, legacyAH and 0.060 or 0.070,
+        legacyAH and 0.070 or 0.065, 0.98)
+    frame:SetBackdropBorderColor(legacyAH and 0.31 or 0.45, legacyAH and 0.32 or 0.38,
+        legacyAH and 0.34 or 0.22, 0.95)
     Sidecar.Frame = frame
 
     -- Top Header Container
@@ -347,20 +389,24 @@ function MarketSync.CreateAHSidecar(parent)
         if mode == "lists" then
             listsContainer:Show()
             sellContainer:Hide()
-            tabLists:SetBackdropColor(0.26, 0.20, 0.10, 0.95)
+            tabLists:SetBackdropColor(legacyAH and 0.18 or 0.26, legacyAH and 0.20 or 0.20,
+                legacyAH and 0.23 or 0.10, 0.95)
             tabLists:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
             tabLists.label:SetText("|cFFFFD100Shopping Lists|r")
-            tabBags:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
+            tabBags:SetBackdropColor(legacyAH and 0.10 or 0.10, legacyAH and 0.11 or 0.09,
+                legacyAH and 0.12 or 0.08, 0.75)
             tabBags:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
             tabBags.label:SetText("|cFF888888Bag Selling|r")
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
         else
             listsContainer:Hide()
             sellContainer:Show()
-            tabBags:SetBackdropColor(0.26, 0.20, 0.10, 0.95)
+            tabBags:SetBackdropColor(legacyAH and 0.18 or 0.26, legacyAH and 0.20 or 0.20,
+                legacyAH and 0.23 or 0.10, 0.95)
             tabBags:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
             tabBags.label:SetText("|cFFFFD100Bag Selling|r")
-            tabLists:SetBackdropColor(0.10, 0.09, 0.08, 0.75)
+            tabLists:SetBackdropColor(legacyAH and 0.10 or 0.10, legacyAH and 0.11 or 0.09,
+                legacyAH and 0.12 or 0.08, 0.75)
             tabLists:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
             tabLists.label:SetText("|cFF888888Shopping Lists|r")
             if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
@@ -392,6 +438,20 @@ function MarketSync.CreateAHSidecar(parent)
     toggleBtn:SetScript("OnClick", function()
         Sidecar.SetExpanded(true)
     end)
+    Sidecar.ToggleButton = toggleBtn
+    function Sidecar.SetVisibleForAH(visible)
+        Sidecar.AHVisible = visible == true
+        if not visible then
+            frame:Hide()
+            toggleBtn:Hide()
+        elseif MarketSyncDB and MarketSyncDB.AHSidecarExpanded then
+            frame:Show()
+            toggleBtn:Hide()
+        else
+            frame:Hide()
+            toggleBtn:Show()
+        end
+    end
 
     -- ================================================================
     -- 1. SHOPPING LISTS VIEW
@@ -598,8 +658,10 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    listInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-    listInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    listInset:SetBackdropColor(legacyAH and 0.055 or 0.075, legacyAH and 0.060 or 0.070,
+        legacyAH and 0.070 or 0.065, 0.96)
+    listInset:SetBackdropBorderColor(legacyAH and 0.30 or 0.38, legacyAH and 0.31 or 0.32,
+        legacyAH and 0.33 or 0.22, 0.90)
     listInset:EnableMouse(true)
     listInset:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
     listInset:SetScript("OnMouseUp", function(self, button)
@@ -969,7 +1031,9 @@ function MarketSync.CreateAHSidecar(parent)
                         end
 
                         -- 1. Switch to native Sell tab
-                        if AuctionHouseFrame.Tabs and AuctionHouseFrame.Tabs[2] then
+                        if legacyAH and _G.AuctionFrameTab3 then
+                            _G.AuctionFrameTab3:Click()
+                        elseif AuctionHouseFrame and AuctionHouseFrame.Tabs and AuctionHouseFrame.Tabs[2] then
                             AuctionHouseFrame.Tabs[2]:Click()
                         end
 
@@ -977,22 +1041,24 @@ function MarketSync.CreateAHSidecar(parent)
                         local pFunc = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
                         if pFunc then
                             pFunc(item.bag, item.slot)
-                            if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.ItemDisplay then
+                            if legacyAH and type(ClickAuctionSellItemButton) == "function" then
+                                pcall(ClickAuctionSellItemButton)
+                            elseif AuctionHouseFrame and AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.ItemDisplay then
                                 pcall(AuctionHouseFrame.ItemSellFrame.ItemDisplay.Click, AuctionHouseFrame.ItemSellFrame.ItemDisplay)
-                            elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay then
+                            elseif AuctionHouseFrame and AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay then
                                 pcall(AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay.Click, AuctionHouseFrame.CommoditiesSellFrame.ItemDisplay)
                             elseif ClickAuctionSellItemButton then
                                 pcall(ClickAuctionSellItemButton)
                             end
-                            ClearCursor()
+                            if ClearCursor then ClearCursor() end
                         end
 
                         -- 3. Set suggested match price (matches current lowest market price, no 1c undercut)
-                        if item.marketPrice and item.marketPrice > 0 then
+                        if not legacyAH and item.marketPrice and item.marketPrice > 0 then
                             local postPrice = item.marketPrice
-                            if AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.PriceInput and AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount then
+                            if AuctionHouseFrame and AuctionHouseFrame.ItemSellFrame and AuctionHouseFrame.ItemSellFrame.PriceInput and AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount then
                                 pcall(AuctionHouseFrame.ItemSellFrame.PriceInput.SetAmount, AuctionHouseFrame.ItemSellFrame.PriceInput, postPrice)
-                            elseif AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount then
+                            elseif AuctionHouseFrame and AuctionHouseFrame.CommoditiesSellFrame and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice and AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount then
                                 pcall(AuctionHouseFrame.CommoditiesSellFrame.UnitPrice.SetAmount, AuctionHouseFrame.CommoditiesSellFrame.UnitPrice, postPrice)
                             end
                         end
@@ -1071,7 +1137,7 @@ function MarketSync.CreateAHSidecar(parent)
     end
 
     -- Initial state: restore previous state or default to true
-    local startExpanded = true
+    local startExpanded = not legacyAH
     if MarketSyncDB and MarketSyncDB.AHSidecarExpanded ~= nil then
         startExpanded = MarketSyncDB.AHSidecarExpanded
     end

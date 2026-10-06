@@ -36,6 +36,12 @@ run(`
       r.buyout, 0, nil, nil, nil, nil, nil, r.id
   end
   function GetAuctionItemLink(_, index) return results[index].link end
+  purchases = {}
+  function PlaceAuctionBid(view, index, amount)
+    purchases[#purchases + 1] = { view = view, index = index, amount = amount }
+  end
+  function GetMoney() return 100000 end
+  function UnitName() return "TestPlayer" end
   AuctionFrame = { IsShown = function() return true end }
   function CreateFrame()
     LegacyFrame = {
@@ -173,5 +179,21 @@ run(`
   assert(MarketSync.Scanner.LiveSearchResults[3].stackSize == 2)
   assert(MarketSync.Scanner.LiveSearchResults[3].available == 4)
   assert(#recorded == 0, "live searches must not overwrite scan observations")
+  local chosen = MarketSync.Scanner.LiveSearchResults[3]
+  assert(chosen.page == 0 and chosen.query == "Test Ore")
+  assert(MarketSync.Scanner.PrepareLivePurchase(chosen) == true)
+  assert(queries[#queries].page == 0, "buy preparation must reload the source page")
+  results = {{id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"}}
+  resultTotal = 1
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(MarketSync.Scanner.PurchaseReady and MarketSync.Scanner.PurchaseReady.row == chosen)
+  assert(MarketSync.Scanner.BuyPreparedLivePurchase(chosen) == true)
+  assert(#purchases == 1 and purchases[1].view == "list" and purchases[1].amount == 200)
+  assert(MarketSync.Scanner.BuyPreparedLivePurchase(chosen) == false,
+    "same confirmation cannot buy twice")
+  assert(MarketSync.Scanner.PrepareLivePurchase(chosen) == true)
+  results = {{id = 100, name = "Test Ore", count = 2, buyout = 201, link = "item:100"}}
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(MarketSync.Scanner.PurchaseReady == nil, "changed price must reject purchase")
 `);
 console.log('PASS legacy full, targeted, and neutral scan transport');
