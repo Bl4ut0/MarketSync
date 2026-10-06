@@ -5,9 +5,96 @@ function MarketSync.CreateLegacySearchPanel(parent)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     local scanner = MarketSync.Scanner
+    local background = panel:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(panel)
+    background:SetColorTexture(0.045, 0.048, 0.055, 0.99)
+
+    -- Use the same left rail occupied by categories on the native Browse tab.
+    local listPane = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    listPane:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
+    listPane:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
+    listPane:SetWidth(205)
+    listPane:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    listPane:SetBackdropColor(0.055, 0.060, 0.070, 0.97)
+    listPane:SetBackdropBorderColor(0.30, 0.31, 0.33, 0.95)
+    local listTitle = listPane:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    listTitle:SetPoint("TOPLEFT", 12, -12)
+    listTitle:SetText("Search Lists")
+    local listHint = listPane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    listHint:SetPoint("TOPLEFT", listTitle, "BOTTOMLEFT", 0, -5)
+    listHint:SetText("Choose a list or item")
+    local listScroll = CreateFrame("ScrollFrame", nil, listPane, "UIPanelScrollFrameTemplate")
+    listScroll:SetPoint("TOPLEFT", listHint, "BOTTOMLEFT", 0, -10)
+    listScroll:SetPoint("BOTTOMRIGHT", listPane, "BOTTOMRIGHT", -25, 8)
+    local listContent = CreateFrame("Frame", nil, listScroll)
+    listContent:SetSize(172, 1)
+    listScroll:SetScrollChild(listContent)
+    local listRows, selectedList = {}, "Favorites"
+    local function RefreshLists()
+        local favorites = MarketSync.Favorites
+        local lists = favorites and favorites.GetLists and favorites.GetLists() or { "Favorites" }
+        local entries = {}
+        for _, listName in ipairs(lists) do
+            entries[#entries + 1] = { name = listName, heading = true }
+            if listName == selectedList then
+                local items = favorites and favorites.GetListItems and favorites.GetListItems(listName) or {}
+                for _, item in ipairs(items) do
+                    entries[#entries + 1] = { name = item.name, itemID = item.itemID }
+                end
+            end
+        end
+        for i = 1, math.max(#entries, #listRows) do
+            local row = listRows[i]
+            if not row then
+                row = CreateFrame("Button", nil, listContent)
+                row:SetSize(170, 22)
+                row.background = row:CreateTexture(nil, "BACKGROUND")
+                row.background:SetAllPoints(row)
+                row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row.text:SetPoint("LEFT", 5, 0)
+                row.text:SetWidth(160)
+                row.text:SetJustifyH("LEFT")
+                row.text:SetWordWrap(false)
+                row:SetScript("OnEnter", function(self)
+                    self.background:SetColorTexture(0.20, 0.22, 0.25, 0.95)
+                end)
+                row:SetScript("OnLeave", function(self)
+                    self.background:SetColorTexture(0.11, 0.12, 0.14, self.entry and self.entry.heading and 0.95 or 0.65)
+                end)
+                row:SetScript("OnClick", function(self)
+                    if self.entry.heading then
+                        selectedList = self.entry.name
+                        RefreshLists()
+                    else
+                        local itemName = self.entry.name
+                        if itemName and itemName ~= "" then
+                            panel:SetQuery(itemName)
+                            if scanner and scanner.StartLiveSearch then scanner.StartLiveSearch(itemName) end
+                        end
+                    end
+                end)
+                listRows[i] = row
+            end
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, -(i - 1) * 22)
+            row.entry = entries[i]
+            if row.entry then
+                row.background:SetColorTexture(0.11, 0.12, 0.14, row.entry.heading and 0.95 or 0.65)
+                row.text:SetText((row.entry.heading and "|cffffd100" or "   |cffcccccc") .. row.entry.name .. "|r")
+                row:Show()
+            else row:Hide() end
+        end
+        listContent:SetHeight(math.max(1, #entries * 22))
+    end
+
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     search:SetSize(300, 24)
-    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -18)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 229, -18)
     search:SetAutoFocus(false)
     search:SetMaxLetters(80)
 
@@ -30,13 +117,13 @@ function MarketSync.CreateLegacySearchPanel(parent)
 
     local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     header:SetPoint("TOPLEFT", status, "BOTTOMLEFT", 0, -12)
-    header:SetText("Item / variant                         Unit buyout       Stack       Auctions       Available")
+    header:SetText("Item / variant                  Unit buyout     Stack    Auctions   Available")
 
     local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -8)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -38, 20)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(700, 1)
+    content:SetSize(560, 1)
     scroll:SetScrollChild(content)
     local rowHeight, rowCount, rows = 27, 17, {}
     for i = 1, rowCount do
@@ -49,20 +136,20 @@ function MarketSync.CreateLegacySearchPanel(parent)
         row.icon:SetPoint("LEFT", row, "LEFT", 3, 0)
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.name:SetPoint("LEFT", row.icon, "RIGHT", 7, 0)
-        row.name:SetWidth(300)
+        row.name:SetWidth(190)
         row.name:SetJustifyH("LEFT")
         row.price = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.price:SetPoint("LEFT", row.name, "RIGHT", 7, 0)
-        row.price:SetWidth(90)
+        row.price:SetWidth(85)
         row.stack = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.stack:SetPoint("LEFT", row.price, "RIGHT", 8, 0)
-        row.stack:SetWidth(60)
+        row.stack:SetWidth(45)
         row.auctions = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.auctions:SetPoint("LEFT", row.stack, "RIGHT", 8, 0)
-        row.auctions:SetWidth(60)
+        row.auctions:SetWidth(55)
         row.available = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.available:SetPoint("LEFT", row.auctions, "RIGHT", 8, 0)
-        row.available:SetWidth(65)
+        row.available:SetWidth(60)
         row:SetScript("OnEnter", function(self)
             if not self.data or not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -109,8 +196,14 @@ function MarketSync.CreateLegacySearchPanel(parent)
     panel.SetQuery = function(_, query)
         if type(query) == "string" then search:SetText(query) end
     end
-    panel:SetScript("OnShow", Refresh)
+    panel:SetScript("OnShow", function()
+        RefreshLists()
+        Refresh()
+    end)
     scroll:HookScript("OnVerticalScroll", Refresh)
     if scanner and scanner.RegisterCallback then scanner.RegisterCallback(Refresh) end
+    if MarketSync.Favorites and MarketSync.Favorites.RegisterCallback then
+        MarketSync.Favorites.RegisterCallback(RefreshLists)
+    end
     return panel
 end

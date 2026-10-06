@@ -62,9 +62,16 @@ function MarketSync.CreateAHScannerPanel(parent)
     -- panel in one session. A global frame name would collide on the second one.
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
+    local legacyAH = MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH
+    if legacyAH then
+        local background = panel:CreateTexture(nil, "BACKGROUND")
+        background:SetAllPoints(panel)
+        background:SetColorTexture(0.045, 0.048, 0.055, 0.99)
+    end
 
     -- Left Pane: Scan Lists Management (260px wide)
-    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, 260, nil)
+    local leftWidth = legacyAH and 205 or 260
+    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, leftWidth, nil)
     if not leftInset then
         leftInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
         leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
@@ -78,7 +85,7 @@ function MarketSync.CreateAHScannerPanel(parent)
         leftInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
     end
     leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
-    leftInset:SetWidth(260)
+    leftInset:SetWidth(leftWidth)
 
     -- Right Pane: Scan Operations & Results Feed
     local rightInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel)
@@ -126,7 +133,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(listScroll) end
 
     local listScrollContent = CreateFrame("Frame", nil, listScroll)
-    listScrollContent:SetSize(232, 1)
+    listScrollContent:SetSize(leftWidth - 28, 1)
     listScroll:SetScrollChild(listScrollContent)
 
     -- Batch selection and scan CTA toolbar
@@ -189,7 +196,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     end)
 
     local itemsScrollContent = CreateFrame("Frame", nil, itemsScroll)
-    itemsScrollContent:SetSize(232, 1)
+    itemsScrollContent:SetSize(leftWidth - 28, 1)
     itemsScroll:SetScrollChild(itemsScrollContent)
     itemsScrollContent:EnableMouse(true)
     itemsScrollContent:SetScript("OnReceiveDrag", HandleScannerItemDrop)
@@ -642,8 +649,8 @@ function MarketSync.CreateAHScannerPanel(parent)
         edgeFile = "Interface\\Buttons\\WHITE8X8",
         edgeSize = 1,
     })
-    progressBar:SetBackdropColor(0.10, 0.09, 0.08, 0.95)
-    progressBar:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    progressBar:SetBackdropColor(0.07, 0.08, 0.09, 0.95)
+    progressBar:SetBackdropBorderColor(0.30, 0.31, 0.33, 0.90)
     progressBar:SetMinMaxValues(0, 1)
     progressBar:SetValue(0)
 

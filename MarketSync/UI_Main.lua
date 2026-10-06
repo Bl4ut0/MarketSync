@@ -20,8 +20,8 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
     if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
-        inset:SetBackdropColor(0.16, 0.12, 0.08, 0.80)
-        inset:SetBackdropBorderColor(0.48, 0.34, 0.16, 0.95)
+        inset:SetBackdropColor(0.055, 0.060, 0.070, 0.97)
+        inset:SetBackdropBorderColor(0.30, 0.31, 0.33, 0.95)
     else
         inset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
         inset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
@@ -60,8 +60,8 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
     if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
-        hdr:SetBackdropColor(0.24, 0.17, 0.10, 0.95)
-        hdr:SetBackdropBorderColor(0.53, 0.37, 0.15, 0.90)
+        hdr:SetBackdropColor(0.12, 0.13, 0.15, 0.98)
+        hdr:SetBackdropBorderColor(0.32, 0.33, 0.35, 0.90)
     else
         hdr:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
         hdr:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
@@ -92,11 +92,11 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     hdr.arrow = arrow
 
     hdr:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.24, 0.20, 0.12, 0.95)
+        self:SetBackdropColor(0.20, 0.22, 0.24, 0.95)
     end)
     hdr:SetScript("OnLeave", function(self)
         if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
-            self:SetBackdropColor(0.24, 0.17, 0.10, 0.95)
+            self:SetBackdropColor(0.12, 0.13, 0.15, 0.98)
         else
             self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
         end
@@ -155,7 +155,7 @@ local function CreateMainFrame()
             tile = true, tileSize = 32, edgeSize = 32,
             insets = { left = 10, right = 10, top = 10, bottom = 10 },
         })
-        MainFrame:SetBackdropColor(0.19, 0.13, 0.07, 1)
+        MainFrame:SetBackdropColor(0.08, 0.08, 0.09, 1)
     end
 
     -- --- PORTRAIT ---
