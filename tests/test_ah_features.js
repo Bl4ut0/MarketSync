@@ -1653,7 +1653,7 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(MarketSyncDB.UITheme == "legacy", tostring(MarketSyncDB.UITheme))
     assert(MarketSync.GetUITheme() == "legacy", MarketSync.GetUITheme())
     local frame = MarketSync.CreateMainFrame()
-    assert(frame.template == nil, "Legacy theme must use the old untemplated frame shell")
+    assert(frame.template == "BackdropTemplate", "Legacy theme must use the compatible backdrop shell")
     assert(frame.tabs[1].template == "CharacterFrameTabButtonTemplate")
     assert(frame.tabs[1].points[1][1] == "TOPLEFT", "Legacy tabs use the old bottom-edge anchors")
     assert(frame.tabs[1]:GetWidth() == 92)
@@ -2194,7 +2194,11 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     assert(MarketSyncDB.OnDemandNeutral == true, "OnDemandNeutral must default to true")
     assert(MarketSyncDB.BuildCacheOnStartup == false, "BuildCacheOnStartup must default to false")
     assert(MarketSyncDB.EnableProfessionCraftInfo ~= false, "Trade skill costs must default to enabled")
-    assert(MarketSync.GetUITheme() == "forever", "Forever is the default UI theme")
+    assert(MarketSync.GetUIThemePreference() == "auto", "Auto must be the default theme preference")
+    assert(MarketSync.GetUITheme() == "forever", "Auto resolves to Forever on the modern client")
+    MarketSync.Scanner = { IsLegacyAH = true }
+    assert(MarketSync.GetUITheme() == "legacy", "Auto resolves to Legacy on a classic AH client")
+    MarketSync.Scanner = nil
     assert(MarketSync.SetUITheme("legacy") == true and MarketSync.GetUITheme() == "legacy")
     assert(MarketSync.SetUITheme("unknown") == false and MarketSync.GetUITheme() == "legacy")
     assert(MarketSync.SetUITheme("forever") == true)

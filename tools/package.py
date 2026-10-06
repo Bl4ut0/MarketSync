@@ -79,7 +79,7 @@ def build(output, interface=None, game_type=None, flavor=None):
         "gameType": game_type or "multi",
         "flavor": flavor or "multi",
         "interface": interface,
-        "auctionHouseEntry": "embedded-tab" if game_type in (None, "camelot") else "portable-scanner",
+        "auctionHouseEntry": "embedded-tab" if game_type in (None, "camelot") else "legacy-auction-tabs",
         "embeddedAuctionHousePanel": game_type in (None, "camelot"),
         "portableWindow": True,
         "nativeScanner": True,

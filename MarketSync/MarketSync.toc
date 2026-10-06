@@ -57,6 +57,7 @@ UI_AHScanner.lua
 UI_LegacySearch.lua
 UI_AHSidecar.lua
 AuctionHouse.lua
+LegacyAuctionHouse.lua
 LegacyPosting.lua
 
 # UI Main: frame shell, tabs, settings

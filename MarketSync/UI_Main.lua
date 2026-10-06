@@ -124,7 +124,7 @@ local function CreateMainFrame()
     -- --- MAIN WINDOW (832 x 447, PortraitFrameTemplate) ---
     local ok, res
     if legacyTheme then
-        ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent)
+        ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent, "BackdropTemplate")
     else
         ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent, "PortraitFrameTemplate")
     end
@@ -146,32 +146,16 @@ local function CreateMainFrame()
     if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(MainFrame) end
 
     if legacyTheme then
-        -- Preserve the original pre-Forever AuctionFrame parchment construction.
-        -- These are the six frame pieces from the v0.8 legacy shell, not a tint
-        -- placed over the newer PortraitFrameTemplate.
-        local fallback = MainFrame:CreateTexture(nil, "BACKGROUND")
-        fallback:SetAllPoints(MainFrame)
-        fallback:SetColorTexture(0.22, 0.16, 0.10, 1)
-        local pieces = {
-            {"UI-AuctionFrame-Browse-TopLeft", 256, 256, 0, 0},
-            {"UI-AuctionFrame-Browse-Top", 320, 256, 256, 0},
-            {"UI-AuctionFrame-Browse-TopRight", 256, 256, 576, 0},
-            {"UI-AuctionFrame-Browse-BotLeft", 256, 191, 0, -256},
-            {"UI-AuctionFrame-Browse-Bot", 320, 191, 256, -256},
-            {"UI-AuctionFrame-Browse-BotRight", 256, 191, 576, -256},
-        }
-        for i, piece in ipairs(pieces) do
-            local tex = MainFrame:CreateTexture(nil, "BACKGROUND")
-            tex:SetTexture("Interface\\AuctionFrame\\" .. piece[1])
-            tex:SetSize(piece[2], piece[3])
-            tex:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", piece[4], piece[5])
-            if i > 3 then tex:SetTexCoord(0, 1, 0, 191 / 256) end
-        end
-        local cover = MainFrame:CreateTexture(nil, "BORDER")
-        cover:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-Bot")
-        cover:SetSize(260, 191)
-        cover:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -5, -256)
-        cover:SetTexCoord(0, 0.75, 0, 191 / 256)
+        -- A single backdrop scales with the whole frame. The old Browse-Top/
+        -- Browse-Bot atlas pieces are no longer present on every classic client;
+        -- missing pieces left large brown gaps and even covered panel content.
+        MainFrame:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 10, right = 10, top = 10, bottom = 10 },
+        })
+        MainFrame:SetBackdropColor(0.19, 0.13, 0.07, 1)
     end
 
     -- --- PORTRAIT ---
@@ -375,12 +359,7 @@ local function CreateMainFrame()
     -- ================================================================
     -- BOTTOM TABS
     -- ================================================================
-    local legacyAH = MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH == true
     local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Settings"}
-    if legacyAH then
-        tabNames[#tabNames + 1] = "Scanner"
-        tabNames[#tabNames + 1] = "Search AH"
-    end
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -458,9 +437,7 @@ local function CreateMainFrame()
             "Analytics",
             "Processing",
             "Alerts",
-            "Settings",
-            "Scanner",
-            "Search AH"
+            "Settings"
         }
         
         local tooltips = {
@@ -471,8 +448,6 @@ local function CreateMainFrame()
             "Organized controls on the left, auction-style arbitrage and crafting results on the right.",
             "Track targets by threshold and watch lists.",
             "Configure MarketSync background settings, caches, and UI behaviors.",
-            "Scan the legacy Auction House and inspect recent results.",
-            "Search current listings and compare grouped stack prices.",
         }
 
         local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
@@ -679,40 +654,6 @@ local function CreateMainFrame()
     SettingsContent:Hide()
     table.insert(contentFrames, SettingsContent)
 
-    -- Legacy Auction Houses have no modern embedded tab. Reuse the scanner
-    -- feed and list controls in the portable window instead.
-    if legacyAH and MarketSync.CreateAHScannerPanel then
-        local scannerHost = CreateFrame("Frame", nil, MainFrame)
-        scannerHost:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 12, -63)
-        scannerHost:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -12, 29)
-        scannerHost.Content = MarketSync.CreateAHScannerPanel(scannerHost)
-        MainFrame.legacyScannerPanel = scannerHost.Content
-        scannerHost:SetScript("OnShow", function()
-            if scannerHost.Content and scannerHost.Content.OnShow then scannerHost.Content.OnShow() end
-        end)
-        scannerHost:Hide()
-        table.insert(contentFrames, scannerHost)
-    end
-    if legacyAH and MarketSync.CreateLegacySearchPanel then
-        local searchHost = CreateFrame("Frame", nil, MainFrame)
-        searchHost:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 12, -63)
-        searchHost:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -12, 29)
-        searchHost.Content = MarketSync.CreateLegacySearchPanel(searchHost)
-        MarketSync.OpenLegacySearch = function(query)
-            if type(query) == "number" and MarketSync.GetItemInfo then
-                query = MarketSync.GetItemInfo(query)
-            end
-            if type(query) ~= "string" or query == "" then return false end
-            if not (MarketSync.Scanner and MarketSync.Scanner.IsAvailable and MarketSync.Scanner.IsAvailable()) then return false end
-            if searchHost.Content and searchHost.Content.SetQuery then
-                searchHost.Content:SetQuery(query:match("%[(.-)%]") or query)
-            end
-            SelectTab(9)
-            return MarketSync.Scanner.StartLiveSearch(query:match("%[(.-)%]") or query)
-        end
-        searchHost:Hide()
-        table.insert(contentFrames, searchHost)
-    end
 
     -- --- SETTINGS UI FRAMES ---
     local function CreateBox(parent, w, h, x, y)
@@ -890,10 +831,10 @@ local function CreateMainFrame()
     if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(themeDropdown, 130) end
     if UIDropDownMenu_Initialize then
         UIDropDownMenu_Initialize(themeDropdown, function()
-            for _, theme in ipairs({{"forever", "Forever"}, {"legacy", "Legacy"}}) do
+            for _, theme in ipairs({{"auto", "Auto (game version)"}, {"forever", "Forever"}, {"legacy", "Legacy"}}) do
                 local info = UIDropDownMenu_CreateInfo()
                 info.text, info.value = theme[2], theme[1]
-                info.checked = MarketSync.GetUITheme and MarketSync.GetUITheme() == theme[1]
+                info.checked = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() == theme[1]
                 info.func = function()
                     if CloseDropDownMenus then CloseDropDownMenus() end
                     if MarketSync.SetUITheme then MarketSync.SetUITheme(theme[1]) end
@@ -904,7 +845,9 @@ local function CreateMainFrame()
     end
     themeDropdown:SetScript("OnShow", function(self)
         if UIDropDownMenu_SetText then
-            UIDropDownMenu_SetText(self, MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever")
+            local preference = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() or "auto"
+            UIDropDownMenu_SetText(self, preference == "auto" and "Auto (" .. (MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever") .. ")"
+                or (preference == "legacy" and "Legacy" or "Forever"))
         end
     end)
 
@@ -958,8 +901,9 @@ local function CreateMainFrame()
         end
         if MarketSync.Provider then MarketSync.Provider.Select() end
         if isChecked and MarketSync.RegisterAuctionatorHooks then MarketSync.RegisterAuctionatorHooks() end
-        if MainFrame.legacyScannerPanel and MainFrame.legacyScannerPanel.RefreshScannerState then
-            MainFrame.legacyScannerPanel.RefreshScannerState()
+        if MarketSync.AuctionHouse and MarketSync.AuctionHouse.LegacyScannerPanel
+            and MarketSync.AuctionHouse.LegacyScannerPanel.RefreshScannerState then
+            MarketSync.AuctionHouse.LegacyScannerPanel.RefreshScannerState()
         end
         if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then
             MarketSync.AuctionHouse.RefreshTabVisibility()

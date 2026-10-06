@@ -705,16 +705,16 @@ local function PopulateAddonSettings(panel)
     appearanceTitle:SetText("|cffffd700Window Theme|r")
     local appearanceHint = cardAppearance:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     appearanceHint:SetPoint("TOPLEFT", appearanceTitle, "BOTTOMLEFT", 0, -3)
-    appearanceHint:SetText("Legacy restores the older AuctionFrame shell and tab layout. Switching reloads the UI.")
+    appearanceHint:SetText("Auto uses Legacy on older clients and Forever on modern clients. Switching reloads the UI.")
     local themeDropdown = CreateFrame("Frame", nil, cardAppearance, "UIDropDownMenuTemplate")
     themeDropdown:SetPoint("TOPLEFT", cardAppearance, "TOPLEFT", 0, -38)
     if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(themeDropdown, 125) end
     if UIDropDownMenu_Initialize then
         UIDropDownMenu_Initialize(themeDropdown, function()
-            for _, theme in ipairs({{"forever", "Forever"}, {"legacy", "Legacy"}}) do
+            for _, theme in ipairs({{"auto", "Auto (game version)"}, {"forever", "Forever"}, {"legacy", "Legacy"}}) do
                 local info = UIDropDownMenu_CreateInfo()
                 info.text, info.value = theme[2], theme[1]
-                info.checked = MarketSync.GetUITheme and MarketSync.GetUITheme() == theme[1]
+                info.checked = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() == theme[1]
                 info.func = function()
                     if CloseDropDownMenus then CloseDropDownMenus() end
                     if MarketSync.SetUITheme then MarketSync.SetUITheme(theme[1]) end
@@ -725,7 +725,9 @@ local function PopulateAddonSettings(panel)
     end
     table.insert(refreshControls, function()
         if UIDropDownMenu_SetText then
-            UIDropDownMenu_SetText(themeDropdown, MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever")
+            local preference = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() or "auto"
+            UIDropDownMenu_SetText(themeDropdown, preference == "auto" and "Auto (" .. (MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever") .. ")"
+                or (preference == "legacy" and "Legacy" or "Forever"))
         end
     end)
 

@@ -332,7 +332,17 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.PassiveSync == nil then MarketSyncDB.PassiveSync = true end
     if MarketSyncDB.EnableNeutralSync == nil then MarketSyncDB.EnableNeutralSync = true end
     if MarketSyncDB.DebugMode == nil then MarketSyncDB.DebugMode = false end
-    if MarketSyncDB.UITheme ~= "legacy" then MarketSyncDB.UITheme = "forever" end
+    -- The first theme build stored Forever as its implicit default. Migrate that
+    -- default once so older clients pick their native look automatically.
+    if not MarketSyncDB.UIThemeAutoMigrated then
+        if MarketSyncDB.UITheme == nil or MarketSyncDB.UITheme == "forever" then
+            MarketSyncDB.UITheme = "auto"
+        end
+        MarketSyncDB.UIThemeAutoMigrated = true
+    end
+    if MarketSyncDB.UITheme ~= "legacy" and MarketSyncDB.UITheme ~= "forever" then
+        MarketSyncDB.UITheme = "auto"
+    end
     if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
     if MarketSyncDB.EnableTooltipProb == nil then MarketSyncDB.EnableTooltipProb = true end
     if MarketSyncDB.EnableTooltipAuctionPrice == nil then MarketSyncDB.EnableTooltipAuctionPrice = true end
@@ -1561,11 +1571,19 @@ end
 -- The layout is selected when frames are constructed. Keep the setting
 -- independent of the game flavor so classic players can choose either look.
 function MarketSync.GetUITheme()
-    return MarketSyncDB and MarketSyncDB.UITheme == "legacy" and "legacy" or "forever"
+    local selected = MarketSync.GetUIThemePreference()
+    if selected == "auto" then
+        return MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH and "legacy" or "forever"
+    end
+    return selected
+end
+
+function MarketSync.GetUIThemePreference()
+    return MarketSyncDB and MarketSyncDB.UITheme or "auto"
 end
 
 function MarketSync.SetUITheme(theme)
-    if theme ~= "legacy" and theme ~= "forever" then return false end
+    if theme ~= "legacy" and theme ~= "forever" and theme ~= "auto" then return false end
     if not MarketSyncDB then return false end
     if MarketSyncDB.UITheme == theme then return true end
     MarketSyncDB.UITheme = theme
