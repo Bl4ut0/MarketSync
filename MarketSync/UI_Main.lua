@@ -328,7 +328,10 @@ local function CreateMainFrame()
     -- ================================================================
     local legacyAH = MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH == true
     local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Settings"}
-    if legacyAH then tabNames[#tabNames + 1] = "Scanner" end
+    if legacyAH then
+        tabNames[#tabNames + 1] = "Scanner"
+        tabNames[#tabNames + 1] = "Search AH"
+    end
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -407,7 +410,8 @@ local function CreateMainFrame()
             "Processing",
             "Alerts",
             "Settings",
-            "Scanner"
+            "Scanner",
+            "Search AH"
         }
         
         local tooltips = {
@@ -419,6 +423,7 @@ local function CreateMainFrame()
             "Track targets by threshold and watch lists.",
             "Configure MarketSync background settings, caches, and UI behaviors.",
             "Scan the legacy Auction House and inspect recent results.",
+            "Search current listings and compare grouped stack prices.",
         }
 
         local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
@@ -507,7 +512,9 @@ local function CreateMainFrame()
         -- 6 tabs: 112px (span ~660px)
         -- <=5 tabs: 120px (span ~590px)
         local tabWidth = 104
-        if numVisible >= 8 then
+        if numVisible >= 9 then
+            tabWidth = 86
+        elseif numVisible >= 8 then
             tabWidth = 96
         elseif numVisible <= 5 then
             tabWidth = 120
@@ -632,6 +639,26 @@ local function CreateMainFrame()
         end)
         scannerHost:Hide()
         table.insert(contentFrames, scannerHost)
+    end
+    if legacyAH and MarketSync.CreateLegacySearchPanel then
+        local searchHost = CreateFrame("Frame", nil, MainFrame)
+        searchHost:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", 12, -63)
+        searchHost:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -12, 29)
+        searchHost.Content = MarketSync.CreateLegacySearchPanel(searchHost)
+        MarketSync.OpenLegacySearch = function(query)
+            if type(query) == "number" and MarketSync.GetItemInfo then
+                query = MarketSync.GetItemInfo(query)
+            end
+            if type(query) ~= "string" or query == "" then return false end
+            if not (MarketSync.Scanner and MarketSync.Scanner.IsAvailable and MarketSync.Scanner.IsAvailable()) then return false end
+            if searchHost.Content and searchHost.Content.SetQuery then
+                searchHost.Content:SetQuery(query:match("%[(.-)%]") or query)
+            end
+            SelectTab(9)
+            return MarketSync.Scanner.StartLiveSearch(query:match("%[(.-)%]") or query)
+        end
+        searchHost:Hide()
+        table.insert(contentFrames, searchHost)
     end
 
     -- --- SETTINGS UI FRAMES ---

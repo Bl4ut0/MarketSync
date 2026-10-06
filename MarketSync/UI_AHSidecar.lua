@@ -39,6 +39,9 @@ end
 -- Drives the native AuctionHouseFrame to search an item immediately
 -- ================================================================
 function MarketSync.SearchInAuctionHouse(itemOrName)
+    if MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH then
+        return MarketSync.OpenLegacySearch and MarketSync.OpenLegacySearch(itemOrName) or false
+    end
     if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then return false end
     local name = type(itemOrName) == "string" and itemOrName or nil
     local itemID = tonumber(itemOrName)

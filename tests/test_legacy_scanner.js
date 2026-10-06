@@ -146,5 +146,32 @@ run(`
     "paged target scan must aggregate rows and ignore auctions without buyout: " ..
     tostring(#recorded) .. " " .. tostring(recorded[1] and recorded[1].price) ..
     " " .. tostring(recorded[1] and recorded[1].qty))
+  recorded = {}
+  assert(MarketSync.Scanner.StartLiveSearch("  Test Ore  ") == true)
+  assert(queries[#queries].name == "Test Ore" and queries[#queries].page == 0)
+  results = {
+    {id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"},
+    {id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"},
+    {id = 100, name = "Test Ore", count = 1, buyout = 75, link = "item:100"},
+    {id = 100, name = "Test Ore", count = 1, buyout = 0, link = "item:100"},
+  }
+  resultTotal = 51
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(queries[#queries].page == 1, "live search must traverse all pages")
+  results = {
+    {id = 100, name = "Test Ore", count = 1, buyout = 75, link = "item:100"},
+    {id = 100, name = "Test Ore of Power", count = 1, buyout = 75,
+      link = "|Hitem:100:0:0:0:0:0:-12:0|h[Test Ore of Power]|h"},
+  }
+  resultTotal = 51
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(MarketSync.Scanner.Active == false and #MarketSync.Scanner.LiveSearchResults == 3)
+  assert(MarketSync.Scanner.LiveSearchResults[1].unitPrice == 75)
+  assert(MarketSync.Scanner.LiveSearchResults[1].auctions == 2)
+  assert(MarketSync.Scanner.LiveSearchResults[2].itemSuffix == -12,
+    "variants at the same price must not merge")
+  assert(MarketSync.Scanner.LiveSearchResults[3].stackSize == 2)
+  assert(MarketSync.Scanner.LiveSearchResults[3].available == 4)
+  assert(#recorded == 0, "live searches must not overwrite scan observations")
 `);
 console.log('PASS legacy full, targeted, and neutral scan transport');

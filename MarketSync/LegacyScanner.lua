@@ -9,6 +9,7 @@ if type(QueryAuctionItems) ~= "function" then return end
 S.IsLegacyAH = true
 local legacy = { mode = nil, page = 0, waiting = false, data = nil, keys = nil, requestID = 0 }
 local oldCancel = S.Cancel
+local Suffix
 
 local function After(delay, fn)
     if C_Timer and C_Timer.After then C_Timer.After(delay, fn) else fn() end
@@ -31,8 +32,10 @@ local function Start(label, mode)
     S.Active = true
     S.Pending = nil
     S.Queue = {}
-    S.RecentResults = {}
-    S.ResultsRevision = (S.ResultsRevision or 0) + 1
+    if mode ~= "search" then
+        S.RecentResults = {}
+        S.ResultsRevision = (S.ResultsRevision or 0) + 1
+    end
     S.Progress = { current = 0, total = 0 }
     S.Status = label
     S.ScanTime = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
@@ -41,7 +44,11 @@ local function Start(label, mode)
     legacy.mode, legacy.page, legacy.waiting = mode, 0, false
     legacy.requestID = legacy.requestID + 1
     legacy.data, legacy.keys = {}, {}
-    if MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
+    if mode == "search" then
+        S.LiveSearchResults = {}
+        S.LiveSearchRevision = (S.LiveSearchRevision or 0) + 1
+    end
+    if mode ~= "search" and MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
         and MarketSync.ObservationAPI.v1.HasListeners() then
         S.ObservationScanID = MarketSync.ObservationAPI.v1.NewScanID("local")
         Emit("start")
@@ -52,6 +59,22 @@ end
 local function Finish()
     local mode = legacy.mode
     local scope = S.ScanScope
+    if mode == "search" then
+        table.sort(S.LiveSearchResults, function(a, b)
+            if a.unitPrice ~= b.unitPrice then return a.unitPrice < b.unitPrice end
+            if a.itemID ~= b.itemID then return a.itemID < b.itemID end
+            if a.itemSuffix ~= b.itemSuffix then return a.itemSuffix > b.itemSuffix end
+            return a.stackSize > b.stackSize
+        end)
+        S.LiveSearchRevision = (S.LiveSearchRevision or 0) + 1
+        Emit("finish")
+        S.Active, S.Pending, S.ScanTime, S.ScanScope = false, nil, nil, nil
+        legacy.mode, legacy.waiting, legacy.data, legacy.keys = nil, false, nil, nil
+        legacy.requestID = legacy.requestID + 1
+        S.Status = string.format("Search Complete (%d price/stack groups)", #S.LiveSearchResults)
+        Notify()
+        return
+    end
     if mode == "full" and S.ScanScope == "neutral" and MarketSync.CompleteNeutralFullScan then
         MarketSync.CompleteNeutralFullScan()
     end
@@ -65,6 +88,30 @@ local function Finish()
         After(2, function() MarketSync.SendAdvertisement() end)
     end
     Notify()
+end
+
+local function ReadSearchRow(index)
+    local name, texture, count, quality, _, level, _, _, _, buyout,
+        _, _, _, _, _, _, itemID = GetAuctionItemInfo("list", index)
+    local link = GetAuctionItemLink and GetAuctionItemLink("list", index) or nil
+    itemID = tonumber(itemID) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
+    count, buyout = tonumber(count), tonumber(buyout)
+    if not itemID or not count or count < 1 or not buyout or buyout < 1 then return end
+    local suffix = Suffix(link)
+    -- Group only identical variants, stack sizes and exact buyout amounts.
+    local identity = table.concat({itemID, suffix, count, buyout}, ":")
+    local row = legacy.data[identity]
+    if row then
+        row.auctions = row.auctions + 1
+        row.available = row.available + count
+    else
+        row = { itemID = itemID, itemSuffix = suffix, link = link, name = name,
+            icon = texture, quality = quality, level = level, stackSize = count,
+            buyout = buyout, unitPrice = math.ceil(buyout / count),
+            auctions = 1, available = count }
+        legacy.data[identity] = row
+        S.LiveSearchResults[#S.LiveSearchResults + 1] = row
+    end
 end
 
 function S.Cancel(reason)
@@ -125,7 +172,7 @@ local function Query(name, page, getAll)
     Try()
 end
 
-local function Suffix(link)
+Suffix = function(link)
     if type(link) ~= "string" then return 0 end
     local itemString = link:match("|H(item:[^|]+)|h") or link:match("(item:%d+[^%s|]*)")
     if not itemString then return 0 end
@@ -261,6 +308,30 @@ function S.StartFullScan()
     return true
 end
 
+function S.StartLiveSearch(query)
+    if S.Active then S.Cancel("replaced by live search") end
+    if S.IsDisabledByAuctionator and S.IsDisabledByAuctionator() then
+        S.Status = "MarketSync live search disabled while Auctionator scans"
+        Notify()
+        return false
+    end
+    if not S.IsAvailable() then
+        S.Status = "Auctioneer must be open to search"
+        Notify()
+        return false
+    end
+    query = type(query) == "string" and query:match("^%s*(.-)%s*$") or nil
+    if not query or query == "" then
+        S.Status = "Enter an item name to search"
+        Notify()
+        return false
+    end
+    Start("Searching auctions for " .. query .. "...", "search")
+    legacy.query = query
+    Query(query, 0, false)
+    return true
+end
+
 local frame = CreateFrame("Frame")
 pcall(frame.RegisterEvent, frame, "AUCTION_ITEM_LIST_UPDATE")
 pcall(frame.RegisterEvent, frame, "AUCTION_HOUSE_CLOSED")
@@ -281,7 +352,10 @@ frame:SetScript("OnEvent", function(_, event)
     local function ReadBatch()
         if not S.Active or S.Generation ~= generation then return end
         local stop = math.min(count, index + 249)
-        for i = index, stop do ReadRow(i, targetID, targetSuffix) end
+        for i = index, stop do
+            if legacy.mode == "search" then ReadSearchRow(i)
+            else ReadRow(i, targetID, targetSuffix) end
+        end
         index = stop + 1
         if legacy.mode == "full" then
             S.Progress.current = stop
@@ -289,11 +363,20 @@ frame:SetScript("OnEvent", function(_, event)
             Notify()
         end
         if index <= count then After(0.01, ReadBatch) return end
-        if legacy.mode == "target" and (legacy.page + 1) * 50 < total then
+        if legacy.mode == "search" then
+            S.Progress.current = math.min((legacy.page * 50) + count, total)
+            S.Progress.total = total
+            S.Status = string.format("Searching auctions (%d / %d)...", S.Progress.current, total)
+            Notify()
+        end
+        if (legacy.mode == "target" or legacy.mode == "search") and (legacy.page + 1) * 50 < total then
             legacy.page = legacy.page + 1
-            Query(S.Pending.name or (MarketSync.GetItemInfo and MarketSync.GetItemInfo(S.Pending.itemID)), legacy.page, false)
+            local name = legacy.mode == "search" and legacy.query
+                or (S.Pending.name or (MarketSync.GetItemInfo and MarketSync.GetItemInfo(S.Pending.itemID)))
+            Query(name, legacy.page, false)
             return
         end
+        if legacy.mode == "search" then Finish() return end
         SaveRows(function()
             if legacy.mode == "full" then
                 local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()

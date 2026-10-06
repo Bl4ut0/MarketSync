@@ -54,6 +54,7 @@ UI_ItemDetail.lua
 
 # Native Auction House Embedded Panel, Scanner & Sidecar UI
 UI_AHScanner.lua
+UI_LegacySearch.lua
 UI_AHSidecar.lua
 AuctionHouse.lua
 LegacyPosting.lua
