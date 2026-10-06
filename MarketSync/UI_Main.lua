@@ -19,8 +19,13 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
         tile = false, tileSize = 0, edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    inset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-    inset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
+        inset:SetBackdropColor(0.16, 0.12, 0.08, 0.80)
+        inset:SetBackdropBorderColor(0.48, 0.34, 0.16, 0.95)
+    else
+        inset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
+        inset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    end
 
     -- Subtle top inner highlight line matching Blizzard AH insets (warm bronze/gold sheen)
     local topHighlight = inset:CreateTexture(nil, "BORDER")
@@ -54,8 +59,13 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
         edgeSize = 1,
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
-    hdr:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-    hdr:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+    if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
+        hdr:SetBackdropColor(0.24, 0.17, 0.10, 0.95)
+        hdr:SetBackdropBorderColor(0.53, 0.37, 0.15, 0.90)
+    else
+        hdr:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+        hdr:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+    end
 
     -- Vertical separator on right side
     local sep = hdr:CreateTexture(nil, "OVERLAY")
@@ -85,7 +95,11 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
         self:SetBackdropColor(0.24, 0.20, 0.12, 0.95)
     end)
     hdr:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+        if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
+            self:SetBackdropColor(0.24, 0.17, 0.10, 0.95)
+        else
+            self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+        end
     end)
 
     return hdr
@@ -96,6 +110,7 @@ end
 -- ================================================================
 local function CreateMainFrame()
     if MainFrame then return MainFrame end
+    local legacyTheme = MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy"
 
     -- Ensure Auction House UI is loaded so AuctionHouseFrameDisplayModeTabTemplate and textures are present
     if C_AddOns and C_AddOns.IsAddOnLoaded and not C_AddOns.IsAddOnLoaded("Blizzard_AuctionHouseUI") then
@@ -107,7 +122,12 @@ local function CreateMainFrame()
     end
 
     -- --- MAIN WINDOW (832 x 447, PortraitFrameTemplate) ---
-    local ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent, "PortraitFrameTemplate")
+    local ok, res
+    if legacyTheme then
+        ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent)
+    else
+        ok, res = pcall(CreateFrame, "Frame", "MarketSyncMainFrame", UIParent, "PortraitFrameTemplate")
+    end
     if ok and res then
         MainFrame = res
     else
@@ -124,6 +144,35 @@ local function CreateMainFrame()
     MainFrame:SetFrameStrata("HIGH")
     MainFrame:SetToplevel(true)
     if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(MainFrame) end
+
+    if legacyTheme then
+        -- Preserve the original pre-Forever AuctionFrame parchment construction.
+        -- These are the six frame pieces from the v0.8 legacy shell, not a tint
+        -- placed over the newer PortraitFrameTemplate.
+        local fallback = MainFrame:CreateTexture(nil, "BACKGROUND")
+        fallback:SetAllPoints(MainFrame)
+        fallback:SetColorTexture(0.22, 0.16, 0.10, 1)
+        local pieces = {
+            {"UI-AuctionFrame-Browse-TopLeft", 256, 256, 0, 0},
+            {"UI-AuctionFrame-Browse-Top", 320, 256, 256, 0},
+            {"UI-AuctionFrame-Browse-TopRight", 256, 256, 576, 0},
+            {"UI-AuctionFrame-Browse-BotLeft", 256, 191, 0, -256},
+            {"UI-AuctionFrame-Browse-Bot", 320, 191, 256, -256},
+            {"UI-AuctionFrame-Browse-BotRight", 256, 191, 576, -256},
+        }
+        for i, piece in ipairs(pieces) do
+            local tex = MainFrame:CreateTexture(nil, "BACKGROUND")
+            tex:SetTexture("Interface\\AuctionFrame\\" .. piece[1])
+            tex:SetSize(piece[2], piece[3])
+            tex:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", piece[4], piece[5])
+            if i > 3 then tex:SetTexCoord(0, 1, 0, 191 / 256) end
+        end
+        local cover = MainFrame:CreateTexture(nil, "BORDER")
+        cover:SetTexture("Interface\\AuctionFrame\\UI-AuctionFrame-Browse-Bot")
+        cover:SetSize(260, 191)
+        cover:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -5, -256)
+        cover:SetTexCoord(0, 0.75, 0, 191 / 256)
+    end
 
     -- --- PORTRAIT ---
     local portrait = MainFrame.GetPortrait and MainFrame:GetPortrait()
@@ -232,7 +281,7 @@ local function CreateMainFrame()
     -- vertical position varies by client and can put the label under content).
     -- PortraitFrameTemplate's title strip is shallow; keep the status text
     -- centered in it rather than sitting on the lower decorative border.
-    syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -42, -3)
+    syncButton:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -42, legacyTheme and -12 or -3)
     syncButton:SetHeight(20)
     syncButton:SetWidth(150)
     local syncFrameLevel = 100
@@ -444,11 +493,9 @@ local function CreateMainFrame()
         local tabName = "MarketSyncMainFrameTab" .. id
 
         -- Match native Blizzard Auction House tabs 1:1
-        local templates = {
-            "AuctionHouseFrameDisplayModeTabTemplate",
-            "AuctionHouseFrameTabTemplate",
-            "PanelTabButtonTemplate",
-        }
+        local templates = legacyTheme
+            and {"CharacterFrameTabButtonTemplate", "PanelTabButtonTemplate"}
+            or {"AuctionHouseFrameDisplayModeTabTemplate", "AuctionHouseFrameTabTemplate", "PanelTabButtonTemplate"}
         for _, tmpl in ipairs(templates) do
             local ok, res = pcall(CreateFrame, "Button", tabName, MainFrame, tmpl)
             if ok and res then
@@ -512,7 +559,9 @@ local function CreateMainFrame()
         -- 6 tabs: 112px (span ~660px)
         -- <=5 tabs: 120px (span ~590px)
         local tabWidth = 104
-        if numVisible >= 9 then
+        if legacyTheme then
+            tabWidth = 92
+        elseif numVisible >= 9 then
             tabWidth = 86
         elseif numVisible >= 8 then
             tabWidth = 96
@@ -543,7 +592,11 @@ local function CreateMainFrame()
                 PanelTemplates_TabResize(tab, 0, tabWidth)
             end
 
-            if not lastVisible then
+            if not lastVisible and legacyTheme then
+                tab:SetPoint("TOPLEFT", MainFrame, "BOTTOMLEFT", 60, 12)
+            elseif legacyTheme then
+                tab:SetPoint("TOPLEFT", lastVisible, "TOPRIGHT", -8, 0)
+            elseif not lastVisible then
                 -- First visible tab docks to the bottom border of MainFrame
                 -- -28 from BOTTOMLEFT aligns the tab top to the bottom border gold trim
                 tab:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", 19, -28)
@@ -828,6 +881,32 @@ local function CreateMainFrame()
         UpdateSpeedDisplay(val)
     end)
     AttachTooltip(speedSlider, "Controls background indexing yield rate and batch size when building search caches or resolving item data.")
+
+    local themeHeader = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    themeHeader:SetPoint("TOPLEFT", boxMemory, "TOPLEFT", 12, -220)
+    themeHeader:SetText("Window Theme")
+    local themeDropdown = CreateFrame("Frame", nil, boxMemory, "UIDropDownMenuTemplate")
+    themeDropdown:SetPoint("TOPLEFT", themeHeader, "BOTTOMLEFT", -15, -4)
+    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(themeDropdown, 130) end
+    if UIDropDownMenu_Initialize then
+        UIDropDownMenu_Initialize(themeDropdown, function()
+            for _, theme in ipairs({{"forever", "Forever"}, {"legacy", "Legacy"}}) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text, info.value = theme[2], theme[1]
+                info.checked = MarketSync.GetUITheme and MarketSync.GetUITheme() == theme[1]
+                info.func = function()
+                    if CloseDropDownMenus then CloseDropDownMenus() end
+                    if MarketSync.SetUITheme then MarketSync.SetUITheme(theme[1]) end
+                end
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+    end
+    themeDropdown:SetScript("OnShow", function(self)
+        if UIDropDownMenu_SetText then
+            UIDropDownMenu_SetText(self, MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever")
+        end
+    end)
 
     local ramText = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     ramText:SetPoint("BOTTOMLEFT", boxMemory, "BOTTOMLEFT", 10, 8)

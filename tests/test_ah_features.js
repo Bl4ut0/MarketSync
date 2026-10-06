@@ -1645,6 +1645,23 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('MainFrame 7-tab check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
+  const legacyState = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(legacyState);
+  const legacyEnv = mockEnv.replace('MarketSyncDB = { LowRamMode = false',
+    'MarketSyncDB = { UITheme = "legacy", LowRamMode = false');
+  for (const chunk of [legacyEnv, configLua, mainLua, `
+    assert(MarketSyncDB.UITheme == "legacy", tostring(MarketSyncDB.UITheme))
+    assert(MarketSync.GetUITheme() == "legacy", MarketSync.GetUITheme())
+    local frame = MarketSync.CreateMainFrame()
+    assert(frame.template == nil, "Legacy theme must use the old untemplated frame shell")
+    assert(frame.tabs[1].template == "CharacterFrameTabButtonTemplate")
+    assert(frame.tabs[1].points[1][1] == "TOPLEFT", "Legacy tabs use the old bottom-edge anchors")
+    assert(frame.tabs[1]:GetWidth() == 92)
+  `]) {
+    if (lauxlib.luaL_dostring(legacyState, to_luastring(chunk)) !== 0) {
+      throw new Error('Legacy theme frame check failed: ' + to_jsstring(lua.lua_tostring(legacyState, -1)));
+    }
+  }
 });
 
 test('AuctionHouse buy frame button hook and sidecar suppression across tabs', () => {
@@ -2177,6 +2194,10 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     assert(MarketSyncDB.OnDemandNeutral == true, "OnDemandNeutral must default to true")
     assert(MarketSyncDB.BuildCacheOnStartup == false, "BuildCacheOnStartup must default to false")
     assert(MarketSyncDB.EnableProfessionCraftInfo ~= false, "Trade skill costs must default to enabled")
+    assert(MarketSync.GetUITheme() == "forever", "Forever is the default UI theme")
+    assert(MarketSync.SetUITheme("legacy") == true and MarketSync.GetUITheme() == "legacy")
+    assert(MarketSync.SetUITheme("unknown") == false and MarketSync.GetUITheme() == "legacy")
+    assert(MarketSync.SetUITheme("forever") == true)
 
     -- 2. Verify RAM usage estimator
     local realmDB = MarketSync.GetRealmDB()

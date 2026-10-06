@@ -332,6 +332,7 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.PassiveSync == nil then MarketSyncDB.PassiveSync = true end
     if MarketSyncDB.EnableNeutralSync == nil then MarketSyncDB.EnableNeutralSync = true end
     if MarketSyncDB.DebugMode == nil then MarketSyncDB.DebugMode = false end
+    if MarketSyncDB.UITheme ~= "legacy" then MarketSyncDB.UITheme = "forever" end
     if MarketSyncDB.EnableChatPriceCheck == nil then MarketSyncDB.EnableChatPriceCheck = true end
     if MarketSyncDB.EnableTooltipProb == nil then MarketSyncDB.EnableTooltipProb = true end
     if MarketSyncDB.EnableTooltipAuctionPrice == nil then MarketSyncDB.EnableTooltipAuctionPrice = true end
@@ -1557,6 +1558,21 @@ function MarketSync.CreateModernDialog(name, width, height, titleText)
 end
 
 -- ================================================================
+-- The layout is selected when frames are constructed. Keep the setting
+-- independent of the game flavor so classic players can choose either look.
+function MarketSync.GetUITheme()
+    return MarketSyncDB and MarketSyncDB.UITheme == "legacy" and "legacy" or "forever"
+end
+
+function MarketSync.SetUITheme(theme)
+    if theme ~= "legacy" and theme ~= "forever" then return false end
+    if not MarketSyncDB then return false end
+    if MarketSyncDB.UITheme == theme then return true end
+    MarketSyncDB.UITheme = theme
+    if type(ReloadUI) == "function" then ReloadUI() end
+    return true
+end
+
 -- UI HELPER: CreateModernInset
 -- Matches Blizzard Auction House sleek dark bronze/stone inset panels
 -- ================================================================
