@@ -7,36 +7,54 @@ function MarketSync.CreateLegacySearchPanel(parent)
     panel:SetAllPoints(parent)
     local scanner = MarketSync.Scanner
     local selected
+    local panelWidth = parent.GetWidth and parent:GetWidth() or 0
+    -- Leave the right-hand gutter for the native scroll bar; result cells
+    -- must fit inside the ScrollFrame viewport, not just its outer border.
+    local tableWidth = math.max(1, (panelWidth > 0 and panelWidth or 900) - 80)
+    local colPrice = math.floor(tableWidth * 0.47)
+    local colStack = math.floor(tableWidth * 0.65)
+    local colAuctions = math.floor(tableWidth * 0.76)
+    local colAvailable = math.floor(tableWidth * 0.87)
 
     local background = panel:CreateTexture(nil, "BACKGROUND")
     background:SetAllPoints(panel)
-    background:SetColorTexture(0.045, 0.048, 0.055, 0.99)
+    background:SetColorTexture(0.035, 0.037, 0.042, 0.99)
+
+    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -10)
+    title:SetText("Search Auctions")
+    local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    hint:SetText("Live prices - select a row to check a stack")
 
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    search:SetSize(390, 24)
-    search:SetPoint("TOPLEFT", 22, -16)
+    search:SetHeight(24)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -31)
+    search:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -133, -31)
     search:SetAutoFocus(false)
     search:SetMaxLetters(80)
 
     local searchButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    searchButton:SetSize(92, 22)
-    searchButton:SetPoint("LEFT", search, "RIGHT", 12, 0)
-    searchButton:SetText("Search")
+    searchButton:SetSize(98, 24)
+    searchButton:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -31)
+    searchButton:SetText("Search AH")
 
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    status:SetPoint("TOPLEFT", search, "BOTTOMLEFT", 0, -8)
-    status:SetPoint("RIGHT", panel, "RIGHT", -20, 0)
+    status:SetPoint("TOPLEFT", search, "BOTTOMLEFT", 0, -9)
+    status:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -64)
     status:SetJustifyH("LEFT")
 
     local header = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    header:SetPoint("TOPLEFT", status, "BOTTOMLEFT", -4, -8)
-    header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -28, 0)
-    header:SetHeight(22)
-    header:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-    header:SetBackdropColor(0.12, 0.13, 0.15, 0.98)
+    header:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -89)
+    header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -34, -89)
+    header:SetHeight(24)
+    header:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    header:SetBackdropColor(0.12, 0.12, 0.13, 0.98)
+    header:SetBackdropBorderColor(0.25, 0.25, 0.27, 0.95)
     local columns = {
-        { "Item / variant", 34 }, { "Unit buyout", 338 },
-        { "Stack", 446 }, { "Auctions", 509 }, { "Available", 572 },
+        { "Item / variant", 32 }, { "Unit buyout", colPrice },
+        { "Stack", colStack }, { "Auctions", colAuctions }, { "Available", colAvailable },
     }
     for _, column in ipairs(columns) do
         local label = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -45,33 +63,56 @@ function MarketSync.CreateLegacySearchPanel(parent)
     end
 
     local selectionBar = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    selectionBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 16, 8)
-    selectionBar:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -16, 8)
-    selectionBar:SetHeight(44)
+    selectionBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 18, 10)
+    selectionBar:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -18, 10)
+    selectionBar:SetHeight(58)
     selectionBar:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
         edgeSize = 1,
     })
-    selectionBar:SetBackdropColor(0.07, 0.08, 0.09, 0.98)
-    selectionBar:SetBackdropBorderColor(0.31, 0.32, 0.34, 0.95)
+    selectionBar:SetBackdropColor(0.085, 0.083, 0.077, 0.98)
+    selectionBar:SetBackdropBorderColor(0.33, 0.31, 0.25, 0.95)
+    local selectionTitle = selectionBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    selectionTitle:SetPoint("TOPLEFT", selectionBar, "TOPLEFT", 12, -8)
+    selectionTitle:SetText("Selected auction")
     local selectionText = selectionBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    selectionText:SetPoint("LEFT", 12, 0)
-    selectionText:SetPoint("RIGHT", -145, 0)
+    selectionText:SetPoint("TOPLEFT", selectionTitle, "BOTTOMLEFT", 0, -5)
+    selectionText:SetPoint("TOPRIGHT", selectionBar, "TOPRIGHT", -150, -25)
     selectionText:SetJustifyH("LEFT")
+    if selectionText.SetWordWrap then selectionText:SetWordWrap(false) end
 
     local buyButton = CreateFrame("Button", nil, selectionBar, "UIPanelButtonTemplate")
-    buyButton:SetSize(124, 24)
-    buyButton:SetPoint("RIGHT", -10, 0)
+    buyButton:SetSize(128, 26)
+    buyButton:SetPoint("RIGHT", selectionBar, "RIGHT", -11, 0)
     buyButton:SetText("Buy 1 Stack")
 
-    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
-    scroll:SetPoint("BOTTOMRIGHT", selectionBar, "TOPRIGHT", -15, 6)
+    local resultsArea = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    resultsArea:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+    resultsArea:SetPoint("BOTTOMRIGHT", selectionBar, "TOPRIGHT", 0, 5)
+    resultsArea:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    resultsArea:SetBackdropColor(0.025, 0.026, 0.03, 0.98)
+    resultsArea:SetBackdropBorderColor(0.25, 0.25, 0.27, 0.95)
+
+    local emptyOverlay = CreateFrame("Frame", nil, resultsArea)
+    emptyOverlay:SetAllPoints(resultsArea)
+    emptyOverlay:EnableMouse(false)
+    local emptyTitle = emptyOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    emptyTitle:SetPoint("CENTER", emptyOverlay, "CENTER", 0, 21)
+    local emptyHint = emptyOverlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    emptyHint:SetPoint("TOP", emptyTitle, "BOTTOM", 0, -9)
+    emptyHint:SetWidth(440)
+    emptyHint:SetJustifyH("CENTER")
+
+    local scroll = CreateFrame("ScrollFrame", nil, resultsArea, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", resultsArea, "TOPLEFT", 2, -4)
+    scroll:SetPoint("BOTTOMRIGHT", resultsArea, "BOTTOMRIGHT", -23, 4)
+    emptyOverlay:SetFrameLevel(scroll:GetFrameLevel() + 1)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(730, 1)
+    content:SetSize(tableWidth, 1)
     scroll:SetScrollChild(content)
-    local rowHeight, rows = 27, {}
+    local rowHeight, rows = 32, {}
 
     local function Refresh()
         if not panel:IsShown() then return end
@@ -80,6 +121,27 @@ function MarketSync.CreateLegacySearchPanel(parent)
         searchButton:SetEnabled(not disabled and scanner and scanner.IsAvailable and scanner.IsAvailable())
         status:SetText(disabled and "Auctionator scanning is enabled. Disable it in MarketSync Settings to use Search."
             or (scanner and scanner.Status or "Open the auctioneer and search for an item."))
+        if #results == 0 then
+            local query = search:GetText() or ""
+            if disabled then
+                emptyTitle:SetText("Search is unavailable")
+                emptyHint:SetText("Disable Auctionator scanning in MarketSync Settings to use this search page.")
+            elseif scanner and scanner.Active then
+                emptyTitle:SetText("Searching auctions...")
+                emptyHint:SetText("Matching price and stack-size groups will appear here.")
+            elseif query ~= "" then
+                emptyTitle:SetText("No matching auctions")
+                emptyHint:SetText("Nothing is listed for " .. query .. ". Try a shorter name or search again later.")
+            else
+                emptyTitle:SetText("Find an item to buy")
+                emptyHint:SetText("Search by item name above, or choose an item from your MarketSync lists.")
+            end
+            emptyTitle:Show()
+            emptyHint:Show()
+        else
+            emptyTitle:Hide()
+            emptyHint:Hide()
+        end
         content:SetHeight(math.max(1, #results * rowHeight))
         local first = math.floor((scroll:GetVerticalScroll() or 0) / rowHeight)
         for i, row in ipairs(rows) do
@@ -89,8 +151,9 @@ function MarketSync.CreateLegacySearchPanel(parent)
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -(index - 1) * rowHeight)
             row.data = data
             if data then
-                row.background:SetColorTexture(data == selected and 0.18 or 0.07,
-                    data == selected and 0.21 or 0.08, data == selected and 0.24 or 0.09, 0.95)
+                row.background:SetColorTexture(data == selected and 0.20 or (index % 2 == 0 and 0.075 or 0.045),
+                    data == selected and 0.17 or (index % 2 == 0 and 0.072 or 0.043),
+                    data == selected and 0.09 or (index % 2 == 0 and 0.066 or 0.04), 0.98)
                 row.icon:SetTexture(data.icon or 134400)
                 row.name:SetText(data.name or ("Item #" .. data.itemID))
                 row.price:SetText(MarketSync.FormatMoney and MarketSync.FormatMoney(data.unitPrice) or tostring(data.unitPrice))
@@ -105,36 +168,47 @@ function MarketSync.CreateLegacySearchPanel(parent)
             and (type(GetMoney) ~= "function" or GetMoney() >= selected.buyout) or false)
         if selected then
             local price = MarketSync.FormatMoney and MarketSync.FormatMoney(selected.buyout) or tostring(selected.buyout) .. "c"
-            selectionText:SetText(string.format("%s  x%d   |cffffd100%s per stack|r", selected.name or "Item", selected.stackSize, price))
+            selectionTitle:SetText(ready and ready.row == selected and "Stack verified - ready to buy" or "Checking selected stack")
+            selectionText:SetText(string.format("%s  x%d   |cffffd100%s for this stack|r", selected.name or "Item", selected.stackSize, price))
         else
-            selectionText:SetText("Select a price row to check a live stack before buying.")
+            selectionTitle:SetText("Selected auction")
+            selectionText:SetText("Select a price row to verify a live stack before buying.")
         end
     end
 
     for i = 1, 15 do
         local row = CreateFrame("Button", nil, content)
-        row:SetSize(710, rowHeight)
+        row:SetSize(tableWidth - 6, rowHeight)
         row.background = row:CreateTexture(nil, "BACKGROUND")
         row.background:SetAllPoints(row)
+        local separator = row:CreateTexture(nil, "ARTWORK")
+        separator:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        separator:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        separator:SetHeight(1)
+        separator:SetColorTexture(0.18, 0.18, 0.18, 0.65)
         row.icon = row:CreateTexture(nil, "ARTWORK")
-        row.icon:SetSize(20, 20)
-        row.icon:SetPoint("LEFT", 3, 0)
+        row.icon:SetSize(24, 24)
+        row.icon:SetPoint("LEFT", row, "LEFT", 7, 0)
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.name:SetPoint("LEFT", row.icon, "RIGHT", 7, 0)
-        row.name:SetWidth(290)
+        row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        row.name:SetWidth(colPrice - 47)
         row.name:SetJustifyH("LEFT")
         row.price = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.price:SetPoint("LEFT", row.name, "RIGHT", 7, 0)
-        row.price:SetWidth(100)
+        row.price:SetPoint("LEFT", row, "LEFT", colPrice - 2, 0)
+        row.price:SetWidth(colStack - colPrice - 10)
+        row.price:SetTextColor(1, 0.82, 0.30)
         row.stack = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.stack:SetPoint("LEFT", row.price, "RIGHT", 8, 0)
-        row.stack:SetWidth(55)
+        row.stack:SetPoint("LEFT", row, "LEFT", colStack - 2, 0)
+        row.stack:SetWidth(colAuctions - colStack - 10)
         row.auctions = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.auctions:SetPoint("LEFT", row.stack, "RIGHT", 8, 0)
-        row.auctions:SetWidth(55)
+        row.auctions:SetPoint("LEFT", row, "LEFT", colAuctions - 2, 0)
+        row.auctions:SetWidth(colAvailable - colAuctions - 10)
         row.available = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.available:SetPoint("LEFT", row.auctions, "RIGHT", 8, 0)
-        row.available:SetWidth(75)
+        row.available:SetPoint("LEFT", row, "LEFT", colAvailable - 2, 0)
+        row.available:SetWidth(tableWidth - colAvailable - 12)
+        for _, label in ipairs({ row.name, row.price, row.stack, row.auctions, row.available }) do
+            if label.SetWordWrap then label:SetWordWrap(false) end
+        end
         row:SetScript("OnClick", function(self)
             if not self.data then return end
             selected = self.data
@@ -179,6 +253,12 @@ function MarketSync.CreateLegacySearchPanel(parent)
     end)
 
     panel.Refresh = Refresh
+    panel.SearchField = search
+    panel.SearchButton = searchButton
+    panel.EmptyTitle = emptyTitle
+    panel.EmptyHint = emptyHint
+    panel.ResultRows = rows
+    panel.BuyButton = buyButton
     panel.SetQuery = function(_, query)
         if type(query) == "string" then
             selected = nil
