@@ -44,6 +44,16 @@ local function NetMainAuctionValue(grossValue)
 end
 
 local function GetClientExpansionLevel()
+    -- The client build identifies the actual game ruleset. GetExpansionLevel()
+    -- can report the account's expansion entitlement instead (notably on
+    -- Classic-derived clients), which would leak later materials into lists.
+    if type(GetBuildInfo) == "function" then
+        local ok, version = pcall(GetBuildInfo)
+        local major = ok and tonumber(tostring(version or ""):match("^(%d+)")) or nil
+        if major then
+            return math.max(0, major - 1)
+        end
+    end
     if type(GetExpansionLevel) == "function" then
         local ok, level = pcall(GetExpansionLevel)
         if ok then
@@ -199,10 +209,15 @@ local function BuildProcessingDataOnce()
     local expansion = CLIENT_EXPANSION_LEVEL
     local out = {}
     local source = Auctionator and Auctionator.Prospect and Auctionator.Prospect.PROSPECT_TABLE
-    if type(source) == "table" then
+    if expansion == 1 then
+        -- Auctionator may bundle a cross-expansion prospect table. For a TBC
+        -- client, use the known TBC outcomes so later gems cannot enter the
+        -- Target Material dropdown through otherwise valid TBC ore IDs.
+        AddProspectDefinitions(out, TBC_PROSPECT_FALLBACK, expansion)
+    elseif type(source) == "table" then
         AddProspectDefinitions(out, source, expansion)
     end
-    if expansion >= 1 then
+    if expansion > 1 then
         local fallbackDefinitions = {}
         AddProspectDefinitions(fallbackDefinitions, TBC_PROSPECT_FALLBACK, expansion)
         for inputItemID, def in pairs(fallbackDefinitions) do
@@ -212,7 +227,7 @@ local function BuildProcessingDataOnce()
     return out
 end
 
--- Build once at load. Auctionator is a required dependency and is loaded first.
+-- Build once at load. Auctionator is optional; Classic/TBC use bundled data.
 MarketSync.ProcessingData = BuildProcessingDataOnce()
 
 -- Flattened probability rows mirror Auctionator v329. Each outcome triple is
@@ -503,16 +518,20 @@ local function GetCraftingCharacterKey()
     return tostring(playerName) .. "-" .. tostring(playerRealm)
 end
 
-local function GetKnownCraftingStore()
+local function GetKnownCraftingStore(characterKey)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or nil
     if not realmDB then return {} end
     if not realmDB.KnownCraftingRecipesByCharacter then
         realmDB.KnownCraftingRecipesByCharacter = {}
     end
 
-    local charKey = GetCraftingCharacterKey()
+    local charKey = characterKey or GetCraftingCharacterKey()
     local charStore = realmDB.KnownCraftingRecipesByCharacter[charKey]
     if type(charStore) ~= "table" or tonumber(charStore.__cacheVersion) ~= CRAFT_RECIPE_CACHE_VERSION then
+        if characterKey and characterKey ~= GetCraftingCharacterKey() then
+            -- Reading an alt must never overwrite its older cache.
+            return {}
+        end
         -- Pre-v2 recipes stored only GetTradeSkillNumMade's first return value.
         -- They cannot be repaired safely, so force a fresh profession-window scan.
         charStore = { __cacheVersion = CRAFT_RECIPE_CACHE_VERSION }
@@ -522,14 +541,28 @@ local function GetKnownCraftingStore()
     return charStore
 end
 
-local function GetKnownProfessionStore()
+local function IsCompatibleCraftingStore(store)
+    if type(store) ~= "table" or tonumber(store.__cacheVersion) ~= CRAFT_RECIPE_CACHE_VERSION then
+        return false
+    end
+    if store.__clientExpansion ~= nil and tonumber(store.__clientExpansion) ~= CLIENT_EXPANSION_LEVEL then
+        return false
+    end
+    local faction = type(UnitFactionGroup) == "function" and UnitFactionGroup("player") or nil
+    if store.__faction and faction and store.__faction ~= faction then
+        return false
+    end
+    return true
+end
+
+local function GetKnownProfessionStore(characterKey)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or nil
     if not realmDB then return { updatedAt = 0, professions = {} } end
     if not realmDB.KnownProfessionsByCharacter then
         realmDB.KnownProfessionsByCharacter = {}
     end
 
-    local charKey = GetCraftingCharacterKey()
+    local charKey = characterKey or GetCraftingCharacterKey()
     local payload = realmDB.KnownProfessionsByCharacter[charKey]
     if type(payload) ~= "table" then
         payload = {}
@@ -543,7 +576,7 @@ local function GetKnownProfessionStore()
             end
         end
 
-        if next(migrated) == nil and type(realmDB.KnownProfessions) == "table" then
+        if not characterKey and next(migrated) == nil and type(realmDB.KnownProfessions) == "table" then
             for key, value in pairs(realmDB.KnownProfessions) do
                 if type(key) == "string" and value then
                     migrated[key] = true
@@ -953,6 +986,8 @@ function MarketSync.RefreshKnownCraftingRecipes()
     end
 
     local store = GetKnownCraftingStore()
+    store.__clientExpansion = CLIENT_EXPANSION_LEVEL
+    store.__faction = type(UnitFactionGroup) == "function" and UnitFactionGroup("player") or nil
     store[professionName] = {
         cacheVersion = CRAFT_RECIPE_CACHE_VERSION,
         updatedAt = time(),
@@ -1106,12 +1141,13 @@ local function CraftRecipeKey(recipe)
     return table.concat(parts, ":")
 end
 
-local function GetRecipesForProfession(professionName)
+local function GetRecipesForProfession(professionName, characterKey)
     local prof = professionName and tostring(professionName) or nil
     if not prof or prof == "" then return {} end
 
     local normalized = NormalizeProfessionName(prof) or prof
-    local store = GetKnownCraftingStore()
+    local store = GetKnownCraftingStore(characterKey)
+    if not IsCompatibleCraftingStore(store) then return {} end
     local out = {}
     local seen = {}
 
@@ -1162,12 +1198,12 @@ local function GetRecipesForProfession(professionName)
     return {}
 end
 
-function MarketSync.GetCraftRecipeCount(professionName)
+function MarketSync.GetCraftRecipeCount(professionName, characterKey)
     if professionName == "ALL" then
         local total = 0
         local seen = {}
-        for _, name in ipairs(MarketSync.GetProcessingProfessions()) do
-            for _, recipe in ipairs(GetRecipesForProfession(name)) do
+        for _, name in ipairs(MarketSync.GetProcessingProfessions(characterKey)) do
+            for _, recipe in ipairs(GetRecipesForProfession(name, characterKey)) do
                 local key = CraftRecipeKey(recipe)
                 if not seen[key] then
                     seen[key] = true
@@ -1177,7 +1213,7 @@ function MarketSync.GetCraftRecipeCount(professionName)
         end
         return total
     end
-    local recipes = GetRecipesForProfession(professionName)
+    local recipes = GetRecipesForProfession(professionName, characterKey)
     return #recipes
 end
 
@@ -1364,10 +1400,48 @@ function MarketSync.GetProcessingTargets()
     return out
 end
 
-function MarketSync.GetProcessingProfessions()
-    MarketSync.RefreshKnownCraftingRecipes()
-    local playerProfSet = GetPlayerProfessionSet()
-    local cachedProfessions = MarketSync.RefreshKnownProfessionCache()
+function MarketSync.GetProcessingCraftingCharacters()
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or nil
+    local currentKey = GetCraftingCharacterKey()
+    local out = { { key = currentKey, isCurrent = true } }
+    local seen = { [currentKey] = true }
+    for charKey, store in pairs(realmDB and realmDB.KnownCraftingRecipesByCharacter or {}) do
+        if type(charKey) == "string" and not seen[charKey]
+            and IsCompatibleCraftingStore(store) then
+            local latest, hasRecipes = 0, false
+            for _, payload in pairs(store) do
+                if type(payload) == "table" and type(payload.recipes) == "table" and #payload.recipes > 0 then
+                    hasRecipes = true
+                    latest = math.max(latest, tonumber(payload.updatedAt) or 0)
+                end
+            end
+            if hasRecipes then
+                out[#out + 1] = {
+                    key = charKey,
+                    isCurrent = false,
+                    updatedAt = latest,
+                    scopeKnown = store.__clientExpansion ~= nil and store.__faction ~= nil,
+                }
+                seen[charKey] = true
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.isCurrent ~= b.isCurrent then return a.isCurrent end
+        return a.key < b.key
+    end)
+    return out
+end
+
+function MarketSync.GetProcessingProfessions(characterKey)
+    local isCurrent = not characterKey or characterKey == GetCraftingCharacterKey()
+    if not isCurrent and not IsCompatibleCraftingStore(GetKnownCraftingStore(characterKey)) then
+        return {}
+    end
+    if isCurrent then MarketSync.RefreshKnownCraftingRecipes() end
+    local playerProfSet = isCurrent and GetPlayerProfessionSet() or {}
+    local cachedProfessions = isCurrent and MarketSync.RefreshKnownProfessionCache()
+        or SetToSortedList(GetKnownProfessionStore(characterKey).professions)
     local knownProfessionSet = {}
 
     for name in pairs(playerProfSet) do
@@ -1380,6 +1454,15 @@ function MarketSync.GetProcessingProfessions()
         local normalized = NormalizeProfessionName(name)
         if normalized then
             knownProfessionSet[normalized] = true
+        end
+    end
+    local knownRecipeStore = GetKnownCraftingStore(characterKey)
+    for name, payload in pairs(knownRecipeStore) do
+        if type(name) == "string" and type(payload) == "table"
+            and tonumber(payload.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION
+            and type(payload.recipes) == "table" and #payload.recipes > 0 then
+            local normalized = NormalizeProfessionName(name)
+            if normalized then knownProfessionSet[normalized] = true end
         end
     end
 
@@ -1400,7 +1483,7 @@ function MarketSync.GetProcessingProfessions()
         if hasKnownProfs and not knownProfessionSet[prof] then
             return
         end
-        local knownRecipes = MarketSync.GetCraftRecipeCount(prof)
+        local knownRecipes = MarketSync.GetCraftRecipeCount(prof, characterKey)
         if knownRecipes > 0 or (hasKnownProfs and knownProfessionSet[prof] and IsCraftingProfessionName(prof)) then
             seen[prof] = true
             out[#out + 1] = prof
@@ -1411,7 +1494,6 @@ function MarketSync.GetProcessingProfessions()
         AddProfessionIfEligible(name)
     end
 
-    local knownRecipeStore = GetKnownCraftingStore()
     for name, payload in pairs(knownRecipeStore) do
         if type(name) == "string" and type(payload) == "table" then
             AddProfessionIfEligible(name)
@@ -1525,6 +1607,70 @@ function MarketSync.DeleteProcessingCustomSelection(selectionID)
     for i, existing in ipairs(store) do
         if existing and tostring(existing.id) == id then
             table.remove(store, i)
+            return true
+        end
+    end
+    return false
+end
+
+local function GetProcessingCraftSetStore()
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or nil
+    if not realmDB then return {} end
+    if type(realmDB.ProcessingCraftSets) ~= "table" then
+        realmDB.ProcessingCraftSets = {}
+    end
+    return realmDB.ProcessingCraftSets
+end
+
+local function NormalizeCraftSetItems(items)
+    local out, seen = {}, {}
+    for _, value in ipairs(type(items) == "table" and items or {}) do
+        local id = tonumber(value)
+        if id and id > 0 and id == math.floor(id) and not seen[id] then
+            seen[id] = true
+            out[#out + 1] = id
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+function MarketSync.ListProcessingCraftSets()
+    local out = {}
+    for _, entry in ipairs(GetProcessingCraftSetStore()) do
+        if type(entry) == "table" and type(entry.name) == "string" then
+            local items = NormalizeCraftSetItems(entry.itemIDs)
+            if #items > 0 then
+                out[#out + 1] = { name = entry.name, itemIDs = items }
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.name:lower() < b.name:lower() end)
+    return out
+end
+
+function MarketSync.UpsertProcessingCraftSet(name, itemIDs)
+    local cleanName = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local items = NormalizeCraftSetItems(itemIDs)
+    if cleanName == "" then return nil, "List name is required" end
+    if #items == 0 then return nil, "Select at least one craft" end
+    local store = GetProcessingCraftSetStore()
+    local payload = { name = cleanName, itemIDs = items }
+    for index, entry in ipairs(store) do
+        if type(entry) == "table" and tostring(entry.name or ""):lower() == cleanName:lower() then
+            store[index] = payload
+            return payload
+        end
+    end
+    store[#store + 1] = payload
+    return payload
+end
+
+function MarketSync.DeleteProcessingCraftSet(name)
+    local key = tostring(name or ""):lower()
+    for index, entry in ipairs(GetProcessingCraftSetStore()) do
+        if type(entry) == "table" and tostring(entry.name or ""):lower() == key then
+            table.remove(GetProcessingCraftSetStore(), index)
             return true
         end
     end
@@ -1899,16 +2045,18 @@ function MarketSync.ExportArbitrageToAuctionator(results, listName)
     return true, #searchStrings
 end
 
-function MarketSync.FindProfitableCrafts(professionName, minMarginCopper)
-    MarketSync.RefreshKnownCraftingRecipes()
+function MarketSync.FindProfitableCrafts(professionName, minMarginCopper, characterKey, outputItemSet)
+    if not characterKey or characterKey == GetCraftingCharacterKey() then
+        MarketSync.RefreshKnownCraftingRecipes()
+    end
 
     local recipeEntries = {}
     local seen = {}
-    local professions = professionName == "ALL" and MarketSync.GetProcessingProfessions() or { professionName }
+    local professions = professionName == "ALL" and MarketSync.GetProcessingProfessions(characterKey) or { professionName }
     for _, profession in ipairs(professions) do
-        for _, recipe in ipairs(GetRecipesForProfession(profession)) do
+        for _, recipe in ipairs(GetRecipesForProfession(profession, characterKey)) do
             local key = CraftRecipeKey(recipe)
-            if not seen[key] then
+            if not seen[key] and (not outputItemSet or outputItemSet[tonumber(recipe.outputItemID)]) then
                 seen[key] = true
                 recipeEntries[#recipeEntries + 1] = { recipe = recipe, profession = profession }
             end
@@ -1967,6 +2115,7 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper)
             end
         end
         table.insert(out, {
+            craftingCharacter = characterKey or GetCraftingCharacterKey(),
             profession = entry.profession,
             recipeName = recipe.name or ("Item " .. tostring(recipe.outputItemID)),
             outputItemID = recipe.outputItemID,

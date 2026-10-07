@@ -1,6 +1,6 @@
 -- =============================================================
 -- MarketSync - Processing Panel UI
--- Box layout: top-left controls, lower-left custom presets, right results
+-- Compact mode controls above full-width results, with saved views in a popout
 -- =============================================================
 
 local RESULTS_PER_PAGE = 8
@@ -300,14 +300,17 @@ end
 function MarketSync.CreateProcessingPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local LEFT_X = isEmbedded and 10 or 14
-    local LEFT_W = isEmbedded and 170 or 164
-    local RESULTS_X = isEmbedded and 188 or 186
+    local LEFT_W = 220
+    local RESULTS_X = isEmbedded and 16 or 18
     -- The classic Auction House hosts this panel in a shorter but wider area
     -- than the portable window. Use the actual host width instead of leaving
     -- unused space to the right of the price columns.
     local parentWidth = parent.GetWidth and parent:GetWidth() or 0
     local parentHeight = parent.GetHeight and parent:GetHeight() or 0
-    local ROW_WIDTH = isEmbedded and math.max(550, parentWidth - RESULTS_X - 18) or 632
+    local effectiveWidth = parentWidth > 0 and parentWidth or (isEmbedded and 780 or 850)
+    local ROW_WIDTH = math.max(550, effectiveWidth - RESULTS_X - 18)
+    local controlsTop = isEmbedded and -36 or -68
+    local resultsTop = isEmbedded and -111 or -145
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
@@ -319,6 +322,8 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.selectedTargetID = nil
     panel.selectedProcess = nil
     panel.selectedProfession = nil
+    panel.selectedCharacterKey = nil -- nil means the active character
+    panel.activeCraftSet = nil
     panel.lastMode = nil
     panel.lastArbitrageResults = {}
     panel.lastCraftResults = {}
@@ -339,19 +344,17 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.page = 0
     panel.customPage = 0
 
-    local leftTopBox, leftBottomBox, rightBox
-    if isEmbedded then
-        leftTopBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 196)
-        leftBottomBox = CreateBox(panel, LEFT_X, -236, LEFT_W, 202)
-        leftBottomBox:SetWidth(LEFT_W)
-        leftBottomBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
-        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH + 6, 436)
-        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
-    else
-        leftTopBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, LEFT_TOP_H)
-        leftBottomBox = CreateBox(panel, LEFT_X, TOP_Y - LEFT_TOP_H - BOX_GAP, LEFT_W, LEFT_BOTTOM_H)
-        rightBox = CreateBox(panel, RESULTS_X - 2, TOP_Y, ROW_WIDTH + 6, LEFT_TOP_H + BOX_GAP + LEFT_BOTTOM_H)
+    local leftTopBox = CreateBox(panel, LEFT_X, controlsTop, effectiveWidth - LEFT_X - 10, 68)
+    local rightBox = CreateBox(panel, RESULTS_X - 4, resultsTop, ROW_WIDTH + 8, 320)
+    rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
+    local leftBottomBox = CreateBox(panel, 0, 0, LEFT_W, 202)
+    if leftBottomBox.ClearAllPoints then leftBottomBox:ClearAllPoints() end
+    leftBottomBox:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, resultsTop - 4)
+    leftBottomBox:SetSize(LEFT_W, 202)
+    if leftBottomBox.SetFrameLevel and panel.GetFrameLevel then
+        leftBottomBox:SetFrameLevel(panel:GetFrameLevel() + 20)
     end
+    leftBottomBox:Hide()
     panel.leftTopBox = leftTopBox
     panel.leftBottomBox = leftBottomBox
     panel.rightBox = rightBox
@@ -359,6 +362,7 @@ function MarketSync.CreateProcessingPanel(parent)
     local leftTopTitle = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     leftTopTitle:SetPoint("TOPLEFT", 8, -8)
     leftTopTitle:SetText("|cffffd700Target Material Controls|r")
+    leftTopTitle:Hide()
 
     local modeButtons = {}
     local btnRun
@@ -441,6 +445,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 if panel.RefreshModeControls then
                     panel:RefreshModeControls()
                 end
+                if panel.RefreshCustomRows then panel.RefreshCustomRows() end
                 if def.key == "craft" and RunActiveMode then
                     RunActiveMode()
                 end
@@ -455,18 +460,19 @@ function MarketSync.CreateProcessingPanel(parent)
     RefreshModeButtons()
 
     local targetLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    targetLabel:SetPoint("TOPLEFT", 8, -26)
+    targetLabel:SetPoint("TOPLEFT", 12, -8)
     targetLabel:SetText("Target (Name/ID)")
 
     local targetInputBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
-    targetInputBox:SetSize(LEFT_W - 16, 18)
-    targetInputBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
+    panel.targetInputBox = targetInputBox
+    targetInputBox:SetSize(210, 18)
+    targetInputBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -27)
     targetInputBox:SetAutoFocus(false)
     targetInputBox:SetText("")
     targetInputBox:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Enter target item", 1, 0.82, 0)
-        GameTooltip:AddLine("Use item link, itemID, or a cached item name.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("Drag an item here, shift-click a link, or enter a name/ID to search.", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     targetInputBox:SetScript("OnLeave", function()
@@ -481,15 +487,35 @@ function MarketSync.CreateProcessingPanel(parent)
             RunActiveMode()
         end
     end)
+    local targetDropdown
+    local function SetTargetFromItem(item)
+        local itemID = ResolveItemIDFromQuery(item)
+        if not itemID then return false end
+        local name = SafeGetItemInfo(itemID)
+        panel.selectedTargetID = itemID
+        targetInputBox:SetText(name and (name .. " (" .. itemID .. ")") or ("Item " .. itemID))
+        if targetDropdown then
+            SetDropdownLabel(targetDropdown, Truncate(name or ("Item " .. itemID), 20))
+        end
+        targetInputBox:ClearFocus()
+        if panel.activeMode == "target" and RunActiveMode then RunActiveMode() end
+        return true
+    end
+    local function HandleTargetItemDrop()
+        if type(GetCursorInfo) ~= "function" then return false end
+        local cursorType, itemID, itemLink = GetCursorInfo()
+        if cursorType ~= "item" or not (SetTargetFromItem(itemLink) or SetTargetFromItem(itemID)) then return false end
+        if type(ClearCursor) == "function" then ClearCursor() end
+        return true
+    end
+    targetInputBox:SetScript("OnReceiveDrag", HandleTargetItemDrop)
+    targetInputBox:SetScript("OnMouseUp", function()
+        HandleTargetItemDrop()
+    end)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(targetInputBox, {
-            onInsertLink = function(box, text)
-                local itemName = text and text:match("%[(.-)%]")
-                if itemName and itemName ~= "" then
-                    box:SetText(itemName)
-                    return true
-                end
-                return false
+            onInsertLink = function(_, text)
+                return SetTargetFromItem(text)
             end
         })
     end
@@ -513,13 +539,12 @@ function MarketSync.CreateProcessingPanel(parent)
         MarketSync.SetAccessibility(targetInputBox, {
             name = "Target Material Input",
             context = "Edit Box",
-            description = "Enter item name, item link, or item ID to evaluate",
+            description = "Drag an item, shift-click an item link, or enter an item name or ID to search",
         })
     end
 
     local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
-    local targetDropdown
-    targetDropdown = BuildDropdown(parentPrefix .. "ProcessingTargetDropdown", leftTopBox, LEFT_W - 16, function(self, level)
+    targetDropdown = BuildDropdown(parentPrefix .. "ProcessingTargetDropdown", leftTopBox, 208, function(self, level)
         local resetInfo = UIDropDownMenu_CreateInfo()
         resetInfo.text = "Select material..."
         resetInfo.func = function()
@@ -549,22 +574,22 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -64)
+    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 232, -25)
     SetDropdownLabel(targetDropdown, "Select material...")
 
     local targetDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    targetDesc:SetPoint("TOPLEFT", 8, -94)
+    targetDesc:SetPoint("TOPLEFT", 12, -53)
     targetDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     targetDesc:SetJustifyH("LEFT")
     if targetDesc.SetJustifyV then targetDesc:SetJustifyV("TOP") end
     targetDesc:SetText("|cff777777Shows all items that process into this material.|r")
 
     local processLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    processLabel:SetPoint("TOPLEFT", 8, -26)
+    processLabel:SetPoint("TOPLEFT", 12, -8)
     processLabel:SetText("Process")
 
     local processDropdown
-    processDropdown = BuildDropdown(parentPrefix .. "ProcessingTypeDropdown", leftTopBox, LEFT_W - 16, function(self, level)
+    processDropdown = BuildDropdown(parentPrefix .. "ProcessingTypeDropdown", leftTopBox, 208, function(self, level)
         if panel.selectedProcess and not IsSupportedProcessType(panel.selectedProcess) then
             panel.selectedProcess = nil
         end
@@ -582,11 +607,11 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
+    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -25)
     SetDropdownLabel(processDropdown, "ALL")
 
     local processDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    processDesc:SetPoint("TOPLEFT", 8, -72)
+    processDesc:SetPoint("TOPLEFT", 232, -30)
     processDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     processDesc:SetJustifyH("LEFT")
     if processDesc.SetJustifyV then processDesc:SetJustifyV("TOP") end
@@ -595,13 +620,43 @@ function MarketSync.CreateProcessingPanel(parent)
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
     panel.selectedProfession = "ALL"
 
+    local RefreshProfessionOptions
+    local characterLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    characterLabel:SetPoint("TOPLEFT", 12, -8)
+    characterLabel:SetText("Crafter")
+
+    local characterDropdown
+    characterDropdown = BuildDropdown(parentPrefix .. "ProcessingCharacterDropdown", leftTopBox, 208, function(self, level)
+        local choices = MarketSync.GetProcessingCraftingCharacters and MarketSync.GetProcessingCraftingCharacters() or {}
+        for _, choice in ipairs(choices) do
+            local opt = UIDropDownMenu_CreateInfo()
+            opt.text = choice.isCurrent and ("This character: " .. choice.key) or choice.key
+            opt.tooltipTitle = choice.key
+            opt.tooltipText = choice.isCurrent and "Current character's known recipes"
+                or (choice.scopeKnown
+                    and "Cached recipes from this character; profitability uses this realm's current auction prices."
+                    or "Older cache: game version and faction were not recorded. Reopen this character's profession to verify its recipes before relying on profit estimates.")
+            opt.func = function()
+                panel.selectedCharacterKey = choice.isCurrent and nil or choice.key
+                SetDropdownLabel(characterDropdown, choice.isCurrent and "This character" or Truncate(choice.key, 17))
+                panel.activeCraftSet = nil
+                panel.selectedCrafts = {}
+                if RefreshProfessionOptions then RefreshProfessionOptions() end
+                if panel.activeMode == "craft" and RunActiveMode then RunActiveMode() end
+            end
+            UIDropDownMenu_AddButton(opt, level)
+        end
+    end)
+    characterDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -25)
+    SetDropdownLabel(characterDropdown, "This character")
+
     local professionLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    professionLabel:SetPoint("TOPLEFT", 8, -26)
+    professionLabel:SetPoint("TOPLEFT", 232, -8)
     professionLabel:SetText("Profession")
 
     local professionDropdown
-    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, LEFT_W - 16, function(self, level)
-        professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or professionOptions
+    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, 208, function(self, level)
+        professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions(panel.selectedCharacterKey)) or professionOptions
         local options = { "ALL" }
         for _, name in ipairs(professionOptions) do options[#options + 1] = name end
         for _, p in ipairs(options) do
@@ -609,6 +664,7 @@ function MarketSync.CreateProcessingPanel(parent)
             opt.text = p
             opt.func = function()
                 panel.selectedProfession = p
+                panel.selectedCrafts = {}
                 SetDropdownLabel(professionDropdown, p)
                 if panel.activeMode == "craft" and panel:IsShown() and RunActiveMode then
                     RunActiveMode()
@@ -617,50 +673,49 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -42)
+    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 232, -25)
     SetDropdownLabel(professionDropdown, "ALL")
 
     local craftDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    craftDesc:SetPoint("TOPLEFT", 8, -74)
+    craftDesc:SetPoint("TOPLEFT", 144, -53)
     craftDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
     craftDesc:SetJustifyH("LEFT")
     if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
-    craftDesc:SetText("|cff777777Compare known recipes with current AH prices.|r")
+    craftDesc:SetText("|cff777777Current realm AH prices|r")
 
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local btnSaved = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    panel.savedButton = btnSaved
     local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 
-    if isEmbedded then
-        btnRun:SetSize(88, 24)
-        btnExport:SetSize(66, 24)
-        btnTrack:SetSize(64, 24)
+    btnRun:SetSize(88, 24)
+    btnExport:SetSize(66, 24)
+    btnTrack:SetSize(64, 24)
+    btnSaved:SetSize(90, 24)
 
-        btnTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -8)
-        btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
-        btnRun:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
+    btnTrack:SetPoint("TOPRIGHT", leftTopBox, "TOPRIGHT", -8, -24)
+    btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
+    btnRun:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
+    btnSaved:SetPoint("RIGHT", btnRun, "LEFT", -4, 0)
 
-        statusSummary:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RESULTS_X + 4, 14)
-        statusSummary:SetPoint("RIGHT", panel, "BOTTOMRIGHT", -140, 14)
-        statusSummary:SetJustifyH("LEFT")
-    else
-        btnRun:SetSize(96, 24)
-        btnExport:SetSize(70, 24)
-        btnTrack:SetSize(68, 24)
-
-        btnTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -14, -34)
-        btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
-        btnRun:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
-
-        statusSummary:SetPoint("RIGHT", btnRun, "LEFT", -8, 0)
-        statusSummary:SetPoint("LEFT", modeButtons.craft, "RIGHT", 8, 0)
-        statusSummary:SetJustifyH("RIGHT")
-    end
+    statusSummary:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RESULTS_X + 4, 14)
+    statusSummary:SetPoint("RIGHT", panel, "BOTTOMRIGHT", -140, 14)
+    statusSummary:SetJustifyH("LEFT")
     if statusSummary.SetWordWrap then statusSummary:SetWordWrap(false) end
     btnExport:SetText("Export")
     btnTrack:SetText("Track")
+    btnSaved:SetText("Saved...")
+    btnSaved:SetScript("OnClick", function()
+        if leftBottomBox:IsShown() then
+            leftBottomBox:Hide()
+        else
+            if panel.RefreshCustomRows then panel.RefreshCustomRows() end
+            leftBottomBox:Show()
+        end
+    end)
     statusSummary:SetText("|cff888888Ready|r")
 
     if MarketSync.SetAccessibility then
@@ -689,7 +744,7 @@ function MarketSync.CreateProcessingPanel(parent)
     local typeWidth = 65 + math.floor(extraWidth * 0.08)
     local priceWidth = 62 + math.floor(extraWidth * 0.12)
     local statusWidth = ROW_WIDTH - itemWidth - typeWidth - (priceWidth * 4)
-    local colDefs = isEmbedded and {
+    local colDefs = {
         { name = "Item",     width = itemWidth,   sortKey = "itemSort"   },
         { name = "Type",     width = typeWidth,   sortKey = "typeSort"   },
         { name = "Net EV",   width = priceWidth,  sortKey = "valueSort"  },
@@ -697,14 +752,6 @@ function MarketSync.CreateProcessingPanel(parent)
         { name = "AH/ea",    width = priceWidth,  sortKey = "liveSort"   },
         { name = "Edge",     width = priceWidth,  sortKey = "deltaSort"  },
         { name = "Status",   width = statusWidth, sortKey = "statusSort" },
-    } or {
-        { name = "Item",     width = 224, sortKey = "itemSort"   },
-        { name = "Type",     width = 68,  sortKey = "typeSort"   },
-        { name = "Net EV",   width = 70,  sortKey = "valueSort"  },
-        { name = "Max/ea",   width = 70,  sortKey = "maxSort"    },
-        { name = "AH/ea",    width = 68,  sortKey = "liveSort"   },
-        { name = "Edge",     width = 68,  sortKey = "deltaSort"  },
-        { name = "Status",   width = 64,  sortKey = "statusSort" },
     }
 
     panel.headerButtons = {}
@@ -725,14 +772,12 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end
 
-    -- Reserve the footer and native AH tab strip. Eleven fixed rows extend
-    -- below the shorter classic host when a full result page is populated.
-    local numResultsPerPage = isEmbedded
-        and math.max(1, math.min(11, math.floor(((parentHeight > 0 and parentHeight or 410) - 92) / 36)))
-        or 8
     local rowHeight = isEmbedded and 36 or 37
-    local hdrY = isEmbedded and -32 or -70
-    local rowStartY = isEmbedded and -54 or -94
+    local usableHeight = parentHeight > 0 and parentHeight or (isEmbedded and 440 or 430)
+    local numResultsPerPage = math.max(1, math.min(10,
+        math.floor((usableHeight - (isEmbedded and 172 or 204)) / rowHeight)))
+    local hdrY = isEmbedded and -111 or -145
+    local rowStartY = isEmbedded and -135 or -169
 
     local colX = RESULTS_X - 2
     for i, col in ipairs(colDefs) do
@@ -1048,7 +1093,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
 
     panel.noResultsText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    panel.noResultsText:SetPoint("TOP", panel, "TOP", isEmbedded and 80 or 115, -200)
+    panel.noResultsText:SetPoint("TOP", panel, "TOP", 0, isEmbedded and -215 or -250)
     panel.noResultsText:SetText("|cff888888Run a mode to see results.|r")
     panel.noResultsText:Show()
 
@@ -1075,8 +1120,8 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.pageText:SetText("0 results")
 
     local btnResyncProf = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
-    btnResyncProf:SetSize(LEFT_W - 16, 20)
-    btnResyncProf:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 8, -160)
+    btnResyncProf:SetSize(116, 20)
+    btnResyncProf:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -49)
     btnResyncProf:SetText("Resync Profs")
     btnResyncProf:Hide()
     btnResyncProf:SetScript("OnEnter", function(self)
@@ -1112,7 +1157,13 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local customTitle = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     customTitle:SetPoint("TOPLEFT", 8, -8)
-    customTitle:SetText("|cffffd700Custom Selections|r")
+    customTitle:SetText("|cffffd700Saved Analyses|r")
+
+    local closeSaved = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
+    closeSaved:SetSize(20, 18)
+    closeSaved:SetPoint("TOPRIGHT", leftBottomBox, "TOPRIGHT", -6, -5)
+    closeSaved:SetText("X")
+    closeSaved:SetScript("OnClick", function() leftBottomBox:Hide() end)
 
     local customNameLabel = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     customNameLabel:SetPoint("TOPLEFT", 8, -28)
@@ -1143,7 +1194,14 @@ function MarketSync.CreateProcessingPanel(parent)
     customEmptyText:SetPoint("BOTTOMRIGHT", -8, 28)
     customEmptyText:SetJustifyH("CENTER")
     if customEmptyText.SetJustifyV then customEmptyText:SetJustifyV("MIDDLE") end
-    customEmptyText:SetText("|cff666666No presets saved.\n\nSave materials above for quick access.|r")
+    customEmptyText:SetText("|cff666666No analyses saved.\n\nName and save the current controls for quick access.|r")
+
+    local craftHelpText = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    craftHelpText:SetPoint("TOPLEFT", 8, -129)
+    craftHelpText:SetPoint("RIGHT", leftBottomBox, "RIGHT", -8, 0)
+    craftHelpText:SetJustifyH("LEFT")
+    craftHelpText:SetText("|cff999999Select craft rows, then Save.|r")
+    craftHelpText:Hide()
 
     local customRows = {}
     for i = 1, CUSTOM_ROWS do
@@ -1234,10 +1292,11 @@ function MarketSync.CreateProcessingPanel(parent)
         end
         SetDropdownLabel(processDropdown, panel.selectedProcess or "ALL")
         SetDropdownLabel(professionDropdown, panel.selectedProfession or "No professions")
+        SetDropdownLabel(characterDropdown, panel.selectedCharacterKey and Truncate(panel.selectedCharacterKey, 17) or "This character")
     end
 
-    local function RefreshProfessionOptions()
-        professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or professionOptions
+    RefreshProfessionOptions = function()
+        professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions(panel.selectedCharacterKey)) or professionOptions
         if (not panel.selectedProfession or panel.selectedProfession == "") and #professionOptions > 0 then
             panel.selectedProfession = professionOptions[1]
         end
@@ -1277,9 +1336,16 @@ function MarketSync.CreateProcessingPanel(parent)
         SetControlVisible(processDesc, isProcess)
 
         SetControlVisible(professionLabel, isCraft)
+        SetControlVisible(characterLabel, isCraft)
+        SetControlVisible(characterDropdown, isCraft)
         SetControlVisible(professionDropdown, isCraft)
         SetControlVisible(craftDesc, isCraft)
         SetControlVisible(btnResyncProf, isCraft)
+
+        customTitle:SetText(isCraft and "|cffffd700Craft Lists|r" or "|cffffd700Saved Analyses|r")
+        customNameLabel:SetText(isCraft and "List" or "Preset")
+        btnSaved:SetText(isCraft and "Craft Lists" or "Saved...")
+        SetControlVisible(craftHelpText, isCraft)
 
         RefreshResultHeaders()
     end
@@ -1841,7 +1907,14 @@ function MarketSync.CreateProcessingPanel(parent)
             return
         end
 
-        local results = MarketSync.FindProfitableCrafts and MarketSync.FindProfitableCrafts(profession, 0) or {}
+        local craftSet = nil
+        if panel.activeCraftSet then
+            craftSet = {}
+            for _, itemID in ipairs(panel.activeCraftSet.itemIDs or {}) do
+                craftSet[tonumber(itemID)] = true
+            end
+        end
+        local results = MarketSync.FindProfitableCrafts and MarketSync.FindProfitableCrafts(profession, 0, panel.selectedCharacterKey, craftSet) or {}
 
         panel.lastMode = "craft"
         panel.lastCraftResults = results
@@ -1855,11 +1928,15 @@ function MarketSync.CreateProcessingPanel(parent)
             end
         end
 
-        statusSummary:SetText(string.format("|cff00ff00%s|r: %d profitable / %d total", profession, profitableCount, #panel.displayRows))
+        local sourceLabel = panel.selectedCharacterKey and Truncate(panel.selectedCharacterKey, 14) or "This character"
+        local setLabel = panel.activeCraftSet and (" / " .. Truncate(panel.activeCraftSet.name, 14)) or ""
+        statusSummary:SetText(string.format("|cff00ff00%s / %s%s|r: %d profitable / %d total", sourceLabel, profession, setLabel, profitableCount, #panel.displayRows))
         if #panel.displayRows == 0 then
-            local knownCount = MarketSync.GetCraftRecipeCount and MarketSync.GetCraftRecipeCount(profession) or 0
+            local knownCount = MarketSync.GetCraftRecipeCount and MarketSync.GetCraftRecipeCount(profession, panel.selectedCharacterKey) or 0
             if knownCount == 0 then
                 SetNoResultsMessage("No known recipes cached yet. Open your profession window once to index recipes.")
+            elseif panel.activeCraftSet then
+                SetNoResultsMessage("No recipes in this list are known by the selected crafter and profession.")
             else
                 SetNoResultsMessage("No craft rows have complete pricing data yet.")
             end
@@ -1911,13 +1988,23 @@ function MarketSync.CreateProcessingPanel(parent)
         UpdateRunButtonText()
         panel:RefreshModeControls()
         RefreshDropdownLabels()
+        if panel.RefreshCustomRows then panel.RefreshCustomRows() end
 
         statusSummary:SetText("|cff00ff00Loaded preset:|r " .. Truncate(selection.name or "Preset", 22))
     end
 
     local RefreshCustomRows
     RefreshCustomRows = function()
-        local selections = MarketSync.ListProcessingCustomSelections and MarketSync.ListProcessingCustomSelections() or {}
+        local isCraft = panel.activeMode == "craft"
+        local selections
+        if isCraft then
+            selections = { { name = "All recipes", all = true } }
+            for _, craftSet in ipairs(MarketSync.ListProcessingCraftSets and MarketSync.ListProcessingCraftSets() or {}) do
+                selections[#selections + 1] = craftSet
+            end
+        else
+            selections = MarketSync.ListProcessingCustomSelections and MarketSync.ListProcessingCustomSelections() or {}
+        end
         local total = #selections
         local totalPages = math.max(1, math.ceil(total / CUSTOM_ROWS))
 
@@ -1931,14 +2018,33 @@ function MarketSync.CreateProcessingPanel(parent)
 
             if selection then
                 row.selection = selection
-                row.nameText:SetText(Truncate(selection.name or "Preset", 15))
+                local active = isCraft and (selection.all and not panel.activeCraftSet
+                    or panel.activeCraftSet and panel.activeCraftSet.name == selection.name)
+                row.applyBtn:SetText(isCraft and "Go" or "L")
+                row.nameText:SetText((active and "|cffffd700" or "")
+                    .. Truncate(selection.name or "Preset", 15) .. (active and "|r" or ""))
+                if isCraft and selection.all then row.deleteBtn:Hide() else row.deleteBtn:Show() end
 
                 row.applyBtn:SetScript("OnClick", function()
-                    ApplySelection(selection)
+                    if isCraft then
+                        panel.activeCraftSet = selection.all and nil or selection
+                        if RunActiveMode then RunActiveMode() end
+                        RefreshCustomRows()
+                    else
+                        ApplySelection(selection)
+                    end
                 end)
                 row.deleteBtn:SetScript("OnClick", function()
-                    if MarketSync.DeleteProcessingCustomSelection and MarketSync.DeleteProcessingCustomSelection(selection.id) then
-                        statusSummary:SetText("|cffffaa00Deleted preset:|r " .. Truncate(selection.name or "Preset", 18))
+                    local deleted = isCraft and MarketSync.DeleteProcessingCraftSet
+                        and MarketSync.DeleteProcessingCraftSet(selection.name)
+                        or not isCraft and MarketSync.DeleteProcessingCustomSelection
+                        and MarketSync.DeleteProcessingCustomSelection(selection.id)
+                    if deleted then
+                        if isCraft and panel.activeCraftSet and panel.activeCraftSet.name == selection.name then
+                            panel.activeCraftSet = nil
+                            if RunActiveMode then RunActiveMode() end
+                        end
+                        statusSummary:SetText((isCraft and "|cffffaa00Deleted list:|r " or "|cffffaa00Deleted preset:|r ") .. Truncate(selection.name or "Preset", 18))
                         RefreshCustomRows()
                     else
                         statusSummary:SetText("|cffff4444Failed to delete preset.|r")
@@ -1948,7 +2054,9 @@ function MarketSync.CreateProcessingPanel(parent)
                 row:SetScript("OnEnter", function(self)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     GameTooltip:SetText(selection.name or "Preset", 1, 0.82, 0)
-                    GameTooltip:AddLine(BuildSelectionSummary(selection), 0.85, 0.85, 0.85, true)
+                    GameTooltip:AddLine(isCraft and (selection.all and "Show all known recipes"
+                        or (tostring(#(selection.itemIDs or {})) .. " selected item(s)"))
+                        or BuildSelectionSummary(selection), 0.85, 0.85, 0.85, true)
                     GameTooltip:Show()
                 end)
                 row:SetScript("OnLeave", function()
@@ -1957,14 +2065,14 @@ function MarketSync.CreateProcessingPanel(parent)
 
                 row.applyBtn:SetScript("OnEnter", function(self)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetText("Load preset", 1, 0.82, 0)
+                    GameTooltip:SetText(isCraft and "Run craft list" or "Load preset", 1, 0.82, 0)
                     GameTooltip:Show()
                 end)
                 row.applyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
                 row.deleteBtn:SetScript("OnEnter", function(self)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetText("Delete preset", 1, 0.25, 0.25)
+                    GameTooltip:SetText(isCraft and "Delete craft list" or "Delete preset", 1, 0.25, 0.25)
                     GameTooltip:Show()
                 end)
                 row.deleteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2002,6 +2110,7 @@ function MarketSync.CreateProcessingPanel(parent)
             if hasCNext then cnnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else cnnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
         end
     end
+    panel.RefreshCustomRows = RefreshCustomRows
 
     targetInputBox:SetScript("OnEnterPressed", function(self)
         self:ClearFocus()
@@ -2250,6 +2359,9 @@ function MarketSync.CreateProcessingPanel(parent)
         local ok, msg = MarketSync.ResyncProfessionCache()
 
         RefreshProfessionOptions()
+        if characterDropdown and characterDropdown._initFunc then
+            UIDropDownMenu_Initialize(characterDropdown._menu, characterDropdown._initFunc)
+        end
         RefreshDropdownLabels()
         if ok then
             statusSummary:SetText("|cff00ff00" .. tostring(msg or "Profession resync complete.") .. "|r")
@@ -2261,14 +2373,43 @@ function MarketSync.CreateProcessingPanel(parent)
     end)
 
     btnSaveCustom:SetScript("OnClick", function()
-        if not MarketSync.UpsertProcessingCustomSelection then
+        local isCraft = panel.activeMode == "craft"
+        if isCraft and not MarketSync.UpsertProcessingCraftSet then
+            statusSummary:SetText("|cffff4444Craft lists unavailable.|r")
+            return
+        end
+        if not isCraft and not MarketSync.UpsertProcessingCustomSelection then
             statusSummary:SetText("|cffff4444Custom selections unavailable.|r")
             return
         end
 
         local name = TrimText(customNameBox:GetText())
         if name == "" then
-            statusSummary:SetText("|cffff4444Preset name is required.|r")
+            statusSummary:SetText(isCraft and "|cffff4444List name is required.|r" or "|cffff4444Preset name is required.|r")
+            return
+        end
+
+        if isCraft then
+            local itemIDs = {}
+            local seen = {}
+            for _, craft in ipairs(panel.lastCraftResults or {}) do
+                local outputName = craft.outputName or craft.recipeName or ("Item " .. tostring(craft.outputItemID or "?"))
+                local itemID = tonumber(craft.outputItemID)
+                if itemID and panel.selectedCrafts[outputName] and not seen[itemID] then
+                    itemIDs[#itemIDs + 1] = itemID
+                    seen[itemID] = true
+                end
+            end
+            local saved, err = MarketSync.UpsertProcessingCraftSet(name, itemIDs)
+            if not saved then
+                statusSummary:SetText("|cffff4444Save failed:|r " .. tostring(err or "unknown error"))
+                return
+            end
+            panel.activeCraftSet = saved
+            panel.customPage = 0
+            customNameBox:SetText("")
+            RefreshCustomRows()
+            if RunActiveMode then RunActiveMode() end
             return
         end
 
@@ -2359,6 +2500,10 @@ function MarketSync.CreateProcessingPanel(parent)
 
     panel:SetScript("OnShow", function()
         RefreshProfessionOptions()
+
+        if characterDropdown and characterDropdown._initFunc then
+            UIDropDownMenu_Initialize(characterDropdown._menu, characterDropdown._initFunc)
+        end
 
         if targetDropdown and targetDropdown._initFunc then
             UIDropDownMenu_Initialize(targetDropdown._menu, targetDropdown._initFunc)

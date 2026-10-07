@@ -1701,6 +1701,7 @@ test('AuctionHouse buy frame button hook and sidecar suppression across tabs', (
         end,
         IsShown = function(self) return self.shown end,
         SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        ClearAllPoints = function(self) self.points = {} end,
         SetAllPoints = function(self) end,
         SetSize = function(self, w, h) self.width = w self.height = h end,
         SetWidth = function(self, w) self.width = w end,
@@ -1860,6 +1861,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         Hide = function(self) self.shown = false end,
         IsShown = function(self) return self.shown end,
         SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
+        ClearAllPoints = function(self) self.points = {} end,
         SetAllPoints = function(self) end,
         SetSize = function(self, w, h) self.width = w self.height = h end,
         SetWidth = function(self, w) self.width = w end,
@@ -1869,6 +1871,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         SetBackdropBorderColor = function() end,
         SetFrameStrata = function() end,
         SetFrameLevel = function() end,
+        GetFrameLevel = function() return 1 end,
         SetMovable = function() end,
         RegisterForDrag = function() end,
         GetWidth = function(self) return self.width or 0 end,
@@ -1896,7 +1899,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         Enable = function() end,
         Disable = function() end,
         SetEnabled = function(self, en) if en then self:Enable() else self:Disable() end end,
-        CreateTexture = function() return { SetColorTexture = function() end, SetTexture = function() end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetPoint = function() end, SetAllPoints = function() end, SetBlendMode = function() end, SetVertexColor = function() end, SetTexCoord = function() end, Show = function() end, Hide = function() end } end,
+        CreateTexture = function() return { SetColorTexture = function() end, SetTexture = function() end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetPoint = function() end, ClearAllPoints = function() end, SetAllPoints = function() end, SetBlendMode = function() end, SetVertexColor = function() end, SetTexCoord = function() end, Show = function() end, Hide = function() end } end,
         CreateLine = function() return { SetThickness = function() end, SetColorTexture = function() end, SetStartPoint = function() end, SetEndPoint = function() end, Show = function() end, Hide = function() end } end,
         CreateFontString = function() return { SetPoint = function() end, ClearAllPoints = function() end, SetText = function() end, GetText = function() return "" end, SetSize = function() end, SetWidth = function() end, SetHeight = function() end, SetJustifyH = function() end, SetJustifyV = function() end, SetTextColor = function() end, SetFontObject = function() end, Show = function() end, Hide = function() end } end,
         EnableMouseWheel = function() end,
@@ -1932,24 +1935,48 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   const check = `
     -- Standalone MainFrame processing panel
     local procMain = MarketSync.CreateProcessingPanel(MarketSync.MainFrame)
-    assert(procMain.resultRows[1].width == 632, "MainFrame processing row width should be 632, got: " .. tostring(procMain.resultRows[1].width))
-    assert(#procMain.resultRows == 8, "MainFrame processing rows should be 8, got: " .. tostring(#procMain.resultRows))
+    assert(procMain.resultRows[1].width == 796, "MainFrame processing table should use the full content width")
+    assert(#procMain.resultRows == 6, "MainFrame processing rows should fit below the control strip")
+    assert(procMain.leftBottomBox:IsShown() == false and procMain.savedButton ~= nil,
+      "Saved analyses should be a closed popout, not a permanent sidebar")
+    assert(procMain.targetInputBox.scripts.OnReceiveDrag,
+      "Portable Target Material input should accept item drops")
+    assert(procMain.resultRows[1].points[1][5] == -169,
+      "Portable result rows should start below the compact control strip")
+    procMain.savedButton.scripts.OnClick()
+    assert(procMain.leftBottomBox:IsShown(), "Saved button should open the popout")
+    procMain.savedButton.scripts.OnClick()
+    assert(not procMain.leftBottomBox:IsShown(), "Saved button should close the popout")
 
     -- Embedded AH processing panel
     local ahProcContainer = CreateFrame("Frame", "AHProcContainer")
     ahProcContainer:SetSize(756, 447)
     local procAH = MarketSync.CreateProcessingPanel(ahProcContainer)
-    assert(procAH.resultRows[1].width == 550, "Embedded AH processing row width should be 550, got: " .. tostring(procAH.resultRows[1].width))
-    assert(#procAH.resultRows == 9, "Embedded AH processing rows should reserve footer space, got: " .. tostring(#procAH.resultRows))
-    -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
-    assert(198 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
+    assert(procAH.resultRows[1].width == 722, "Embedded AH processing table should use the full content width")
+    assert(#procAH.resultRows == 7, "Embedded AH processing rows should reserve control and footer space")
+    assert(16 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
+
+    -- A bag item dropped on Target Material resolves by ID and searches at once.
+    local droppedSearchID, clearedCursor = nil, false
+    GetCursorInfo = function() return "item", 10940, "|Hitem:10940:0|h[Strange Dust]|h" end
+    ClearCursor = function() clearedCursor = true end
+    MarketSync.GetItemInfo = function(id)
+      if id == 10940 then return "Strange Dust", "|Hitem:10940:0|h[Strange Dust]|h" end
+    end
+    MarketSync.GetAuctionPrice = function() return 100 end
+    MarketSync.FindArbitrageByTarget = function(id) droppedSearchID = id return {} end
+    assert(procAH.targetInputBox.scripts.OnReceiveDrag, "Target input needs a drop handler")
+    procAH.targetInputBox.scripts.OnReceiveDrag()
+    assert(procAH.selectedTargetID == 10940 and droppedSearchID == 10940 and clearedCursor,
+      "Dropping an item should select it, run Target Material, and clear its cursor")
+    assert(procAH.targetInputBox:GetText():find("10940", 1, true), "Target input should retain the exact item ID")
 
     -- Classic AH is wider but shorter: use its width and reduce the visible page.
     local classicHost = CreateFrame("Frame", "ClassicAHProcessingHost")
     classicHost:SetSize(900, 400)
     local classicProc = MarketSync.CreateProcessingPanel(classicHost)
-    assert(classicProc.resultRows[1].width == 694, "Classic AH processing should fill its available width")
-    assert(#classicProc.resultRows == 8, "Classic AH processing rows must stay above the footer")
+    assert(classicProc.resultRows[1].width == 866, "Classic AH processing should fill its available width")
+    assert(#classicProc.resultRows == 6, "Classic AH processing rows must stay above the footer")
 
     -- Uncached reagent IDs request data, then the client-localized item name
     -- replaces the placeholder in the existing craft result and tooltip.
@@ -2094,6 +2121,28 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(analyticsMain.isEmbedded == false, "MainFrame analytics isEmbedded should be false")
     assert(analyticsMain.graphCard.height == 155, "MainFrame analytics graph height should be 155, got: " .. tostring(analyticsMain.graphCard.height))
     assert(analyticsMain.banner.height == 44, "MainFrame analytics banner height should be 44, got: " .. tostring(analyticsMain.banner.height))
+    assert(analyticsMain.sidebarCollapsed == false and analyticsMain.listsToggle,
+      "Portable Analytics should expose a collapsible item-list sidebar")
+    analyticsMain.listsToggle.scripts.OnClick()
+    assert(analyticsMain.sidebarCollapsed and analyticsMain.leftInset.shown == false,
+      "Collapsing should hide Recent Scans and Favorites")
+    assert(analyticsMain.rightInset.points[1][2] == analyticsMain,
+      "Collapsed details must anchor to the whole panel")
+    analyticsMain.listsToggle.scripts.OnClick()
+    assert(not analyticsMain.sidebarCollapsed and analyticsMain.leftInset.shown,
+      "List handle should reopen the sidebar")
+    analyticsMain:SetGraphZoom(12)
+    assert(analyticsMain.graphPointLimit == 12 and #analyticsMain.zoomButtons == 4,
+      "Portable Analytics should offer four chart zoom levels")
+    MarketSync.ScanDayToDate = function(day) return tostring(day) end
+    local sampleHistory = {}
+    for i = 1, 30 do sampleHistory[i] = { day = i, price = 100 + i } end
+    analyticsMain.currentHistory = sampleHistory
+    analyticsMain.graph:Plot(sampleHistory, analyticsMain.graphPointLimit)
+    assert(analyticsMain.graph.dotCursor == 12, "Chart zoom should limit plotted observations")
+    analyticsMain.graph.scripts.OnMouseWheel(analyticsMain.graph, -1)
+    assert(analyticsMain.graphPointLimit == 24 and analyticsMain.graph.dotCursor == 24,
+      "Mouse wheel should zoom out to more observations")
 
     -- Embedded AH analytics panel
     local ahAnalyticsContainer = CreateFrame("Frame", "AHAnalyticsContainer")
@@ -2102,6 +2151,9 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(analyticsAH.isEmbedded == true, "AH analytics isEmbedded should be true")
     assert(analyticsAH.graphCard.height == 230, "AH analytics graph height should be 230, got: " .. tostring(analyticsAH.graphCard.height))
     assert(analyticsAH.banner.height == 46, "AH analytics banner height should be 46, got: " .. tostring(analyticsAH.banner.height))
+    analyticsAH:SetSidebarCollapsed(true)
+    assert(analyticsAH.sidebarCollapsed and analyticsAH.leftInset.shown == false,
+      "Auction House Analytics must support the same collapse behavior")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Responsive layout check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

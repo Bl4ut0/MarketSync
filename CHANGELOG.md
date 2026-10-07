@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-07
+
+### Added
+- Added standalone legacy Auction House scanning, grouped item search, guarded purchasing, and the MarketSync sidecar for Classic Era, Season of Discovery, Anniversary, and TBC clients. Legacy builds remain test artifacts pending in-game validation; the CurseForge upload still targets Forever.
+- Added automatic legacy window styling on older clients, with a selectable window theme.
+- Added cross-character cached profession selection, saved craft analyses, client-specific target materials, and item drag-and-drop in Processing.
+- Added a collapsible Analytics item-list sidebar, 12/24/48/96-observation chart zoom, and the visible price range metric.
+
+### Changed
+- Simplified watched-list scanning so it uses the checked lists; a separate full-AH scan remains available.
+- Preserved manual undercut recommendations on legacy clients while Forever continues to use market-price posting.
+- Reworked Processing controls and results to use the available width in both the portable and Auction House windows.
+
+### Fixed
+- Fixed a cyclic Trade Skill reagent-label anchor and Processing results overflowing the legacy Auction House window.
+- Resolved uncached crafting material IDs to client-localized names when item data loads.
+- Improved legacy search layout, buy confirmation feedback, and scanner button spacing.
+
 ## [0.9.4] - 2026-10-05
 
 ### Changed

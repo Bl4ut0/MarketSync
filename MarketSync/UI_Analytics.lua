@@ -232,7 +232,7 @@ local function CreateGraph(parent)
         lbl:Show()
     end
 
-    function graph:Plot(history)
+    function graph:Plot(history, pointLimit)
         self:Clear()
         local curW = self:GetWidth()
         local curH = self:GetHeight()
@@ -244,7 +244,8 @@ local function CreateGraph(parent)
             return
         end
 
-        if #history == 1 then
+        local visibleCount = math.min(#history, pointLimit or #history)
+        if visibleCount == 1 then
             local d = history[1]
             local pw = self.plotWidth - 55
             local ph = self.plotHeight - 40
@@ -260,7 +261,7 @@ local function CreateGraph(parent)
         end
 
         local plotData = {}
-        local maxPoints = math.min(#history, 48)
+        local maxPoints = visibleCount
         for i = maxPoints, 1, -1 do
             table.insert(plotData, history[i])
         end
@@ -358,7 +359,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     -- ================================================================
     -- Mode Switcher: [ Recent Scans ] [ Shopping List selector ]
     local recentBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
-    recentBtn:SetSize(110, 22)
+    recentBtn:SetSize(96, 22)
     recentBtn:SetPoint("TOPLEFT", leftInset, "TOPLEFT", 8, -8)
     recentBtn:SetText("Recent Scans")
     recentBtn:SetScript("OnEnter", function(self)
@@ -370,8 +371,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
     recentBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local favBtn = CreateFrame("Button", nil, leftInset, "UIPanelButtonTemplate")
-    favBtn:SetSize(110, 22)
-    favBtn:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -8, -8)
+    favBtn:SetSize(96, 22)
+    favBtn:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -32, -8)
     favBtn:SetText("Favorites  |cFFFFD100v|r")
     favBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -380,6 +381,51 @@ function MarketSync.CreateAnalyticsPanel(parent)
         GameTooltip:Show()
     end)
     favBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Keep a narrow, persistent handle when the list is hidden so the chart
+    -- can reclaim the rest of the sidebar's width.
+    local listsToggle = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    listsToggle:SetSize(22, 22)
+    listsToggle:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -7, -8)
+    listsToggle:SetText("<")
+    panel.listsToggle = listsToggle
+    panel.sidebarCollapsed = false
+    function panel:SetSidebarCollapsed(collapsed)
+        self.sidebarCollapsed = not not collapsed
+        rightInset:ClearAllPoints()
+        if self.sidebarCollapsed then
+            leftInset:Hide()
+            rightInset:SetPoint("TOPLEFT", self, "TOPLEFT", LEFT_X + 28, TOP_Y)
+            listsToggle:ClearAllPoints()
+            listsToggle:SetPoint("TOPLEFT", self, "TOPLEFT", LEFT_X + 3, TOP_Y - 8)
+            listsToggle:SetText(">")
+        else
+            leftInset:Show()
+            rightInset:SetPoint("TOPLEFT", leftInset, "TOPRIGHT", 6, 0)
+            listsToggle:ClearAllPoints()
+            listsToggle:SetPoint("TOPRIGHT", leftInset, "TOPRIGHT", -7, -8)
+            listsToggle:SetText("<")
+        end
+        rightInset:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", RIGHT_X, BOTTOM_Y)
+        if self.graph and self.currentHistory then
+            self.graph:Plot(self.currentHistory, self.graphPointLimit)
+        end
+    end
+    listsToggle:SetScript("OnClick", function() panel:SetSidebarCollapsed(not panel.sidebarCollapsed) end)
+    listsToggle:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(panel.sidebarCollapsed and "Show item lists" or "Hide item lists", 1, 1, 1)
+        GameTooltip:AddLine("Expand the chart by hiding Recent Scans and Favorites.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    listsToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(listsToggle, {
+            name = function() return panel.sidebarCollapsed and "Show item lists" or "Hide item lists" end,
+            context = "Button",
+            description = "Toggle Recent Scans and Favorites sidebar",
+        })
+    end
 
     -- Quick Search & Drop EditBox
     local searchBox = CreateFrame("EditBox", nil, leftInset, "InputBoxTemplate")
@@ -970,13 +1016,60 @@ function MarketSync.CreateAnalyticsPanel(parent)
     graphHeader:SetText("|cFFFFD100Historical Price Trend|r")
 
     local graphLegend = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
-    graphLegend:SetPoint("TOPRIGHT", -14, -8)
+    graphLegend:SetPoint("TOPLEFT", 14, -25)
     graphLegend:SetText("|cFF33FF33— Daily Price|r    |cFF33B2FF● Granular 30-Min Snapshot|r")
 
+    local zoomModes = {
+        { label = "12", limit = 12 },
+        { label = "24", limit = 24 },
+        { label = "48", limit = 48 },
+        { label = "96", limit = 96 },
+    }
+    local zoomButtons = {}
+    panel.graphPointLimit = 48
+    panel.zoomButtons = zoomButtons
+    function panel:SetGraphZoom(limit)
+        self.graphPointLimit = limit
+        for _, button in ipairs(zoomButtons) do
+            button:SetText(button.zoomLimit == limit and ("|cffffd700" .. button.zoomLabel .. "|r") or button.zoomLabel)
+        end
+        if self.currentHistory then self.graph:Plot(self.currentHistory, limit) end
+        if self.UpdateVisibleRange then self:UpdateVisibleRange() end
+    end
+    for i, mode in ipairs(zoomModes) do
+        local button = CreateFrame("Button", nil, graphCard, "UIPanelButtonTemplate")
+        button:SetSize(35, 20)
+        button:SetPoint("TOPRIGHT", graphCard, "TOPRIGHT", -14 - ((#zoomModes - i) * 37), -4)
+        button.zoomLabel = mode.label
+        button.zoomLimit = mode.limit
+        button:SetText(mode.label)
+        button:SetScript("OnClick", function() panel:SetGraphZoom(mode.limit) end)
+        button:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Chart zoom: up to " .. mode.limit .. " observations", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        zoomButtons[i] = button
+    end
+
     local graph = CreateGraph(graphCard)
-    graph:SetPoint("TOPLEFT", 10, -26)
+    graph:SetPoint("TOPLEFT", 10, -42)
     graph:SetPoint("BOTTOMRIGHT", -10, 8)
     panel.graph = graph
+    graph:EnableMouseWheel(true)
+    graph:SetScript("OnMouseWheel", function(_, delta)
+        local currentIndex = 3
+        for i, mode in ipairs(zoomModes) do
+            if mode.limit == panel.graphPointLimit then currentIndex = i; break end
+        end
+        local nextIndex = math.max(1, math.min(#zoomModes, currentIndex - (delta > 0 and 1 or -1)))
+        panel:SetGraphZoom(zoomModes[nextIndex].limit)
+    end)
+    graph:SetScript("OnSizeChanged", function(self)
+        if panel.currentHistory then self:Plot(panel.currentHistory, panel.graphPointLimit) end
+    end)
+    panel:SetGraphZoom(panel.graphPointLimit)
 
     -- Horizontal separator line between graph and metrics
     local sep2 = rightInset:CreateTexture(nil, "ARTWORK")
@@ -1061,6 +1154,26 @@ function MarketSync.CreateAnalyticsPanel(parent)
     panel.mBestTime = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff1, "Best Buy Time")
     panel.mVolatility = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff2, "Price Volatility")
     panel.mDataPoints = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff3, "Snapshots")
+    panel.mVisibleRange = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff4, "Visible Range")
+
+    function panel:UpdateVisibleRange()
+        local history = self.currentHistory or {}
+        local count = math.min(#history, self.graphPointLimit or #history)
+        if count == 0 then
+            self.mVisibleRange:SetText("|cff888888No history|r")
+            return
+        end
+        local low, high = math.huge, 0
+        for i = 1, count do
+            local price = tonumber(history[i].price)
+            if price then
+                low = math.min(low, price)
+                high = math.max(high, price)
+            end
+        end
+        self.mVisibleRange:SetText(low == math.huge and "|cff888888No prices|r"
+            or (FormatMoneyPlain(low) .. " - " .. FormatMoneyPlain(high)))
+    end
 
     local debugNote = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
     debugNote:SetPoint("BOTTOMLEFT", metricsCard, "BOTTOM", 15, isEmbedded and 8 or 6)
@@ -1167,7 +1280,9 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
         -- Retrieve History Data
         local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key) or {}
-        self.graph:Plot(history)
+        self.currentHistory = history
+        self.graph:Plot(history, self.graphPointLimit)
+        self:UpdateVisibleRange()
 
         -- Evaluate Data Freshness & Source Distribution
         local latestAge = 0

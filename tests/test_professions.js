@@ -579,4 +579,116 @@ test('classic crafting info never creates a reagent-label anchor cycle', () => {
   `);
 });
 
+test('target materials follow client build, not account expansion entitlement', () => {
+  const L = createLuaState(`
+    GetBuildInfo = function() return "1.60.1", "", "", 160001 end
+    GetExpansionLevel = function() return 10 end
+  `);
+  execLua(L, `
+    local targets = MarketSync.GetProcessingTargets()
+    local foundVanilla, foundTBC = false, false
+    for _, target in ipairs(targets) do
+      if target.itemID == 10940 then foundVanilla = true end
+      if target.itemID == 22445 then foundTBC = true end
+    end
+    assert(foundVanilla, "Expected Classic enchanting material")
+    assert(not foundTBC, "TBC enchanting material must not appear on a 1.x client")
+    assert(not MarketSync.IsProcessingTypeSupported("PROSPECT"), "Prospecting must not appear on a 1.x client")
+  `);
+});
+
+test('TBC target list rejects later-version outcomes from bundled prospect data', () => {
+  const L = createLuaState(`
+    GetBuildInfo = function() return "2.5.5", "", "", 20505 end
+    GetExpansionLevel = function() return 10 end
+    Auctionator = { Prospect = { PROSPECT_TABLE = {
+      [2770] = { [999999] = { 1.0 } }
+    } } }
+  `);
+  execLua(L, `
+    local targets = MarketSync.GetProcessingTargets()
+    local foundGem, foundForeign = false, false
+    for _, target in ipairs(targets) do
+      if target.itemID == 818 then foundGem = true end
+      if target.itemID == 999999 then foundForeign = true end
+    end
+    assert(foundGem, "TBC prospecting materials should be listed")
+    assert(not foundForeign, "Cross-version Auctionator output must not be listed on TBC")
+  `);
+});
+
+test('craft profit can use another cached character on the same realm', () => {
+  const L = createLuaState('');
+  execLua(L, `
+    MarketSyncDB.KnownCraftingRecipesByCharacter = {
+      ["Alt-Faerlina"] = {
+        __cacheVersion = 2,
+        Alchemy = { cacheVersion = 2, recipes = {
+          { name = "Minor Healing Potion", outputItemID = 118, outputQty = 1,
+            mats = { { itemID = 2447, qty = 1 }, { itemID = 765, qty = 1 } } }
+        } }
+      }
+    }
+    local characters = MarketSync.GetProcessingCraftingCharacters()
+    assert(#characters == 2 and characters[1].isCurrent, "Expected current and cached alt")
+    local professions = MarketSync.GetProcessingProfessions("Alt-Faerlina")
+    assert(#professions == 1 and professions[1] == "Alchemy", "Expected alt's cached profession")
+    local crafts = MarketSync.FindProfitableCrafts("Alchemy", 0, "Alt-Faerlina")
+    assert(#crafts == 1 and crafts[1].outputItemID == 118, "Expected alt's known recipe")
+    assert(crafts[1].craftingCharacter == "Alt-Faerlina", "Expected source character label")
+    assert(#MarketSync.FindProfitableCrafts("Alchemy", 0) == 0, "Alt recipes must not be treated as current character's")
+  `);
+});
+
+test('saved craft sets filter profitability without changing the recipe cache', () => {
+  const L = createLuaState('');
+  execLua(L, `
+    MarketSyncDB.KnownCraftingRecipesByCharacter = {
+      ["Alt-Faerlina"] = {
+        __cacheVersion = 2,
+        Alchemy = { cacheVersion = 2, recipes = {
+          { name = "Minor Healing Potion", outputItemID = 118, outputQty = 1,
+            mats = { { itemID = 2447, qty = 1 } } },
+          { name = "Linen Bandage", outputItemID = 1251, outputQty = 1,
+            mats = { { itemID = 2592, qty = 1 } } }
+        } }
+      }
+    }
+    local saved = MarketSync.UpsertProcessingCraftSet("My crafts", { 1251, 1251, 0 })
+    assert(saved and #saved.itemIDs == 1 and saved.itemIDs[1] == 1251, "Expected a clean, deduplicated list")
+    local lists = MarketSync.ListProcessingCraftSets()
+    assert(#lists == 1 and lists[1].name == "My crafts", "Expected persisted craft list")
+    local filtered = MarketSync.FindProfitableCrafts("Alchemy", 0, "Alt-Faerlina", { [1251] = true })
+    assert(#filtered == 1 and filtered[1].outputItemID == 1251, "Expected only selected output")
+    assert(MarketSync.GetCraftRecipeCount("Alchemy", "Alt-Faerlina") == 2, "Filtering must not alter cached recipes")
+    assert(MarketSync.DeleteProcessingCraftSet("My crafts"), "Expected list deletion")
+  `);
+});
+
+test('cross-character choices exclude incompatible game versions and factions', () => {
+  const L = createLuaState(`
+    GetBuildInfo = function() return "1.60.1", "", "", 160001 end
+    UnitFactionGroup = function() return "Alliance" end
+  `);
+  execLua(L, `
+    local function recipeStore(expansion, faction)
+      return { __cacheVersion = 2, __clientExpansion = expansion, __faction = faction,
+        Alchemy = { cacheVersion = 2, recipes = {
+          { name = "Test craft", outputItemID = 118, mats = { { itemID = 2447, qty = 1 } } }
+        } } }
+    end
+    MarketSyncDB.KnownCraftingRecipesByCharacter = {
+      ["Same-Faerlina"] = recipeStore(0, "Alliance"),
+      ["OtherFaction-Faerlina"] = recipeStore(0, "Horde"),
+      ["OtherVersion-Faerlina"] = recipeStore(1, "Alliance"),
+    }
+    local choices = MarketSync.GetProcessingCraftingCharacters()
+    assert(#choices == 2 and choices[2].key == "Same-Faerlina", "Only compatible alt should be selectable")
+    assert(#MarketSync.FindProfitableCrafts("Alchemy", 0, "OtherFaction-Faerlina") == 0,
+      "Incompatible faction recipes should not be priced against this character's AH")
+    assert(MarketSyncDB.KnownCraftingRecipesByCharacter["OtherVersion-Faerlina"].__clientExpansion == 1,
+      "Incompatible alt cache must not be overwritten")
+  `);
+});
+
 console.log(`\nAll ${passed} profession tests passed successfully!`);
