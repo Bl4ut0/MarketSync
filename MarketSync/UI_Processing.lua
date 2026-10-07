@@ -244,16 +244,24 @@ local function ColorMuted(text)
     return "|cffb0b0b0" .. tostring(text or "") .. "|r"
 end
 
-local function ResolveItemVisual(itemID, fallbackName)
+local function ResolveItemVisual(itemID, fallbackName, onMissingName)
     local id = tonumber(itemID)
     local name, link, _, _, _, _, _, _, _, icon
     if id then
         name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(id)
+        if not name and C_Item and C_Item.GetItemNameByID then
+            local ok, localizedName = pcall(C_Item.GetItemNameByID, id)
+            if ok and type(localizedName) == "string" and localizedName ~= "" then
+                name = localizedName
+            end
+        end
         if not icon then
             icon = SafeGetItemIcon(id)
         end
+        if not name and onMissingName then onMissingName(id) end
     end
-    name = name or fallbackName or ("Item " .. tostring(id or "?"))
+    name = name or fallbackName or (onMissingName and id and ("Loading item #" .. id .. "..."))
+        or ("Item " .. tostring(id or "?"))
     if not link and id then
         local hex = (rarity and RARITY_HEX and RARITY_HEX[rarity]) or "ffffffff"
         link = "|c" .. hex .. "|Hitem:" .. id .. ":0:0:0:0:0:0:0:0:0:0:0:0|h[" .. name .. "]|h|r"
@@ -314,6 +322,17 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.lastMode = nil
     panel.lastArbitrageResults = {}
     panel.lastCraftResults = {}
+    local pendingItemNames = {}
+    local function RequestItemName(itemID)
+        local id = tonumber(itemID)
+        if not id or pendingItemNames[id] then return end
+        pendingItemNames[id] = true
+        -- GetItemInfo above starts a cache request on older clients. Modern
+        -- clients also expose an explicit item-data request for uncached IDs.
+        if C_Item and C_Item.RequestLoadItemDataByID then
+            pcall(C_Item.RequestLoadItemDataByID, id)
+        end
+    end
     panel.selectedCrafts = {}
     panel.selectedArbitrage = {}
     panel.displayRows = {}
@@ -798,6 +817,7 @@ function MarketSync.CreateProcessingPanel(parent)
         local iconButton = CreateFrame("Button", nil, row)
         iconButton:SetSize(32, 32)
         iconButton:SetPoint("TOPLEFT", 0, -3)
+        row.iconButton = iconButton
         local iconTex = iconButton:CreateTexture(nil, "BORDER")
         iconTex:SetAllPoints()
         row.iconTex = iconTex
@@ -916,6 +936,7 @@ function MarketSync.CreateProcessingPanel(parent)
             end
             GameTooltip:Show()
         end
+        row.ShowTooltip = ShowRowTooltip
 
         iconButton:SetScript("OnEnter", function(self)
             row:LockHighlight()
@@ -1440,7 +1461,7 @@ function MarketSync.CreateProcessingPanel(parent)
         local marginMult = 1.0
 
         for _, r in ipairs(arbitrageResults or {}) do
-            local itemName, itemLink, icon = ResolveItemVisual(r.inputItemID, r.inputName)
+            local itemName, itemLink, icon = ResolveItemVisual(r.inputItemID, r.inputName, RequestItemName)
             local livePrice = tonumber(r.livePrice) or 0
             local maxBuy = tonumber(r.maxBuyPerUnit) or 0
             local evPerUnit = tonumber(r.evPerUnit)
@@ -1578,7 +1599,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
         for _, c in ipairs(craftResults or {}) do
             local outputName = c.outputName or c.recipeName or ("Item " .. tostring(c.outputItemID or "?"))
-            local itemName, itemLink, icon = ResolveItemVisual(c.outputItemID, outputName)
+            local itemName, itemLink, icon = ResolveItemVisual(c.outputItemID, outputName, RequestItemName)
             local revenue = tonumber(c.revenue) or 0
             local craftCost = tonumber(c.craftCost) or 0
             local margin = tonumber(c.margin) or 0
@@ -1621,7 +1642,7 @@ function MarketSync.CreateProcessingPanel(parent)
             local outputQtyMin = tonumber(c.outputQtyMin) or outputQty
             local outputQtyMax = tonumber(c.outputQtyMax) or outputQty
             local ahCutPercent = tonumber(c.ahCutPercent) or 5
-            detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Recipe:"), ColorInfo(outputName))
+            detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Recipe:"), ColorInfo(itemName))
             detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profession:"), ColorInfo(c.profession or "Unknown"))
             if outputQtyMin ~= outputQtyMax then
                 detailLines[#detailLines + 1] = string.format("%s |cffffffff%g-%g|r %s",
@@ -1670,7 +1691,7 @@ function MarketSync.CreateProcessingPanel(parent)
                     detailLines[#detailLines + 1] = ColorMuted("...")
                     break
                 end
-                local matName = ResolveItemVisual(mat.itemID)
+                local matName = ResolveItemVisual(mat.itemID, nil, RequestItemName)
                 local qty = tonumber(mat.qty) or 1
                 local matPriceText = (mat.price and mat.price > 0) and MoneyText(mat.price) or "No price"
                 local priceColor = mat.stale and ColorWarn(matPriceText) or "|cffffffff" .. matPriceText .. "|r"
@@ -1714,6 +1735,37 @@ function MarketSync.CreateProcessingPanel(parent)
 
         return rows
     end
+
+    if panel.RegisterEvent then
+        panel:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+        panel:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    end
+    panel:SetScript("OnEvent", function(_, event, itemID, success)
+        local id = tonumber(itemID)
+        if not id or not pendingItemNames[id] then return end
+        pendingItemNames[id] = nil
+        if success == false or panel.lastMode ~= panel.activeMode then return end
+        -- Rebuild presentation only: auction prices and craft calculations
+        -- stay intact while freshly loaded, client-localized names replace IDs.
+        if panel.lastMode == "craft" then
+            panel.displayRows = BuildCraftDisplay(panel.lastCraftResults)
+        elseif panel.lastMode == "target" or panel.lastMode == "process" then
+            panel.displayRows = BuildArbitrageDisplay(panel.lastArbitrageResults)
+        else
+            return
+        end
+        if ApplyDisplaySort then ApplyDisplaySort() else UpdateResultRows() end
+        local tooltipOwner = GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner()
+        if tooltipOwner then
+            for _, row in ipairs(panel.resultRows) do
+                if tooltipOwner == row or tooltipOwner == row.iconButton then
+                    GameTooltip:Hide()
+                    row.ShowTooltip(tooltipOwner)
+                    break
+                end
+            end
+        end
+    end)
 
     RunActiveMode = function()
         panel.page = 0

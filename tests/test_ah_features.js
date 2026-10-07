@@ -1951,6 +1951,36 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(classicProc.resultRows[1].width == 694, "Classic AH processing should fill its available width")
     assert(#classicProc.resultRows == 8, "Classic AH processing rows must stay above the footer")
 
+    -- Uncached reagent IDs request data, then the client-localized item name
+    -- replaces the placeholder in the existing craft result and tooltip.
+    local localizedNameLoaded, requestedID = false, nil
+    C_Item = { RequestLoadItemDataByID = function(id) requestedID = id end }
+    MarketSync.GetItemInfo = function(id)
+      if id == 21072 then return "Smoked Sagefish", "|Hitem:21072|h[Smoked Sagefish]|h" end
+      if id == 21071 and localizedNameLoaded then
+        return "Poisson localisé", "|Hitem:21071|h[Poisson localisé]|h"
+      end
+    end
+    MarketSync.FindProfitableCrafts = function()
+      return {{ outputItemID = 21072, outputName = "Smoked Sagefish", recipeName = "Smoked Sagefish",
+        profession = "Cooking", outputQty = 1, outputUnitPrice = 600, revenue = 570,
+        craftCost = 200, margin = 370, maxCraftCost = 500, meetsMargin = true,
+        matsDetailed = {{ itemID = 21071, qty = 1, price = 200 }} }}
+    end
+    procAH.activeMode = "craft"
+    procAH.selectedProfession = "Cooking"
+    local runCraft
+    for _, frame in ipairs(createdFrames) do
+      if frame.parent == procAH and frame.text == "Run Target" then runCraft = frame break end
+    end
+    assert(runCraft and runCraft.scripts.OnClick, "Expected Processing run button")
+    runCraft.scripts.OnClick()
+    assert(requestedID == 21071, "Uncached reagent data should be requested")
+    assert(procAH.displayRows[1].detail:find("Loading item #21071", 1, true), "Uncached reagent should be marked as loading")
+    localizedNameLoaded = true
+    procAH.scripts.OnEvent(procAH, "GET_ITEM_INFO_RECEIVED", 21071, true)
+    assert(procAH.displayRows[1].detail:find("Poisson localisé", 1, true), "Localized reagent name should replace its ID")
+
     -- Test mouse wheel scrolling on processing panel
     procMain.displayRows = {}
     for r = 1, 25 do
