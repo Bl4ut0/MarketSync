@@ -364,6 +364,29 @@ function MarketSync.IsSyncBusy()
         or ((MarketSync.RxCount or 0) > 0)
 end
 
+function MarketSync.GetSyncTaskStatus()
+    local receiving = guildLane.phase == "receiving"
+    local queuedControlBytes = 0
+    for _, entry in ipairs(controlQueue) do
+        queuedControlBytes = queuedControlBytes + #(entry.payload or "")
+    end
+    return {
+        busy = MarketSync.IsSyncBusy(),
+        phase = guildLane.phase or "idle",
+        scope = guildLane.scope == "N" and "neutral" or (guildLane.scope == "M" and "main" or "none"),
+        source = guildLane.source or "none",
+        outbound = outboundTransfer ~= nil,
+        inbound = receiving,
+        throttled = outboundTransfer and outboundTransfer.throttled == true or false,
+        controlQueued = #controlQueue,
+        queuedControlBytes = queuedControlBytes,
+        frozenEntryCount = outboundTransfer and outboundTransfer.frozenEntryCount or 0,
+        pendingFrameBytes = outboundTransfer and #(outboundTransfer.pendingPayload or "") or 0,
+        receivedItems = tonumber(MarketSync.RxCount) or 0,
+        sentItems = tonumber(MarketSync.TxCount) or 0,
+    }
+end
+
 function MarketSync.SetPullRequestPending(isPending)
     local pending = isPending and true or false
 

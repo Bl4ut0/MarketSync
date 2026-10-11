@@ -74,6 +74,7 @@ function F.DeleteList(name)
         return false, "List not found"
     end
     MarketSyncDB.Favorites[name] = nil
+    if MarketSyncDB.FavoriteQuantities then MarketSyncDB.FavoriteQuantities[name] = nil end
     NotifyChanged()
     return true
 end
@@ -135,11 +136,33 @@ function F.RemoveFromList(listName, itemOrLink)
     for idx, existingID in ipairs(list) do
         if existingID == itemID then
             table.remove(list, idx)
+            if MarketSyncDB.FavoriteQuantities and MarketSyncDB.FavoriteQuantities[listName] then
+                MarketSyncDB.FavoriteQuantities[listName][itemID] = nil
+            end
             NotifyChanged()
             return true
         end
     end
     return false
+end
+
+function F.SetQuantity(listName, itemOrLink, quantity)
+    F.Initialize()
+    local itemID = ExtractItemID(itemOrLink)
+    local qty = tonumber(quantity)
+    if not itemID or not qty or qty < 1 then return false end
+    MarketSyncDB.FavoriteQuantities = MarketSyncDB.FavoriteQuantities or {}
+    MarketSyncDB.FavoriteQuantities[listName] = MarketSyncDB.FavoriteQuantities[listName] or {}
+    MarketSyncDB.FavoriteQuantities[listName][itemID] = math.floor(qty)
+    NotifyChanged()
+    return true
+end
+
+function F.GetQuantity(listName, itemOrLink)
+    local itemID = ExtractItemID(itemOrLink)
+    return itemID and MarketSyncDB and MarketSyncDB.FavoriteQuantities
+        and MarketSyncDB.FavoriteQuantities[listName]
+        and MarketSyncDB.FavoriteQuantities[listName][itemID] or 1
 end
 
 function F.IsItemInList(listName, itemOrLink)

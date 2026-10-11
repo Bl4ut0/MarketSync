@@ -116,6 +116,22 @@ function MarketSync.SearchInAuctionHouse(itemOrName)
     return false
 end
 
+function MarketSync.OpenCraftListForRecipe(recipeOrItemID)
+    if not MarketSync.MainFrame then return false end
+    if MarketSync.RefreshKnownCraftingRecipes then MarketSync.RefreshKnownCraftingRecipes() end
+    if not MarketSync.MainFrame:IsShown() then MarketSync.MainFrame:Show() end
+    local host = AuctionHouseFrame or AuctionFrame or MarketSync.MainFrame
+    if MarketSync.CreateAHSidecar then MarketSync.CreateAHSidecar(host) end
+    if not Sidecar.ShowForMain then return false end
+    Sidecar.ShowForMain("craft")
+    if recipeOrItemID and Sidecar.AddCraftRecipe then
+        local ok, reason = Sidecar.AddCraftRecipe(recipeOrItemID)
+        if not ok then print("|cffff4444[MarketSync]|r " .. tostring(reason)) end
+        return ok
+    end
+    return true
+end
+
 -- ================================================================
 -- ================================================================
 -- BAG SCANNER HELPER
@@ -230,7 +246,7 @@ function MarketSync.CreateAHSidecar(parent)
 
     -- 1. Drawer Toggle Tab on AH right edge (shown ONLY when sidecar is closed)
     local toggleBtn = CreateFrame("Button", "MarketSyncAHSidecarToggleBtn", ahFrame, "BackdropTemplate")
-    toggleBtn:SetSize(22, 70)
+    toggleBtn:SetSize(18, 38)
     toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -60)
     toggleBtn:SetFrameLevel(ahFrame:GetFrameLevel() + (legacyAH and 31 or 5))
     toggleBtn:SetBackdrop({
@@ -239,10 +255,8 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    toggleBtn:SetBackdropColor(legacyAH and 0.08 or 0.12, legacyAH and 0.09 or 0.11,
-        legacyAH and 0.10 or 0.10, 0.95)
-    toggleBtn:SetBackdropBorderColor(legacyAH and 0.31 or 0.45, legacyAH and 0.32 or 0.38,
-        legacyAH and 0.34 or 0.22, 0.90)
+    toggleBtn:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    toggleBtn:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     toggleBtn:EnableMouse(true)
     toggleBtn:RegisterForClicks("LeftButtonUp")
 
@@ -251,16 +265,14 @@ function MarketSync.CreateAHSidecar(parent)
     toggleArrow:SetText("|cFFFFD100>|r")
 
     toggleBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(legacyAH and 0.20 or 0.24, legacyAH and 0.22 or 0.20,
-            legacyAH and 0.24 or 0.12, 0.95)
+        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("MarketSync Sidecar", 1, 0.82, 0)
         GameTooltip:AddLine("Click to open Shopping Lists & Bag Selling", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     toggleBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(legacyAH and 0.08 or 0.12, legacyAH and 0.09 or 0.11,
-            legacyAH and 0.10 or 0.10, 0.95)
+        self:SetBackdropColor(MarketSync.GetThemeColor("header"))
         GameTooltip:Hide()
     end)
     if MarketSync.SetAccessibility then
@@ -280,10 +292,10 @@ function MarketSync.CreateAHSidecar(parent)
     frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", -2, 28)
     frame:SetFrameStrata(ahFrame:GetFrameStrata())
     frame:SetFrameLevel(ahFrame:GetFrameLevel() + (legacyAH and 30 or 1))
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
     if legacyAH then
-        frame:SetClampedToScreen(true)
-        frame:SetMovable(true)
-        frame:EnableMouse(true)
         frame:RegisterForDrag("LeftButton")
         frame:SetScript("OnDragStart", frame.StartMoving)
         frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
@@ -294,17 +306,22 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(legacyAH and 0.055 or 0.075, legacyAH and 0.060 or 0.070,
-        legacyAH and 0.070 or 0.065, 0.98)
-    frame:SetBackdropBorderColor(legacyAH and 0.31 or 0.45, legacyAH and 0.32 or 0.38,
-        legacyAH and 0.34 or 0.22, 0.95)
+    frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
+    frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    frame:SetParent(UIParent)
+    frame:Hide()
     Sidecar.Frame = frame
+    Sidecar.host = "ah"
 
     -- Top Header Container
     local header = CreateFrame("Frame", nil, frame)
     header:SetPoint("TOPLEFT", 6, -6)
     header:SetPoint("TOPRIGHT", -6, -6)
     header:SetHeight(28)
+    header:EnableMouse(true)
+    header:RegisterForDrag("LeftButton")
+    header:SetScript("OnDragStart", function() frame:StartMoving() end)
+    header:SetScript("OnDragStop", function() frame:StopMovingOrSizing() end)
 
     local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("LEFT", 8, 0)
@@ -314,7 +331,11 @@ function MarketSync.CreateAHSidecar(parent)
     closeBtn:SetSize(24, 24)
     closeBtn:SetPoint("TOPRIGHT", 2, 2)
     closeBtn:SetScript("OnClick", function()
-        Sidecar.SetExpanded(false)
+        if Sidecar.host == "main" and Sidecar.HideForMain then
+            Sidecar.HideForMain()
+        else
+            Sidecar.SetExpanded(false)
+        end
     end)
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(closeBtn, {
@@ -329,11 +350,11 @@ function MarketSync.CreateAHSidecar(parent)
     headerSep:SetHeight(1)
     headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -2)
     headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -4, -2)
-    headerSep:SetColorTexture(0.40, 0.35, 0.20, 0.50)
+    headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
 
-    -- Mode Switcher Tabs: [ Shopping Lists ]  [ Bag Selling ]
+    -- Mode Switcher Tabs: [ Shopping ] [ Craft ] [ Bags ]
     local tabLists = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabLists:SetSize(152, 24)
+    tabLists:SetSize(99, 24)
     tabLists:SetPoint("TOPLEFT", headerSep, "BOTTOMLEFT", 2, -6)
     tabLists:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -343,11 +364,24 @@ function MarketSync.CreateAHSidecar(parent)
     })
     tabLists.label = tabLists:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tabLists.label:SetPoint("CENTER")
-    tabLists.label:SetText("Shopping Lists")
+    tabLists.label:SetText("Shopping")
+
+    local tabCraft = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    tabCraft:SetSize(99, 24)
+    tabCraft:SetPoint("LEFT", tabLists, "RIGHT", 4, 0)
+    tabCraft:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    tabCraft.label = tabCraft:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    tabCraft.label:SetPoint("CENTER")
+    tabCraft.label:SetText("Craft")
 
     local tabBags = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabBags:SetSize(152, 24)
-    tabBags:SetPoint("LEFT", tabLists, "RIGHT", 4, 0)
+    tabBags:SetSize(99, 24)
+    tabBags:SetPoint("LEFT", tabCraft, "RIGHT", 4, 0)
     tabBags:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -356,20 +390,25 @@ function MarketSync.CreateAHSidecar(parent)
     })
     tabBags.label = tabBags:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tabBags.label:SetPoint("CENTER")
-    tabBags.label:SetText("Bag Selling")
+    tabBags.label:SetText("Bags")
 
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(tabLists, {
             name = "Shopping Lists",
             context = "Tab",
             description = "Switch to Shopping Lists panel",
-            getIndexInfo = function() return { index = 1, total = 2 } end,
+            getIndexInfo = function() return { index = 1, total = 3 } end,
+        })
+        MarketSync.SetAccessibility(tabCraft, {
+            name = "Craft Lists", context = "Tab",
+            description = "Switch to crafting recipe and materials checklist",
+            getIndexInfo = function() return { index = 2, total = 3 } end,
         })
         MarketSync.SetAccessibility(tabBags, {
             name = "Bag Selling",
             context = "Tab",
             description = "Switch to Inventory Bag Selling panel",
-            getIndexInfo = function() return { index = 2, total = 2 } end,
+            getIndexInfo = function() return { index = 3, total = 3 } end,
         })
     end
 
@@ -383,38 +422,36 @@ function MarketSync.CreateAHSidecar(parent)
     sellContainer:SetPoint("BOTTOMRIGHT", -6, 6)
     sellContainer:Hide()
 
+    local craftContainer = CreateFrame("Frame", nil, frame)
+    craftContainer:SetPoint("TOPLEFT", tabLists, "BOTTOMLEFT", -2, -6)
+    craftContainer:SetPoint("BOTTOMRIGHT", -6, 6)
+    craftContainer:Hide()
+
     local activeMode = "lists"
     local function SetMode(mode)
+        if mode ~= "craft" and mode ~= "sell" then mode = "lists" end
         activeMode = mode
-        if mode == "lists" then
-            listsContainer:Show()
-            sellContainer:Hide()
-            tabLists:SetBackdropColor(legacyAH and 0.18 or 0.26, legacyAH and 0.20 or 0.20,
-                legacyAH and 0.23 or 0.10, 0.95)
-            tabLists:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
-            tabLists.label:SetText("|cFFFFD100Shopping Lists|r")
-            tabBags:SetBackdropColor(legacyAH and 0.10 or 0.10, legacyAH and 0.11 or 0.09,
-                legacyAH and 0.12 or 0.08, 0.75)
-            tabBags:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
-            tabBags.label:SetText("|cFF888888Bag Selling|r")
-            if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
-        else
-            listsContainer:Hide()
-            sellContainer:Show()
-            tabBags:SetBackdropColor(legacyAH and 0.18 or 0.26, legacyAH and 0.20 or 0.20,
-                legacyAH and 0.23 or 0.10, 0.95)
-            tabBags:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.95)
-            tabBags.label:SetText("|cFFFFD100Bag Selling|r")
-            tabLists:SetBackdropColor(legacyAH and 0.10 or 0.10, legacyAH and 0.11 or 0.09,
-                legacyAH and 0.12 or 0.08, 0.75)
-            tabLists:SetBackdropBorderColor(0.28, 0.24, 0.18, 0.60)
-            tabLists.label:SetText("|cFF888888Shopping Lists|r")
-            if Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
+        Sidecar.currentMode = mode
+        listsContainer:SetShown(mode == "lists")
+        craftContainer:SetShown(mode == "craft")
+        sellContainer:SetShown(mode == "sell")
+        for _, tab in ipairs({ tabLists, tabCraft, tabBags }) do
+            local selected = (tab == tabLists and mode == "lists")
+                or (tab == tabCraft and mode == "craft") or (tab == tabBags and mode == "sell")
+            tab:SetBackdropColor(MarketSync.GetThemeColor(selected and "hover" or "header"))
+            tab:SetBackdropBorderColor(MarketSync.GetThemeColor(selected and "headerBorder" or "border"))
         end
+        tabLists.label:SetText(mode == "lists" and "|cFFFFD100Shopping|r" or "|cFF888888Shopping|r")
+        tabCraft.label:SetText(mode == "craft" and "|cFFFFD100Craft|r" or "|cFF888888Craft|r")
+        tabBags.label:SetText(mode == "sell" and "|cFFFFD100Bags|r" or "|cFF888888Bags|r")
+        if mode == "lists" and Sidecar.UpdateListsView then Sidecar.UpdateListsView()
+        elseif mode == "craft" and Sidecar.UpdateCraftView then Sidecar.UpdateCraftView()
+        elseif mode == "sell" and Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
     end
     Sidecar.SetMode = SetMode
 
     tabLists:SetScript("OnClick", function() SetMode("lists") end)
+    tabCraft:SetScript("OnClick", function() SetMode("craft") end)
     tabBags:SetScript("OnClick", function() SetMode("sell") end)
 
     -- Toggle Expand / Collapse
@@ -426,12 +463,14 @@ function MarketSync.CreateAHSidecar(parent)
             toggleBtn:Hide()
             if activeMode == "lists" and Sidecar.UpdateListsView then
                 Sidecar.UpdateListsView()
+            elseif activeMode == "craft" and Sidecar.UpdateCraftView then
+                Sidecar.UpdateCraftView()
             elseif activeMode == "sell" and Sidecar.UpdateSellView then
                 Sidecar.UpdateSellView()
             end
         else
             frame:Hide()
-            toggleBtn:Show()
+            if Sidecar.host == "ah" then toggleBtn:Show() else toggleBtn:Hide() end
         end
     end
 
@@ -441,17 +480,414 @@ function MarketSync.CreateAHSidecar(parent)
     Sidecar.ToggleButton = toggleBtn
     function Sidecar.SetVisibleForAH(visible)
         Sidecar.AHVisible = visible == true
-        if not visible then
+        if visible then
+            local host = AuctionHouseFrame or AuctionFrame or ahFrame
+            Sidecar.host = "ah"
+            frame:ClearAllPoints()
+            frame:SetPoint("TOPLEFT", host, "TOPRIGHT", -2, -28)
+            frame:SetPoint("BOTTOMLEFT", host, "BOTTOMRIGHT", -2, 28)
+            toggleBtn:SetParent(host)
+            toggleBtn:ClearAllPoints()
+            toggleBtn:SetPoint("TOPLEFT", host, "TOPRIGHT", -2, -60)
+        end
+        if not visible and Sidecar.host ~= "main" then
             frame:Hide()
             toggleBtn:Hide()
-        elseif MarketSyncDB and MarketSyncDB.AHSidecarExpanded then
+        elseif visible and MarketSyncDB and MarketSyncDB.AHSidecarExpanded then
             frame:Show()
             toggleBtn:Hide()
-        else
+        elseif visible then
             frame:Hide()
             toggleBtn:Show()
         end
     end
+    function Sidecar.ShowForMain(mode)
+        if not MarketSync.MainFrame then return end
+        if not Sidecar.mainHideHooked then
+            MarketSync.MainFrame:HookScript("OnHide", function()
+                if Sidecar.host == "main" then frame:Hide() end
+            end)
+            Sidecar.mainHideHooked = true
+        end
+        Sidecar.host = "main"
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", MarketSync.MainFrame, "TOPRIGHT", -2, -28)
+        frame:SetPoint("BOTTOMLEFT", MarketSync.MainFrame, "BOTTOMRIGHT", -2, 28)
+        frame:SetFrameStrata(MarketSync.MainFrame:GetFrameStrata())
+        frame:Show()
+        toggleBtn:Hide()
+        MarketSyncDB = MarketSyncDB or {}
+        MarketSyncDB.MainSidecarExpanded = true
+        if Sidecar.MainToggleButton then Sidecar.MainToggleButton:Hide() end
+        SetMode(mode or Sidecar.currentMode or "lists")
+    end
+    function Sidecar.HideForMain()
+        if Sidecar.host ~= "main" then return end
+        frame:Hide()
+        MarketSyncDB = MarketSyncDB or {}
+        MarketSyncDB.MainSidecarExpanded = false
+        if Sidecar.MainToggleButton then Sidecar.MainToggleButton:Show() end
+    end
+
+    -- ================================================================
+    -- CRAFT LISTS: saved recipes and their reagent checklist
+    -- ================================================================
+    local currentCraftList = "Crafts"
+    local craftLabel = craftContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    craftLabel:SetPoint("TOPLEFT", 6, -3)
+    craftLabel:SetText("Craft list:")
+    local craftDropdown = CreateFrame("Button", nil, craftContainer, "UIPanelButtonTemplate")
+    craftDropdown:SetSize(160, 22)
+    craftDropdown:SetPoint("TOPLEFT", 4, -19)
+    local craftMenu = CreateFrame("Frame", "MarketSyncSidecarCraftDropdown", craftContainer, "UIDropDownMenuTemplate")
+    craftMenu:Hide()
+    local function GetCraftList()
+        for _, list in ipairs(MarketSync.ListProcessingCraftSets and MarketSync.ListProcessingCraftSets() or {}) do
+            if list.name == currentCraftList then return list end
+        end
+        return { name = currentCraftList, itemIDs = {}, checked = {}, choices = {},
+            selectedBuys = {}, quantities = {}, recipes = {} }
+    end
+    function Sidecar.GetActiveCraftListName() return currentCraftList end
+    local function RefreshCraftDropdown()
+        craftDropdown:SetText(currentCraftList .. "  |cFFFFD100v|r")
+    end
+    UIDropDownMenu_Initialize(craftMenu, function(self, level)
+        for _, list in ipairs(MarketSync.ListProcessingCraftSets and MarketSync.ListProcessingCraftSets() or {}) do
+            local name = list.name
+            local opt = UIDropDownMenu_CreateInfo()
+            opt.text = name
+            opt.checked = name == currentCraftList
+            opt.func = function()
+                currentCraftList = name
+                RefreshCraftDropdown()
+                if Sidecar.UpdateCraftView then Sidecar.UpdateCraftView() end
+            end
+            UIDropDownMenu_AddButton(opt, level)
+        end
+    end)
+    craftDropdown:SetScript("OnClick", function()
+        ToggleDropDownMenu(1, nil, craftMenu, craftDropdown, 0, 0)
+    end)
+    RefreshCraftDropdown()
+
+    local craftNew = CreateFrame("Button", nil, craftContainer, "UIPanelButtonTemplate")
+    craftNew:SetSize(62, 22)
+    craftNew:SetPoint("LEFT", craftDropdown, "RIGHT", 4, 0)
+    craftNew:SetText("+ New")
+    craftNew:SetScript("OnClick", function()
+        StaticPopupDialogs["MARKETSYNC_SIDECAR_NEW_CRAFT_LIST"] = {
+            text = "Enter name for new Craft List:", button1 = "Create", button2 = "Cancel",
+            hasEditBox = true, timeout = 0, whileDead = true, hideOnEscape = true,
+            OnAccept = function(self)
+                local box = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+                local name = box and box:GetText()
+                if name and name ~= "" and MarketSync.UpsertProcessingCraftSet then
+                    local saved = MarketSync.UpsertProcessingCraftSet(name, {})
+                    if saved then
+                        currentCraftList = saved.name
+                        RefreshCraftDropdown()
+                        Sidecar.UpdateCraftView()
+                    end
+                end
+            end,
+        }
+        StaticPopup_Show("MARKETSYNC_SIDECAR_NEW_CRAFT_LIST")
+    end)
+    local craftDelete = CreateFrame("Button", nil, craftContainer, "UIPanelButtonTemplate")
+    craftDelete:SetSize(52, 22)
+    craftDelete:SetPoint("LEFT", craftNew, "RIGHT", 4, 0)
+    craftDelete:SetText("Delete")
+    craftDelete:SetScript("OnClick", function()
+        if MarketSync.DeleteProcessingCraftSet then
+            MarketSync.DeleteProcessingCraftSet(currentCraftList)
+            local lists = MarketSync.ListProcessingCraftSets and MarketSync.ListProcessingCraftSets() or {}
+            currentCraftList = lists[1] and lists[1].name or "Crafts"
+            RefreshCraftDropdown()
+            Sidecar.UpdateCraftView()
+        end
+    end)
+
+    local craftHint = craftContainer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    craftHint:SetPoint("TOPLEFT", 7, -49)
+    craftHint:SetPoint("RIGHT", craftContainer, "RIGHT", -7, 0)
+    craftHint:SetJustifyH("LEFT")
+    craftHint:SetText("Left check = Craft; Buy check = purchase, else provide.")
+    local craftSearch = CreateFrame("Button", nil, craftContainer, "UIPanelButtonTemplate")
+    craftSearch:SetSize(145, 21)
+    craftSearch:SetPoint("TOPLEFT", 8, -69)
+    craftSearch:SetText("Scan Buy Materials")
+    craftSearch:SetScript("OnClick", function()
+        local plan = MarketSync.BuildCraftPurchasePlan(GetCraftList())
+        local ids = {}
+        for id, buy in pairs(plan.buys) do
+            if not buy.isVendor then ids[#ids + 1] = id end
+        end
+        table.sort(ids)
+        if #ids == 0 then
+            print("|cffffaa00[MarketSync]|r No Auction House materials marked Buy in this Craft list.")
+        elseif MarketSync.Scanner and MarketSync.Scanner.StartScan then
+            MarketSync.Scanner.StartScan(ids, "Craft list: " .. currentCraftList)
+        end
+    end)
+    local craftExport = CreateFrame("Button", nil, craftContainer, "UIPanelButtonTemplate")
+    craftExport:SetSize(145, 21)
+    craftExport:SetPoint("LEFT", craftSearch, "RIGHT", 4, 0)
+    craftExport:SetText("Copy to Shopping")
+    craftExport:SetScript("OnClick", function()
+        local ok, countOrReason, name = MarketSync.ExportCraftPurchasesToShoppingList(GetCraftList())
+        if ok then
+            print(string.format("|cff00ff00[MarketSync]|r %d material types exported to Shopping list: %s", countOrReason, name))
+        else
+            print("|cffff4444[MarketSync]|r " .. tostring(countOrReason))
+        end
+    end)
+    local craftAdd = CreateFrame("EditBox", nil, craftContainer, "InputBoxTemplate")
+    craftAdd:SetSize(296, 20)
+    craftAdd:SetPoint("TOPLEFT", 8, -95)
+    craftAdd:SetAutoFocus(false)
+    craftAdd:SetText("Item ID or link...")
+    craftAdd:SetScript("OnEditFocusGained", function(self)
+        if self:GetText() == "Item ID or link..." then self:SetText("") end
+    end)
+    craftAdd:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    local craftInset = CreateFrame("Frame", nil, craftContainer, "BackdropTemplate")
+    craftInset:SetPoint("TOPLEFT", craftAdd, "BOTTOMLEFT", -6, -8)
+    craftInset:SetPoint("BOTTOMRIGHT", craftContainer, "BOTTOMRIGHT", 0, 0)
+    craftInset:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    craftInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    craftInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    local craftScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarCraftScroll", craftInset,
+        "UIPanelScrollFrameTemplate")
+    craftScroll:SetPoint("TOPLEFT", 2, -3)
+    craftScroll:SetPoint("BOTTOMRIGHT", -17, 3)
+    if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(craftScroll) end
+    local craftRowsFrame = CreateFrame("Frame", nil, craftScroll)
+    craftRowsFrame:SetSize(278, 1)
+    craftScroll:SetScrollChild(craftRowsFrame)
+    local craftRows = {}
+    local function CraftItemName(id)
+        local name = SafeGetItemInfo(id)
+        local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id]
+        return name or (cached and cached.n) or ("Item " .. tostring(id))
+    end
+    local function BuildCraftRows(list)
+        local rows = {}
+        local function AddNode(node, depth, seen)
+            if not node or not node.itemID or depth > 4 then return end
+            rows[#rows + 1] = { id = node.itemID, qty = node.qty or 1, depth = depth,
+                craftable = node.canCraft, chooseCraft = node.chooseCraft,
+                activeBuy = not node.chooseCraft,
+                provided = not node.chooseCraft and (list.selectedBuys or {})[node.itemID] == false }
+            if node.chooseCraft and node.subMats and not seen[node.itemID] then
+                local nextSeen = {}
+                for key, value in pairs(seen) do nextSeen[key] = value end
+                nextSeen[node.itemID] = true
+                for _, child in ipairs(node.subMats) do AddNode(child, depth + 1, nextSeen) end
+            end
+        end
+        for _, id in ipairs(list.itemIDs or {}) do
+            local qty = math.max(1, math.floor(tonumber((list.quantities or {})[id]) or 1))
+            rows[#rows + 1] = { id = id, depth = 0, output = true, qty = qty }
+            local recipe = list.recipes and list.recipes[id]
+            local cost = MarketSync.CalculateGroundUpCraftCost and MarketSync.CalculateGroundUpCraftCost(recipe or id, list.choices, qty)
+            for _, node in ipairs(cost and cost.reagentsTree or {}) do AddNode(node, 1, {}) end
+        end
+        return rows
+    end
+    function Sidecar.UpdateCraftView()
+        RefreshCraftDropdown()
+        local list = GetCraftList()
+        local entries = BuildCraftRows(list)
+        local plan = MarketSync.BuildCraftPurchasePlan and MarketSync.BuildCraftPurchasePlan(list)
+        craftHint:SetText(#entries == 0 and "Drop a crafted item or recipe to plan materials."
+            or string.format("%d recipes | Buy %d | Provide %d", #(list.itemIDs or {}),
+                plan and plan.buyCount or 0, plan and plan.providedCount or 0))
+        for i = 1, math.max(#entries, #craftRows) do
+            local entry = entries[i]
+            local row = craftRows[i]
+            if entry then
+                if not row then
+                    row = CreateFrame("Button", nil, craftRowsFrame)
+                    row:SetHeight(24)
+                    row:SetPoint("LEFT", 2, 0)
+                    row:SetPoint("RIGHT", -2, 0)
+                    row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+                    row.check:SetSize(18, 18)
+                    row.check:SetPoint("LEFT", 0, 0)
+                    row.buyCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+                    row.buyCheck:SetSize(18, 18)
+                    row.buyCheck:SetPoint("RIGHT", -1, 0)
+                    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                    row.name:SetPoint("RIGHT", row, "RIGHT", -24, 0)
+                    row.name:SetJustifyH("LEFT")
+                    row.remove = CreateFrame("Button", nil, row)
+                    row.remove:SetSize(18, 18)
+                    row.remove:SetPoint("RIGHT", -2, 0)
+                    row.remove.label = row.remove:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                    row.remove.label:SetPoint("CENTER")
+                    row.remove.label:SetText("|cffff4444x|r")
+                    row.minus = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+                    row.minus:SetSize(16, 17)
+                    row.minus:SetText("-")
+                    row.minus:SetPoint("RIGHT", row.remove, "LEFT", -1, 0)
+                    row.plus = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+                    row.plus:SetSize(16, 17)
+                    row.plus:SetText("+")
+                    row.plus:SetPoint("RIGHT", row.minus, "LEFT", -1, 0)
+                    craftRows[i] = row
+                end
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", craftRowsFrame, "TOPLEFT", 0, -(i - 1) * 24)
+                row:SetPoint("TOPRIGHT", craftRowsFrame, "TOPRIGHT", 0, -(i - 1) * 24)
+                row.name:ClearAllPoints()
+                row.name:SetPoint("LEFT", row.check, "RIGHT", 3 + math.min(3, entry.depth) * 9, 0)
+                row.name:SetPoint("RIGHT", row, "RIGHT", entry.output and -77 or (entry.craftable and -24 or -8), 0)
+                local tag = entry.output and "Edit craft: " or (entry.chooseCraft and "CRAFT: "
+                    or (entry.provided and "PROVIDE: " or "BUY: "))
+                row.name:SetText((entry.output and "|cffffd700" or "|cffcccccc")
+                    .. tag .. CraftItemName(entry.id) .. (entry.qty and (" x" .. entry.qty) or "") .. "|r")
+                row.check:SetShown(not entry.output)
+                row.check:SetChecked(entry.craftable and entry.chooseCraft
+                    or (not entry.craftable and (list.selectedBuys or {})[entry.id] ~= false))
+                row.check:SetScript("OnClick", function(self)
+                    local latest = GetCraftList()
+                    if entry.craftable then
+                        latest.choices[entry.id] = self:GetChecked() == true
+                    else
+                        latest.selectedBuys[entry.id] = self:GetChecked() == true
+                    end
+                    MarketSync.UpsertProcessingCraftSet(latest.name, latest.itemIDs, latest.checked,
+                        latest.choices, latest.selectedBuys, latest.quantities, latest.recipes)
+                    Sidecar.UpdateCraftView()
+                end)
+                row.check:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetText(entry.craftable and "Craft this component when checked"
+                        or "Buy this material when checked; otherwise provide it")
+                    GameTooltip:Show()
+                end)
+                row.check:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                row.buyCheck:SetShown(entry.craftable and not entry.chooseCraft)
+                row.buyCheck:SetChecked((list.selectedBuys or {})[entry.id] ~= false)
+                row.buyCheck:SetScript("OnClick", function(self)
+                    local latest = GetCraftList()
+                    latest.selectedBuys[entry.id] = self:GetChecked() == true
+                    MarketSync.UpsertProcessingCraftSet(latest.name, latest.itemIDs, latest.checked,
+                        latest.choices, latest.selectedBuys, latest.quantities, latest.recipes)
+                    Sidecar.UpdateCraftView()
+                end)
+                row.buyCheck:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetText("Buy this component when checked; otherwise provide it")
+                    GameTooltip:Show()
+                end)
+                row.buyCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                row.plus:SetShown(entry.output == true)
+                row.minus:SetShown(entry.output == true)
+                local function SetCraftQty(delta)
+                    local latest = GetCraftList()
+                    latest.quantities[entry.id] = math.max(1, math.min(999,
+                        (tonumber(latest.quantities[entry.id]) or 1) + delta))
+                    MarketSync.UpsertProcessingCraftSet(latest.name, latest.itemIDs, latest.checked,
+                        latest.choices, latest.selectedBuys, latest.quantities, latest.recipes)
+                    Sidecar.UpdateCraftView()
+                end
+                row.plus:SetScript("OnClick", function() SetCraftQty(1) end)
+                row.minus:SetScript("OnClick", function() SetCraftQty(-1) end)
+                row.remove:SetShown(entry.output == true)
+                row.remove:SetScript("OnClick", function()
+                    local latest = GetCraftList()
+                    for index, id in ipairs(latest.itemIDs) do
+                        if id == entry.id then table.remove(latest.itemIDs, index); break end
+                    end
+                    MarketSync.UpsertProcessingCraftSet(latest.name, latest.itemIDs, latest.checked,
+                        latest.choices, latest.selectedBuys, latest.quantities, latest.recipes)
+                    Sidecar.UpdateCraftView()
+                end)
+                row:SetScript("OnClick", function()
+                    if not entry.output then return end
+                    local latest = GetCraftList()
+                    local recipe = latest.recipes and latest.recipes[entry.id]
+                        or (MarketSync.GetRecipeForOutput and MarketSync.GetRecipeForOutput(entry.id))
+                    if recipe and MarketSync.OpenCraftingTree then
+                        MarketSync.OpenCraftingTree(recipe, nil, latest)
+                    end
+                end)
+                row:Show()
+            elseif row then row:Hide() end
+        end
+        craftRowsFrame:SetHeight(math.max(1, #entries * 24))
+    end
+    function Sidecar.AddCraftRecipe(itemOrLink, listName, options)
+        local suppliedRecipe = type(itemOrLink) == "table" and itemOrLink.mats and itemOrLink or nil
+        local id = suppliedRecipe and tonumber(suppliedRecipe.outputItemID)
+            or tonumber(itemOrLink) or (type(itemOrLink) == "string"
+            and tonumber(itemOrLink:match("item:(%d+)")))
+        if not id and MarketSync.ResolveItemID then id = MarketSync.ResolveItemID(itemOrLink) end
+        if listName and listName ~= "" then currentCraftList = listName end
+        local list = GetCraftList()
+        local recipe = suppliedRecipe or (list.recipes and list.recipes[id])
+            or (MarketSync.GetRecipeForOutput and MarketSync.GetRecipeForOutput(id))
+        if not id or not recipe then
+            return false, "No known recipe for this item. Open its profession first."
+        end
+        list.recipes = list.recipes or {}
+        if suppliedRecipe and MarketSync.SnapshotCraftRecipe then
+            list.recipes[id] = MarketSync.SnapshotCraftRecipe(suppliedRecipe)
+        end
+        if type(options) == "table" then
+            list.choices = list.choices or {}
+            list.selectedBuys = list.selectedBuys or {}
+            list.quantities = list.quantities or {}
+            if options.choices then
+                for itemID, value in pairs(options.choices) do list.choices[itemID] = value end
+            end
+            if options.selectedBuys then
+                for itemID, value in pairs(options.selectedBuys) do list.selectedBuys[itemID] = value end
+            end
+            if options.quantity then list.quantities[id] = options.quantity end
+        end
+        for _, existing in ipairs(list.itemIDs) do
+            if existing == id then
+                MarketSync.UpsertProcessingCraftSet(list.name, list.itemIDs, list.checked,
+                    list.choices, list.selectedBuys, list.quantities, list.recipes)
+                if Sidecar.UpdateCraftView then Sidecar.UpdateCraftView() end
+                return true
+            end
+        end
+        list.itemIDs[#list.itemIDs + 1] = id
+        MarketSync.UpsertProcessingCraftSet(list.name, list.itemIDs, list.checked,
+            list.choices, list.selectedBuys, list.quantities, list.recipes)
+        if Sidecar.UpdateCraftView then Sidecar.UpdateCraftView() end
+        return true
+    end
+    local function HandleCraftDrop()
+        if not GetCursorInfo then return false end
+        local kind, value, link = GetCursorInfo()
+        if kind ~= "item" and kind ~= "spell" then return false end
+        if kind == "spell" and MarketSync.RefreshKnownCraftingRecipes then
+            MarketSync.RefreshKnownCraftingRecipes()
+        end
+        local output = kind == "spell" and MarketSync.GetCraftOutputForRecipeID
+            and MarketSync.GetCraftOutputForRecipeID(value) or nil
+        local ok, reason = Sidecar.AddCraftRecipe(output or (kind == "item" and (link or value)))
+        if ok then ClearCursor() else print("|cffff4444[MarketSync]|r " .. tostring(reason)) end
+        return ok
+    end
+    for _, target in ipairs({ craftAdd, craftInset, craftScroll, craftRowsFrame }) do
+        target:EnableMouse(true)
+        target:SetScript("OnReceiveDrag", HandleCraftDrop)
+        target:SetScript("OnMouseUp", HandleCraftDrop)
+    end
+    craftAdd:SetScript("OnEnterPressed", function(self)
+        local text = self:GetText()
+        local ok, reason = Sidecar.AddCraftRecipe(text)
+        if not ok then print("|cffff4444[MarketSync]|r " .. tostring(reason)) end
+        self:SetText("")
+        self:ClearFocus()
+    end)
 
     -- ================================================================
     -- 1. SHOPPING LISTS VIEW
@@ -658,10 +1094,8 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    listInset:SetBackdropColor(legacyAH and 0.055 or 0.075, legacyAH and 0.060 or 0.070,
-        legacyAH and 0.070 or 0.065, 0.96)
-    listInset:SetBackdropBorderColor(legacyAH and 0.30 or 0.38, legacyAH and 0.31 or 0.32,
-        legacyAH and 0.33 or 0.22, 0.90)
+    listInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    listInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     listInset:EnableMouse(true)
     listInset:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
     listInset:SetScript("OnMouseUp", function(self, button)
@@ -741,13 +1175,15 @@ function MarketSync.CreateAHSidecar(parent)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
                 if i % 2 == 0 then
-                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                 else
-                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                 end
 
                 row.icon:SetTexture(item.icon)
-                row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name)
+                local quantity = MarketSync.Favorites.GetQuantity and MarketSync.Favorites.GetQuantity(currentListName, item.itemID) or 1
+                local displayName = MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name
+                row.name:SetText(displayName .. (quantity > 1 and (" x" .. quantity) or ""))
                 row.price:SetText(GetPriceText(item.itemID))
 
                 row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -762,7 +1198,7 @@ function MarketSync.CreateAHSidecar(parent)
                 end)
 
                 row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.30, 0.25, 0.12, 0.80)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     if item.link and GameTooltip.SetHyperlink then
                         pcall(GameTooltip.SetHyperlink, GameTooltip, item.link)
@@ -776,9 +1212,9 @@ function MarketSync.CreateAHSidecar(parent)
                 end)
                 row:SetScript("OnLeave", function(self)
                     if i % 2 == 0 then
-                        self:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                     else
-                        self:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                     end
                     GameTooltip:Hide()
                 end)
@@ -871,8 +1307,8 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    sellInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-    sellInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    sellInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    sellInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     local sellScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarSellScroll", sellInset, "UIPanelScrollFrameTemplate")
     sellScroll:SetPoint("TOPLEFT", 2, -3)
@@ -926,8 +1362,8 @@ function MarketSync.CreateAHSidecar(parent)
                         edgeSize = 1,
                         insets = { left = 1, right = 1, top = 1, bottom = 1 },
                     })
-                    header:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-                    header:SetBackdropBorderColor(0.30, 0.26, 0.20, 0.85)
+                    header:SetBackdropColor(MarketSync.GetThemeColor("header"))
+                    header:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
 
                     header.icon = header:CreateTexture(nil, "ARTWORK")
                     header.icon:SetSize(16, 16)
@@ -992,7 +1428,7 @@ function MarketSync.CreateAHSidecar(parent)
                     btn.item = item
 
                     local qColor = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[item.quality] or { r = 0.4, g = 0.4, b = 0.4 }
-                    btn:SetBackdropColor(0.08, 0.075, 0.07, 0.95)
+                    btn:SetBackdropColor(MarketSync.GetThemeColor("inset"))
                     btn:SetBackdropBorderColor(qColor.r or 0.4, qColor.g or 0.4, qColor.b or 0.4, 0.85)
 
                     btn:SetScript("OnEnter", function(self)
@@ -1142,6 +1578,10 @@ function MarketSync.CreateAHSidecar(parent)
         startExpanded = MarketSyncDB.AHSidecarExpanded
     end
     Sidecar.SetExpanded(startExpanded)
+    if not ahFrame:IsShown() then
+        frame:Hide()
+        toggleBtn:Hide()
+    end
 
     return frame
 end

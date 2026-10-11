@@ -270,6 +270,19 @@ local function ResolveItemVisual(itemID, fallbackName, onMissingName)
     return name, link, icon
 end
 
+-- Broad result lists must not request item data for every row. Cached names
+-- and icons are enough until the player inspects one specific result.
+local function ResolveCachedItemVisual(itemID, fallbackName)
+    local id = tonumber(itemID)
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    local info = id and cache and cache[id]
+    local name = (info and info.n) or fallbackName or ("Item " .. tostring(id or "?"))
+    local icon = (info and info.ic) or "Interface\\Icons\\INV_Misc_QuestionMark"
+    local link = id and ("|cffffffff|Hitem:" .. id ..
+        ":0:0:0:0:0:0:0:0:0:0:0:0|h[" .. name .. "]|h|r") or nil
+    return name, link, icon
+end
+
 local function Truncate(text, maxLen)
     local s = tostring(text or "")
     if #s <= maxLen then return s end
@@ -319,6 +332,10 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     panel.activeMode = "target"
+    function panel:CancelCachedWork()
+        self.cacheRunID = (self.cacheRunID or 0) + 1
+    end
+    panel:SetScript("OnHide", function(self) self:CancelCachedWork() end)
     panel.selectedTargetID = nil
     panel.selectedProcess = nil
     panel.selectedProfession = nil
@@ -435,6 +452,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
         btn:SetScript("OnClick", function()
             if panel.activeMode ~= def.key then
+                panel:CancelCachedWork()
                 panel.activeMode = def.key
                 panel.selectedCrafts = {}
                 panel.selectedArbitrage = {}
@@ -562,7 +580,14 @@ function MarketSync.CreateProcessingPanel(parent)
                 priceStr = "  " .. MarketSync.FormatMoney(price)
             end
             opt.text = string.format("%s%s", t.name or ("Item #" .. tostring(t.itemID)), priceStr)
-            opt.icon = t.icon or (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(t.itemID))
+            local icon = t.icon or (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(t.itemID))
+            -- Native menus measure the label to choose their width. Include the
+            -- icon in that measurement instead of anchoring it beyond the text.
+            if icon then
+                opt.text = opt.text .. "  |T" .. tostring(icon) .. ":16:16:0:0|t  "
+            else
+                opt.text = opt.text .. "  "
+            end
             opt.func = function()
                 panel.selectedTargetID = t.itemID
                 targetInputBox:SetText(t.name or ("Item #" .. tostring(t.itemID)))
@@ -708,7 +733,30 @@ function MarketSync.CreateProcessingPanel(parent)
     btnExport:SetText("Export")
     btnTrack:SetText("Track")
     btnSaved:SetText("Saved...")
+    local function OpenCraftSidecar(itemID)
+        local host = AuctionHouseFrame or AuctionFrame or MarketSync.MainFrame
+        if MarketSync.CreateAHSidecar then MarketSync.CreateAHSidecar(host) end
+        local sidecar = MarketSync.AHSidecar
+        if not sidecar or not sidecar.Frame then return false end
+        if parent == MarketSync.MainFrame then
+            if sidecar.ShowForMain then sidecar.ShowForMain("craft") end
+        else
+            if sidecar.SetVisibleForAH then sidecar.SetVisibleForAH(true) end
+            if sidecar.SetExpanded then sidecar.SetExpanded(true) end
+            if sidecar.SetMode then sidecar.SetMode("craft") end
+        end
+        if itemID and sidecar.AddCraftRecipe then
+            local ok, reason = sidecar.AddCraftRecipe(itemID)
+            if not ok then print("|cffff4444[MarketSync]|r " .. tostring(reason)) end
+            return ok
+        end
+        return true
+    end
     btnSaved:SetScript("OnClick", function()
+        if panel.activeMode == "craft" then
+            OpenCraftSidecar()
+            return
+        end
         if leftBottomBox:IsShown() then
             leftBottomBox:Hide()
         else
@@ -877,16 +925,16 @@ function MarketSync.CreateProcessingPanel(parent)
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
         if i % 2 == 0 then
-            rowBg:SetColorTexture(0.10, 0.095, 0.09, 0.50)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("rowEven"))
         else
-            rowBg:SetColorTexture(0.06, 0.055, 0.05, 0.50)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("rowOdd"))
         end
         row.rowBg = rowBg
 
         local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
         rowHl:SetPoint("TOPLEFT", 34, 0)
         rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
+        rowHl:SetColorTexture(MarketSync.GetThemeColor("hover"))
 
         local c1 = colDefs[1].width
         local c2 = c1 + colDefs[2].width
@@ -1032,6 +1080,12 @@ function MarketSync.CreateProcessingPanel(parent)
                         end
                     }
                 }
+                if isCraft and row.itemID then
+                    table.insert(customActions, 2, {
+                        text = "Add to Craft List",
+                        func = function() OpenCraftSidecar(row.itemID) end,
+                    })
+                end
                 if MarketSync.ShowItemContextMenu then
                     MarketSync.ShowItemContextMenu(row, {
                         itemID = row.itemID,
@@ -1119,10 +1173,30 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.pageText:SetPoint("RIGHT", prevBtn, "LEFT", -8, 0)
     panel.pageText:SetText("0 results")
 
-    local btnResyncProf = CreateFrame("Button", nil, leftTopBox, "UIPanelButtonTemplate")
-    btnResyncProf:SetSize(116, 20)
-    btnResyncProf:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -49)
-    btnResyncProf:SetText("Resync Profs")
+    local btnResyncProf = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    btnResyncProf:SetSize(28, 24)
+    btnResyncProf:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -86, isEmbedded and -8 or -34)
+    btnResyncProf:SetText("")
+    local syncArrows = {
+        { x = 0, y = 6, angle = 0 },
+        { x = 6, y = -3, angle = 2.094 },
+        { x = -6, y = -3, angle = 4.189 },
+    }
+    for _, spec in ipairs(syncArrows) do
+        local arrow = btnResyncProf:CreateTexture(nil, "OVERLAY")
+        arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
+        arrow:SetSize(9, 9)
+        arrow:SetTexCoord(0, 0.5625, 0, 1.0)
+        arrow:SetPoint("CENTER", btnResyncProf, "CENTER", spec.x, spec.y)
+        arrow:SetVertexColor(1, 0.82, 0)
+        if arrow.SetRotation then
+            arrow:SetRotation(spec.angle)
+        else
+            arrow:Hide()
+            btnResyncProf:SetText("Sync")
+            btnResyncProf:SetWidth(42)
+        end
+    end
     btnResyncProf:Hide()
     btnResyncProf:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -1521,13 +1595,13 @@ function MarketSync.CreateProcessingPanel(parent)
         UpdateResultRows()
     end
 
-    local function BuildArbitrageDisplay(arbitrageResults)
+    local function BuildArbitrageDisplay(arbitrageResults, yieldStep)
         local rows = {}
         local marginPct = 0
         local marginMult = 1.0
 
-        for _, r in ipairs(arbitrageResults or {}) do
-            local itemName, itemLink, icon = ResolveItemVisual(r.inputItemID, r.inputName, RequestItemName)
+        for index, r in ipairs(arbitrageResults or {}) do
+            local itemName, itemLink, icon = ResolveCachedItemVisual(r.inputItemID, r.inputName)
             local livePrice = tonumber(r.livePrice) or 0
             local maxBuy = tonumber(r.maxBuyPerUnit) or 0
             local evPerUnit = tonumber(r.evPerUnit)
@@ -1655,17 +1729,18 @@ function MarketSync.CreateProcessingPanel(parent)
                 trackThreshold = maxBuy,
                 isSelected = panel.selectedArbitrage and panel.selectedArbitrage[r.inputItemID] or false,
             }
+            if yieldStep and index % 50 == 0 then yieldStep(index) end
         end
 
         return rows
     end
 
-    local function BuildCraftDisplay(craftResults)
+    local function BuildCraftDisplay(craftResults, yieldStep)
         local rows = {}
 
-        for _, c in ipairs(craftResults or {}) do
+        for index, c in ipairs(craftResults or {}) do
             local outputName = c.outputName or c.recipeName or ("Item " .. tostring(c.outputItemID or "?"))
-            local itemName, itemLink, icon = ResolveItemVisual(c.outputItemID, outputName, RequestItemName)
+            local itemName, itemLink, icon = ResolveCachedItemVisual(c.outputItemID, outputName)
             local revenue = tonumber(c.revenue) or 0
             local craftCost = tonumber(c.craftCost) or 0
             local margin = tonumber(c.margin) or 0
@@ -1673,7 +1748,10 @@ function MarketSync.CreateProcessingPanel(parent)
             local capDelta = maxSpend - craftCost
             local missingPrice = c.hasMissingPrice == true
 
-            local profitPct = (revenue > 0 and margin) and math.floor((margin / revenue * 100) + 0.5) or nil
+            -- Match the Materials window: ROI is profit divided by material
+            -- cost, not profit divided by net sale proceeds.
+            local profitPct = (craftCost > 0 and not missingPrice)
+                and math.floor((margin / craftCost * 100) + 0.5) or nil
             local pctLabel = ""
             if profitPct and not missingPrice then
                 if profitPct >= 30 then
@@ -1757,7 +1835,7 @@ function MarketSync.CreateProcessingPanel(parent)
                     detailLines[#detailLines + 1] = ColorMuted("...")
                     break
                 end
-                local matName = ResolveItemVisual(mat.itemID, nil, RequestItemName)
+                local matName = ResolveCachedItemVisual(mat.itemID)
                 local qty = tonumber(mat.qty) or 1
                 local matPriceText = (mat.price and mat.price > 0) and MoneyText(mat.price) or "No price"
                 local priceColor = mat.stale and ColorWarn(matPriceText) or "|cffffffff" .. matPriceText .. "|r"
@@ -1797,6 +1875,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 detailLines = detailLines,
                 isSelected = panel.selectedCrafts and panel.selectedCrafts[outputName] or false,
             }
+            if yieldStep and index % 50 == 0 then yieldStep(index) end
         end
 
         return rows
@@ -1833,7 +1912,46 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end)
 
+    local function RunCachedWork(work, onComplete)
+        local runID = panel.cacheRunID
+        local function Start()
+            if runID ~= panel.cacheRunID then return end
+            local sources = MarketSync.GetProcessingIndexSources
+                and MarketSync.GetProcessingIndexSources()
+            if not sources then
+                statusSummary:SetText("|cffffaa00Market cache not ready. Build it in Personal Scan or Guild Sync first.|r")
+                return
+            end
+
+            statusSummary:SetText("|cffffd700Processing cached prices...|r")
+            local worker = coroutine.create(function()
+                local function YieldStep() coroutine.yield() end
+                local snapshot = MarketSync.BuildProcessingCacheSnapshot(YieldStep)
+                if not snapshot then return nil end
+                return work(snapshot, YieldStep)
+            end)
+            local function Step()
+                if runID ~= panel.cacheRunID then return end
+                local ok, result = coroutine.resume(worker)
+                if not ok then
+                    statusSummary:SetText("|cffff4444Processing failed: " .. tostring(result) .. "|r")
+                    return
+                end
+                if coroutine.status(worker) == "dead" then
+                    if result then onComplete(result) end
+                elseif C_Timer and C_Timer.After then
+                    C_Timer.After(0, Step)
+                else
+                    Step()
+                end
+            end
+            Step()
+        end
+        Start()
+    end
+
     RunActiveMode = function()
+        panel.cacheRunID = (panel.cacheRunID or 0) + 1
         panel.page = 0
 
         if panel.activeMode == "target" then
@@ -1860,41 +1978,54 @@ function MarketSync.CreateProcessingPanel(parent)
                 return
             end
 
-            local results = MarketSync.FindArbitrageByTarget and MarketSync.FindArbitrageByTarget(panel.selectedTargetID, 0) or {}
-            panel.lastMode = "target"
-            panel.lastArbitrageResults = results
-            panel.lastCraftResults = {}
-            panel.displayRows = BuildArbitrageDisplay(results)
-
-            local targetName = FindTargetName(panel.selectedTargetID) or ("Item " .. tostring(panel.selectedTargetID))
-            local targetPrice = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(panel.selectedTargetID)
-            if not targetPrice or targetPrice <= 0 then
-                statusSummary:SetText(string.format("|cffffaa00%s: No AH price data|r", targetName))
-                SetNoResultsMessage(string.format("'%s' has no current AH price. Cannot calculate arbitrage without output market value.", targetName))
-            else
-                statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", targetName, #panel.displayRows))
-                local hasTargetDefinition = MarketSync.HasProcessingDefinitionForTarget
-                    and MarketSync.HasProcessingDefinitionForTarget(panel.selectedTargetID)
-                if hasTargetDefinition then
-                    SetNoResultsMessage("No items currently on the AH yield this material.")
+            local targetID = panel.selectedTargetID
+            RunCachedWork(function(snapshot, yieldStep)
+                local results = MarketSync.FindArbitrageByTarget
+                    and MarketSync.FindArbitrageByTarget(targetID, 0, snapshot, yieldStep) or {}
+                return { results = results, rows = BuildArbitrageDisplay(results, yieldStep),
+                    targetEntry = snapshot.prices[tonumber(targetID)] }
+            end, function(data)
+                panel.lastMode = "target"
+                panel.lastArbitrageResults = data.results
+                panel.lastCraftResults = {}
+                panel.displayRows = data.rows
+                local targetName = (data.targetEntry and data.targetEntry.name)
+                    or ("Item " .. tostring(targetID))
+                local targetPrice = data.targetEntry and tonumber(data.targetEntry.price)
+                if not targetPrice or targetPrice <= 0 then
+                    statusSummary:SetText(string.format("|cffffaa00%s: No cached AH price|r", targetName))
+                    SetNoResultsMessage(string.format("'%s' has no price in the built market cache.", targetName))
                 else
-                    SetNoResultsMessage("Target has no processing definitions in the current dataset yet.")
+                    statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", targetName, #panel.displayRows))
+                    local hasTargetDefinition = MarketSync.HasProcessingDefinitionForTarget
+                        and MarketSync.HasProcessingDefinitionForTarget(targetID)
+                    if hasTargetDefinition then
+                        SetNoResultsMessage("No cached AH items yield this material.")
+                    else
+                        SetNoResultsMessage("Target has no processing definitions in the current dataset yet.")
+                    end
                 end
-            end
-            ApplyDisplaySort()
+                ApplyDisplaySort()
+            end)
             return
         end
 
         if panel.activeMode == "process" then
-            local results = MarketSync.FindArbitrageByProcess and MarketSync.FindArbitrageByProcess(panel.selectedProcess, 0) or {}
-            panel.lastMode = "process"
-            panel.lastArbitrageResults = results
-            panel.lastCraftResults = {}
-            panel.displayRows = BuildArbitrageDisplay(results)
-
-            statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", panel.selectedProcess or "ALL", #panel.displayRows))
-            SetNoResultsMessage("No processable items with current auction prices found.")
-            ApplyDisplaySort()
+            local processType = panel.selectedProcess
+            RunCachedWork(function(snapshot, yieldStep)
+                local results = MarketSync.FindArbitrageByProcess
+                    and MarketSync.FindArbitrageByProcess(processType, 0, snapshot, yieldStep) or {}
+                return { results = results, rows = BuildArbitrageDisplay(results, yieldStep) }
+            end, function(data)
+                panel.lastMode = "process"
+                panel.lastArbitrageResults = data.results
+                panel.lastCraftResults = {}
+                panel.displayRows = data.rows
+                statusSummary:SetText(string.format("|cff00ff00%s|r: %d cached result(s)",
+                    processType or "ALL", #panel.displayRows))
+                SetNoResultsMessage("No processable items with prices in the built market cache.")
+                ApplyDisplaySort()
+            end)
             return
         end
 
@@ -1914,38 +2045,44 @@ function MarketSync.CreateProcessingPanel(parent)
                 craftSet[tonumber(itemID)] = true
             end
         end
-        local results = MarketSync.FindProfitableCrafts and MarketSync.FindProfitableCrafts(profession, 0, panel.selectedCharacterKey, craftSet) or {}
+        local characterKey = panel.selectedCharacterKey
+        local setName = panel.activeCraftSet and panel.activeCraftSet.name
+        RunCachedWork(function(snapshot, yieldStep)
+            local results = MarketSync.FindProfitableCrafts
+                and MarketSync.FindProfitableCrafts(profession, 0, characterKey, craftSet,
+                    snapshot, yieldStep) or {}
+            return { results = results, rows = BuildCraftDisplay(results, yieldStep) }
+        end, function(data)
+            panel.lastMode = "craft"
+            panel.lastCraftResults = data.results
+            panel.lastArbitrageResults = {}
+            panel.displayRows = data.rows
 
-        panel.lastMode = "craft"
-        panel.lastCraftResults = results
-        panel.lastArbitrageResults = {}
-        panel.displayRows = BuildCraftDisplay(results)
-
-        local profitableCount = 0
-        for _, row in ipairs(results) do
-            if row and row.meetsMargin then
-                profitableCount = profitableCount + 1
+            local profitableCount = 0
+            for _, row in ipairs(data.results) do
+                if row and row.meetsMargin then profitableCount = profitableCount + 1 end
             end
-        end
-
-        local sourceLabel = panel.selectedCharacterKey and Truncate(panel.selectedCharacterKey, 14) or "This character"
-        local setLabel = panel.activeCraftSet and (" / " .. Truncate(panel.activeCraftSet.name, 14)) or ""
-        statusSummary:SetText(string.format("|cff00ff00%s / %s%s|r: %d profitable / %d total", sourceLabel, profession, setLabel, profitableCount, #panel.displayRows))
-        if #panel.displayRows == 0 then
-            local knownCount = MarketSync.GetCraftRecipeCount and MarketSync.GetCraftRecipeCount(profession, panel.selectedCharacterKey) or 0
-            if knownCount == 0 then
-                SetNoResultsMessage("No known recipes cached yet. Open your profession window once to index recipes.")
-            elseif panel.activeCraftSet then
-                SetNoResultsMessage("No recipes in this list are known by the selected crafter and profession.")
+            local sourceLabel = characterKey and Truncate(characterKey, 14) or "This character"
+            local setLabel = setName and (" / " .. Truncate(setName, 14)) or ""
+            statusSummary:SetText(string.format("|cff00ff00%s / %s%s|r: %d profitable / %d cached",
+                sourceLabel, profession, setLabel, profitableCount, #panel.displayRows))
+            if #panel.displayRows == 0 then
+                local knownCount = MarketSync.GetCraftRecipeCount
+                    and MarketSync.GetCraftRecipeCount(profession, characterKey) or 0
+                if knownCount == 0 then
+                    SetNoResultsMessage("No known recipes cached yet. Open your profession window once to index recipes.")
+                elseif setName then
+                    SetNoResultsMessage("No recipes in this list are known by the selected crafter and profession.")
+                else
+                    SetNoResultsMessage("No craft rows have complete cached pricing data yet.")
+                end
             else
-                SetNoResultsMessage("No craft rows have complete pricing data yet.")
+                SetNoResultsMessage("Showing cached recipes sorted by highest profit.")
             end
-        else
-            SetNoResultsMessage("Showing recipes sorted by highest profit.")
-        end
-        panel.sortField = "valueSort"
-        panel.sortAscending = false
-        ApplyDisplaySort()
+            panel.sortField = "valueSort"
+            panel.sortAscending = false
+            ApplyDisplaySort()
+        end)
     end
 
     local function BuildSelectionSummary(selection)
@@ -1964,6 +2101,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local function ApplySelection(selection)
         if not selection then return end
+        panel:CancelCachedWork()
 
         panel.activeMode = tostring(selection.mode or "target")
         panel.selectedTargetID = tonumber(selection.targetItemID)

@@ -196,6 +196,40 @@ test('lists First Aid but does not invent unscanned recipes', () => {
   `);
 });
 
+test('current character profession dropdown excludes unlearned cached crafts', () => {
+  const L = createLuaState(`
+    GetProfessions = function() return 1, 2, nil, nil, 3, 4 end
+    GetProfessionInfo = function(idx)
+      return ({ [1] = "Engineering", [2] = "Mining", [3] = "Cooking", [4] = "First Aid" })[idx]
+    end
+  `);
+
+  execLua(L, `
+    MarketSyncDB.KnownProfessionsByCharacter = {
+      ["TestChar-Faerlina"] = { updatedAt = 1, professions = { Enchanting = true, Engineering = true } }
+    }
+    MarketSyncDB.KnownCraftingRecipesByCharacter = {
+      ["TestChar-Faerlina"] = {
+        __cacheVersion = 2,
+        Enchanting = { cacheVersion = 2, recipes = {
+          { name = "Minor Wizard Oil", outputItemID = 20744,
+            mats = { { itemID = 10940, qty = 1 } } }
+        } }
+      }
+    }
+    local professions = MarketSync.GetProcessingProfessions()
+    local found = {}
+    for _, name in ipairs(professions) do found[name] = true end
+    assert(found.Engineering and found.Cooking and found["First Aid (Health)"],
+      "Current engineering, cooking, and first aid should remain selectable")
+    assert(not found.Enchanting, "Unlearned Enchanting must not reappear from cached recipes")
+    assert(not found.Mining, "Gathering professions do not have craft-profit recipes")
+    GetProfessions = function() return 2 end
+    local gatheringOnly = MarketSync.GetProcessingProfessions()
+    assert(#gatheringOnly == 0, "A known gathering-only character must not inherit stale craft professions")
+  `);
+});
+
 // 5. Dynamic Alchemy Health Potion Aggregation Test
 test('dynamically aggregates scanned Alchemy health potions into First Aid (Health)', () => {
   const L = createLuaState(`
@@ -272,6 +306,154 @@ test('disenchant range uses priced outcomes from the same probability row as EV'
     assert(math.abs(gross - 2225) < 0.01, "Expected gross EV from probability-weighted quantities")
     assert(ev == 2113, "Expected 5% AH-cut net EV")
     assert(low == 950 and high == 2850, "Expected min/max outcome after AH cut")
+  `);
+});
+
+test('broad Processing search reads only the built cache without item or price queries', () => {
+  const L = createLuaState('');
+  execLua(L, `
+    local index = {}
+    for id = 10000, 10260 do
+      index[tostring(id)] = { itemID = id, name = "Unpriced", price = 0 }
+    end
+    index["999"] = { itemID = 999, name = "Cached Green", rarity = 2,
+      ilvl = 16, classID = 4, price = 100, age = 0 }
+    for _, drop in ipairs(MarketSync.GetDisenchantDropList(2, 16, 4)) do
+      index[tostring(drop.itemID)] = { itemID = drop.itemID, name = "Cached Material",
+        price = 1000, age = 0 }
+    end
+    MarketSync.GetProcessingIndexSources = function()
+      return index, { ["999"] = { itemID = 999, name = "Cached Guild Green", rarity = 2,
+        ilvl = 16, classID = 4, price = 80, age = 0 } }
+    end
+    MarketSync.GetAuctionPrice = function() error("live price lookup during bulk search") end
+    MarketSync.GetItemInfo = function() error("item request during bulk search") end
+    AUCTIONATOR_PRICE_DATABASE = setmetatable({}, {
+      __pairs = function() error("raw Auctionator DB walked") end,
+    })
+    local batches = 0
+    local snapshot = MarketSync.BuildProcessingCacheSnapshot(function()
+      batches = batches + 1
+    end)
+    assert(snapshot.indexedRows > 250 and batches > 0,
+      "Large cache snapshot should expose bounded work steps")
+    assert(snapshot.prices[999] and not snapshot.prices[10000],
+      "Only priced, resolved index rows may become candidates")
+    assert(snapshot.prices[999].price == 80,
+      "Ready guild cache prices must be included in the snapshot")
+    local rows = MarketSync.FindArbitrageByProcess("DISENCHANT", 0, snapshot)
+    assert(#rows == 1 and rows[1].inputItemID == 999,
+      "Disenchant search should evaluate the cached green item only")
+  `);
+});
+
+test('browse placeholders recover after tooltip loads without a bulk rebuild', () => {
+  const L = createLuaState('');
+  const prefix = uiBrowseLua.slice(0, uiBrowseLua.indexOf('-- PARSE ITEM ID from a dbKey'));
+  execLua(L, `
+    scheduled = {}
+    C_Timer = { After = function(_, fn) scheduled[#scheduled + 1] = fn end }
+    CreateFrame = function()
+      itemEvents = {
+        RegisterEvent = function() end,
+        SetScript = function(self, _, fn) self.onEvent = fn end,
+      }
+      return itemEvents
+    end
+    MarketSync.GetCurrentScanDay = function() return 100 end
+    local available = false
+    MarketSync.GetItemInfo = function(id)
+      if available and id == 2515 then
+        return "Flèche pointue", "|cffffffff|Hitem:2515:0|h[Flèche pointue]|h|r",
+          1, 10, 10, "Projectile", "Arrow", 200, "", 132382, 0, 6, 2
+      end
+    end
+    ${prefix}
+    local entries = {}
+    for i = 1, 45 do
+      entries[i] = BuildIndexEntry("2515", 2515, { m = 123, d = 96 }, "personal", true)
+      assert(entries[i].isPlaceholder, "Expected unresolved placeholder")
+    end
+    assert(not MarketSyncDB.ItemInfoCache or not MarketSyncDB.ItemInfoCache[2515],
+      "Placeholder must never be saved as a real localized item")
+    local refreshes = 0
+    local visible = { IsShown = function() return true end,
+      UpdateResults = function() refreshes = refreshes + 1 end }
+    browsePanels[visible] = true
+    available = true
+    itemEvents.onEvent(nil, "GET_ITEM_INFO_RECEIVED", 2515, true)
+    itemEvents.onEvent(nil, "ITEM_DATA_LOAD_RESULT", 2515, true)
+    assert(#scheduled == 1, "Load events should coalesce")
+    table.remove(scheduled, 1)()
+    local resolved = 0
+    for _, entry in ipairs(entries) do
+      if not entry.isPlaceholder then resolved = resolved + 1 end
+      assert(entry.price == 123 and entry.age == 4 and entry.source == "Personal",
+        "Resolution must preserve market price and provenance")
+    end
+    assert(resolved == 20, "Late resolution must be capped at 20 rows per tick")
+    while #scheduled > 0 do table.remove(scheduled, 1)() end
+    for _, entry in ipairs(entries) do
+      assert(entry.name == "Flèche pointue" and entry.icon == 132382 and entry.classID == 6,
+        "Localized name, icon and filters should recover in place")
+    end
+    assert(refreshes == 3, "Refresh visible rows once per batch, not per item")
+    assert(MarketSyncDB.ItemInfoCache[2515].n == "Flèche pointue", "Persist successful resolution")
+    local unavailable = BuildIndexEntry("999999", 999999, { m = 1 }, "personal", true)
+    ScheduleBrowseItemResolution(999999)
+    table.remove(scheduled, 1)()
+    assert(unavailable.isPlaceholder and #scheduled == 0, "Missing IDs must not spin forever")
+    itemEvents.onEvent(nil, "GET_ITEM_INFO_RECEIVED", 999999, false)
+    assert(#scheduled == 0, "Failed loads must not trigger another query")
+  `);
+});
+
+test('Processing cache prefers fresh observations over stale lower prices', () => {
+  const L = createLuaState('');
+  execLua(L, `
+    MarketSync.GetProcessingIndexSources = function()
+      return {
+        a = { itemID = 1, price = 100, age = 0, exactTime = 200 },
+        b = { itemID = 2, price = 100, age = 0, exactTime = 200 },
+        c = { itemID = 3, price = 100, age = 0 },
+      }, {
+        a = { itemID = 1, price = 1, age = 5, exactTime = 100 },
+        b = { itemID = 2, price = 1, age = 0, exactTime = 100 },
+        c = { itemID = 3, price = 1 },
+      }
+    end
+    local snapshot = MarketSync.BuildProcessingCacheSnapshot()
+    for id = 1, 3 do
+      assert(snapshot.prices[id].price == 100, "Older or unknown-age bargain displaced fresh price")
+    end
+  `);
+});
+
+test('Craft Profit search uses saved recipes and cached prices without rescanning professions', () => {
+  const L = createLuaState('');
+  execLua(L, `
+    MarketSyncDB.KnownCraftingRecipesByCharacter = {
+      ["TestChar-Faerlina"] = {
+        __cacheVersion = 2,
+        Alchemy = { cacheVersion = 2, recipes = {
+          { name = "Minor Healing Potion", outputItemID = 118, outputQty = 1,
+            mats = { { itemID = 2447, qty = 1 } } }
+        } }
+      }
+    }
+    MarketSync.RefreshKnownCraftingRecipes = function()
+      error("Craft Profit must not rescan the profession")
+    end
+    MarketSync.GetAuctionPrice = function()
+      error("Craft Profit must not query a live price")
+    end
+    local snapshot = { prices = {
+      [118] = { itemID = 118, name = "Minor Healing Potion", price = 2000, age = 0 },
+      [2447] = { itemID = 2447, name = "Peacebloom", price = 500, age = 0 },
+    } }
+    local rows = MarketSync.FindProfitableCrafts("Alchemy", 0, nil, nil, snapshot)
+    assert(#rows == 1 and rows[1].craftCost == 500 and rows[1].meetsMargin,
+      "Craft Profit should use saved recipes and snapshot prices")
   `);
 });
 
@@ -400,6 +582,145 @@ test('respects user overrides on intermediate craftables', () => {
   `);
 });
 
+test('craft requests aggregate selected raw purchases without mixing in finished intermediates', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      return ({ [2775] = 200, [3575] = 1500, [3859] = 2500 })[id] or 0
+    end
+  `);
+  execLua(L, `
+    local request = { itemIDs = { 3859 }, quantities = { [3859] = 3 },
+      choices = { [3575] = true }, selectedBuys = {} }
+    local plan = MarketSync.BuildCraftPurchasePlan(request)
+    assert(#plan.recipes == 1 and plan.recipes[1].outputQty == 3)
+    assert(plan.buys[2775] and plan.buys[2775].qty == 3, "Expected 3 Iron Ore")
+    assert(plan.buys[3857] and plan.buys[3857].qty == 3, "Expected 3 Coal")
+    assert(not plan.buys[3575], "Crafted intermediate must not be bought")
+    assert(plan.estimatedBuyCost == 2100, "Expected 3 x 700c raw cost")
+    request.selectedBuys[2775] = false
+    local unchecked = MarketSync.BuildCraftPurchasePlan(request)
+    assert(not unchecked.buys[2775] and unchecked.buys[3857].qty == 3,
+      "Unchecking ore must omit only ore from export")
+    request.choices[3575] = false
+    request.selectedBuys[3575] = true
+    local finished = MarketSync.BuildCraftPurchasePlan(request)
+    assert(finished.buys[3575] and finished.buys[3575].qty == 3)
+    assert(not finished.buys[2775], "Buying intermediate must not include its raw input")
+    assert(not finished.provided[2775], "Buying parent must not also require provided children")
+    request.selectedBuys[3575] = false
+    local supplied = MarketSync.BuildCraftPurchasePlan(request)
+    assert(supplied.provided[3575] and supplied.provided[3575].qty == 3,
+      "Providing parent should be the only terminal requirement for that branch")
+    assert(not supplied.buys[2775] and not supplied.provided[2775],
+      "Providing parent must not include any lower-tier inputs")
+    request.choices[3575] = true
+    local restored = MarketSync.BuildCraftPurchasePlan(request)
+    assert(restored.buys[3857] and restored.buys[3857].qty == 3,
+      "Switching back to Craft should restore the active child requirements")
+  `);
+});
+
+test('output-less SoD profession actions still build material purchase plans', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      return ({ [4387] = 500, [3575] = 1000, [2835] = 50 })[id] or 0
+    end
+  `);
+  execLua(L, `
+    local tinker = { name = "Tinker: Magnetic Displacement", outputQty = 1,
+      mats = { { itemID = 4387, qty = 2 }, { itemID = 2835, qty = 1 } } }
+    local plan = MarketSync.BuildCraftPurchasePlan({
+      recipe = tinker, quantity = 2, choices = { [4387] = false },
+      selectedBuys = { [2835] = false },
+    })
+    assert(#plan.recipes == 1 and plan.recipes[1].itemID == nil,
+      "Output-less action must not require a synthetic item ID")
+    assert(plan.buys[4387] and plan.buys[4387].qty == 4,
+      "Transient plan must calculate repeated material quantities")
+    assert(plan.provided[2835] and plan.provided[2835].qty == 2,
+      "Provided material choice must survive without an output ID")
+    assert(plan.buyUnits == 4 and plan.providedUnits == 2,
+      "Summary counts must include only active terminal materials")
+  `);
+  if (!uiCraftingInfoLua.includes('BuildCurrentCraftRequest(self)') ||
+      !uiCraftingInfoLua.includes('BuildCurrentCraftRequest(f)')) {
+    throw new Error('Craft tree summary and export must use output-less-safe requests');
+  }
+});
+
+test('explicit craft choice survives missing AH prices and reports uncertainty', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id) return 0 end
+  `);
+  execLua(L, `
+    local cost = MarketSync.CalculateGroundUpCraftCost(3859, { [3575] = true })
+    assert(cost.reagentsTree[1].chooseCraft, "User Craft choice must not be silently changed")
+    assert(cost.hasMissing, "Unknown material price must remain visible")
+  `);
+});
+
+test('craft export replaces the separate shopping snapshot with selected quantities', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      return ({ [2775] = 200, [3575] = 1500, [3859] = 2500 })[id] or 0
+    end
+    local lists, quantities = {}, {}
+    MarketSync.Favorites = {
+      GetLists = function() local out = {}; for name in pairs(lists) do out[#out + 1] = name end; return out end,
+      CreateList = function(name) lists[name] = {}; quantities[name] = {}; return true end,
+      GetList = function(name) return lists[name] end,
+      AddToList = function(name, id) lists[name][#lists[name] + 1] = id; return true end,
+      RemoveFromList = function(name, id)
+        for i, found in ipairs(lists[name]) do if found == id then table.remove(lists[name], i); break end end
+      end,
+      SetQuantity = function(name, id, qty) quantities[name][id] = qty end,
+      GetQuantity = function(name, id) return quantities[name][id] end,
+    }
+  `);
+  execLua(L, `
+    local request = { name = "Steel", itemIDs = { 3859 }, quantities = { [3859] = 2 },
+      choices = { [3575] = true }, selectedBuys = {} }
+    local ok, count, name = MarketSync.ExportCraftPurchasesToShoppingList(request)
+    assert(ok and count == 2 and name == "Steel Materials")
+    assert(MarketSync.Favorites.GetQuantity(name, 2775) == 2)
+    request.selectedBuys[2775] = false
+    ok, count = MarketSync.ExportCraftPurchasesToShoppingList(request)
+    assert(ok and count == 1 and #MarketSync.Favorites.GetList(name) == 1)
+    assert(MarketSync.Favorites.GetList(name)[1] == 3857, "Old unchecked ore must be removed")
+  `);
+});
+
+test('saved craft plans keep recipe snapshots and farm versus buy choices separate', () => {
+  const L = createLuaState(`
+    MarketSync.GetAuctionPrice = function(id)
+      return ({ [900001] = 1000, [900002] = 80, [900003] = 20 })[id] or 0
+    end
+  `);
+  execLua(L, `
+    local liveRecipe = { outputItemID = 900001, name = "Test Widget", outputQty = 1,
+      mats = { { itemID = 900002, qty = 2 }, { itemID = 900003, qty = 1 } } }
+    assert(MarketSync.GetRecipeForOutput(900001) == nil, "Test recipe should not exist in lookup")
+    local farm = MarketSync.SaveCraftRequest("Farm Route", liveRecipe, {
+      quantity = 3, selectedBuys = { [900002] = false } })
+    local buy = MarketSync.SaveCraftRequest("Buy Route", liveRecipe, {
+      quantity = 2, selectedBuys = { [900002] = true } })
+    assert(farm and buy, "Live profession recipe must save without a lookup hit")
+    local saved = MarketSync.ListProcessingCraftSets()
+    assert(#saved == 2 and saved[1].name == "Buy Route" and saved[2].name == "Farm Route")
+    local buyPlan = MarketSync.BuildCraftPurchasePlan(saved[1])
+    local farmPlan = MarketSync.BuildCraftPurchasePlan(saved[2])
+    assert(buyPlan.buys[900002].qty == 4 and not buyPlan.provided[900002])
+    assert(farmPlan.provided[900002].qty == 6 and not farmPlan.buys[900002])
+    assert(farmPlan.buys[900003].qty == 3, "Other ingredients still need buying")
+    assert(saved[2].recipes[900001].mats[1].itemID == 900002,
+      "Recipe snapshot should remain available for editing offline")
+    MarketSync.SaveCraftRequest("Farm Route", liveRecipe, { quantity = 5 })
+    local revised = MarketSync.ListProcessingCraftSets()[2]
+    assert(#revised.itemIDs == 1 and revised.quantities[900001] == 5,
+      "Editing a craft should update its saved quantity without duplicating the recipe")
+  `);
+});
+
 // 10. Recipe Profit & 5% AH Cut Calculation Test
 test('calculates recipe net profit with 5% AH cut', () => {
   const L = createLuaState(`
@@ -525,6 +846,8 @@ test('classic crafting info never creates a reagent-label anchor cycle', () => {
       function r:SetFrameLevel() end
       function r:GetFrameLevel() return 1 end
       function r:EnableMouse() end
+      function r:Enable() self.enabled = true end
+      function r:Disable() self.enabled = false end
       function r:SetNormalFontObject() end
       function r:SetHighlightFontObject() end
       function r:SetScript(name, fn) self.scripts[name] = fn end
@@ -649,15 +972,28 @@ test('saved craft sets filter profitability without changing the recipe cache', 
         Alchemy = { cacheVersion = 2, recipes = {
           { name = "Minor Healing Potion", outputItemID = 118, outputQty = 1,
             mats = { { itemID = 2447, qty = 1 } } },
-          { name = "Linen Bandage", outputItemID = 1251, outputQty = 1,
+          { name = "Linen Bandage", outputItemID = 1251, outputQty = 1, recipeIndex = 3275,
             mats = { { itemID = 2592, qty = 1 } } }
         } }
       }
     }
+    MarketSyncDB.KnownCraftingRecipesByCharacter["TestChar-Faerlina"] =
+      MarketSyncDB.KnownCraftingRecipesByCharacter["Alt-Faerlina"]
     local saved = MarketSync.UpsertProcessingCraftSet("My crafts", { 1251, 1251, 0 })
     assert(saved and #saved.itemIDs == 1 and saved.itemIDs[1] == 1251, "Expected a clean, deduplicated list")
     local lists = MarketSync.ListProcessingCraftSets()
     assert(#lists == 1 and lists[1].name == "My crafts", "Expected persisted craft list")
+    assert(MarketSync.GetCraftOutputForRecipeID(123456) == nil, "Unknown recipe cursor must not resolve")
+    assert(MarketSync.GetCraftOutputForRecipeID(3275) == 1251, "Recipe cursor should resolve to crafted output")
+    MarketSync.UpsertProcessingCraftSet("My crafts", { 1251 }, { [2592] = true })
+    local checked = MarketSync.ListProcessingCraftSets()[1]
+    assert(checked.checked[2592] == true, "Craft checklist state should persist")
+    MarketSync.UpsertProcessingCraftSet("My crafts", { 1251 })
+    assert(MarketSync.ListProcessingCraftSets()[1].checked[2592] == true,
+      "Updating recipe selections should preserve checklist state")
+    local empty = MarketSync.UpsertProcessingCraftSet("Future crafts", {})
+    assert(empty and #MarketSync.ListProcessingCraftSets() == 2, "Empty craft list should be creatable")
+    assert(MarketSync.DeleteProcessingCraftSet("Future crafts"), "Expected empty list deletion")
     local filtered = MarketSync.FindProfitableCrafts("Alchemy", 0, "Alt-Faerlina", { [1251] = true })
     assert(#filtered == 1 and filtered[1].outputItemID == 1251, "Expected only selected output")
     assert(MarketSync.GetCraftRecipeCount("Alchemy", "Alt-Faerlina") == 2, "Filtering must not alter cached recipes")

@@ -31,9 +31,28 @@ local function ApplyBackdrop(frame, bg, edge, edgeSize, insets)
             tile = true, tileSize = 16, edgeSize = edgeSize or 14,
             insets = insets or { left = 4, right = 4, top = 4, bottom = 4 },
         })
-        frame:SetBackdropColor(0.06, 0.06, 0.08, 0.95)
-        frame:SetBackdropBorderColor(0.4, 0.4, 0.5, 0.9)
+        frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
+        frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     end
+end
+
+local function BuildCurrentCraftRequest(frame)
+    local recipe = frame.currentRecipe
+    local id = recipe and tonumber(recipe.outputItemID)
+    local request = {
+        name = recipe and recipe.name or "Craft Mats",
+        choices = frame.userOverrides,
+        selectedBuys = frame.selectedBuys,
+    }
+    if id and id > 0 then
+        request.itemIDs = { id }
+        request.quantities = { [id] = frame.targetQuantity }
+        request.recipes = { [id] = MarketSync.SnapshotCraftRecipe(recipe) }
+    else
+        request.recipe = recipe
+        request.quantity = frame.targetQuantity
+    end
+    return request
 end
 
 -- ================================================================
@@ -60,6 +79,7 @@ local function CreateCraftingTreeFrame()
     if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(f) end
 
     f.userOverrides = {}
+    f.selectedBuys = {}
     f.expandedNodes = {}
     f.allExpanded = false
     f.targetQuantity = 1
@@ -112,12 +132,12 @@ local function CreateCraftingTreeFrame()
     presetBg:SetSize(488, 28)
     presetBg:SetPoint("TOPLEFT", 16, -60)
     ApplyBackdrop(presetBg, "Interface\\Buttons\\WHITE8X8", "Interface\\Buttons\\WHITE8X8", 1, { left = 1, right = 1, top = 1, bottom = 1 })
-    presetBg:SetBackdropColor(0.12, 0.12, 0.15, 0.9)
-    presetBg:SetBackdropBorderColor(0.25, 0.25, 0.3, 0.8)
+    presetBg:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    presetBg:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
 
     local treeHint = presetBg:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     treeHint:SetPoint("TOPLEFT", presetBg, "BOTTOMLEFT", 2, -5)
-    treeHint:SetText("Choose Buy or Craft per item. Expand rows for ingredients; group checks set craft choices for that tier.")
+    treeHint:SetText("Checked Buy = purchase; unchecked Buy = provide yourself. Craft expands ingredients.")
 
     local pLabel = presetBg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     pLabel:SetPoint("LEFT", 10, 0)
@@ -128,6 +148,7 @@ local function CreateCraftingTreeFrame()
     btnOptimal:SetNormalFontObject("GameFontNormalSmall")
     btnOptimal:SetScript("OnClick", function()
         f.userOverrides = {}
+        f:ExpandActiveNodes()
         f:RefreshTree()
     end)
 
@@ -147,6 +168,7 @@ local function CreateCraftingTreeFrame()
         if f.lastCostData and f.lastCostData.reagentsTree then
             MarkBuy(f.lastCostData.reagentsTree)
         end
+        f.expandedNodes = {}
         f:RefreshTree()
     end)
 
@@ -159,6 +181,7 @@ local function CreateCraftingTreeFrame()
             for _, n in ipairs(nodes or {}) do
                 if n.canCraft then
                     f.userOverrides[n.itemID] = true
+                    f.expandedNodes[n.itemID] = true
                 end
                 if n.subMats then MarkCraft(n.subMats) end
             end
@@ -203,8 +226,8 @@ local function CreateCraftingTreeFrame()
     summaryBox:SetSize(488, 58)
     summaryBox:SetPoint("BOTTOMLEFT", 16, 42)
     ApplyBackdrop(summaryBox, "Interface\\Buttons\\WHITE8X8", "Interface\\Buttons\\WHITE8X8", 1, { left = 1, right = 1, top = 1, bottom = 1 })
-    summaryBox:SetBackdropColor(0.08, 0.08, 0.1, 0.95)
-    summaryBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.8)
+    summaryBox:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    summaryBox:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     local sumDirect = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     sumDirect:SetPoint("TOPLEFT", 12, -8)
@@ -224,16 +247,79 @@ local function CreateCraftingTreeFrame()
 
     -- Action Buttons (Bottom Bar)
     local btnExport = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnExport:SetSize(180, 24); btnExport:SetPoint("BOTTOMLEFT", 16, 12); btnExport:SetText("Export to AH Shopping List")
+    btnExport:SetSize(195, 24); btnExport:SetPoint("BOTTOMLEFT", 16, 12); btnExport:SetText("Export checked to Shopping")
     btnExport:SetScript("OnClick", function()
-        if f.lastCostData and f.lastCostData.reagentsTree then
-            local rName = f.currentRecipe and f.currentRecipe.name or "Craft Mats"
-            local success, countOrErr = MarketSync.ExportCustomShoppingList(f.lastCostData.reagentsTree, f.userOverrides, "MarketSync " .. rName)
+        if f.currentRecipe then
+            local rName = f.currentRecipe.name or "Craft Mats"
+            local request = BuildCurrentCraftRequest(f)
+            local success, countOrErr, name = MarketSync.ExportCraftPurchasesToShoppingList(request, "Craft " .. rName)
             if success then
-                print(string.format("|cff00ff00[MarketSync]|r Exported %d items to Auctionator shopping list: MarketSync %s", countOrErr, rName))
+                print(string.format("|cff00ff00[MarketSync]|r Exported %d material types to Shopping list: %s", countOrErr, name))
             else
                 print("|cffff2020[MarketSync]|r Export failed: " .. tostring(countOrErr))
             end
+        end
+    end)
+
+    local btnCraftList = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnCraftList:SetSize(125, 24)
+    btnCraftList:SetPoint("LEFT", btnExport, "RIGHT", 5, 0)
+    btnCraftList:SetText("Save Craft... v")
+    f.btnCraftList = btnCraftList
+    local craftSaveMenu = CreateFrame("Frame", "MarketSyncCraftSaveMenu", f, "UIDropDownMenuTemplate")
+    craftSaveMenu:Hide()
+    local function SaveRequest(name)
+        if not f.currentRecipe then return end
+        local saved, reason = MarketSync.SaveCraftRequest(name, f.currentRecipe, {
+            quantity = f.targetQuantity, choices = f.userOverrides, selectedBuys = f.selectedBuys,
+        })
+        if not saved then
+            print("|cffff4444[MarketSync]|r " .. tostring(reason))
+            return
+        end
+        f.craftListName = saved.name
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.UpdateCraftView then
+            MarketSync.AHSidecar.UpdateCraftView()
+        end
+        print("|cff00ff00[MarketSync]|r Saved craft request to " .. saved.name)
+    end
+    if UIDropDownMenu_Initialize then
+        UIDropDownMenu_Initialize(craftSaveMenu, function(_, level)
+            local names = { "Crafts" }
+            local seen = { Crafts = true }
+            for _, list in ipairs(MarketSync.ListProcessingCraftSets()) do
+                if not seen[list.name] then names[#names + 1] = list.name; seen[list.name] = true end
+            end
+            for _, name in ipairs(names) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = name
+                info.checked = name == f.craftListName
+                info.func = function() SaveRequest(name) end
+                UIDropDownMenu_AddButton(info, level)
+            end
+            local newInfo = UIDropDownMenu_CreateInfo()
+            newInfo.text = "+ New Craft List..."
+            newInfo.func = function()
+                StaticPopupDialogs["MARKETSYNC_NEW_CRAFT_REQUEST_LIST"] = {
+                    text = "Name this Craft List:", button1 = "Save", button2 = "Cancel",
+                    hasEditBox = true, timeout = 0, whileDead = true, hideOnEscape = true,
+                    OnAccept = function(popup)
+                        local box = popup.editBox or popup.EditBox
+                            or (popup.GetName and _G[popup:GetName() .. "EditBox"])
+                        local name = box and box:GetText()
+                        if name and name:match("%S") then SaveRequest(name) end
+                    end,
+                }
+                StaticPopup_Show("MARKETSYNC_NEW_CRAFT_REQUEST_LIST")
+            end
+            UIDropDownMenu_AddButton(newInfo, level)
+        end)
+    end
+    btnCraftList:SetScript("OnClick", function()
+        if ToggleDropDownMenu then
+            ToggleDropDownMenu(1, nil, craftSaveMenu, btnCraftList, 0, 0)
+        else
+            SaveRequest(f.craftListName or "Crafts")
         end
     end)
 
@@ -252,7 +338,7 @@ local function CreateCraftingTreeFrame()
 
             local groupBG = row:CreateTexture(nil, "BACKGROUND")
             groupBG:SetAllPoints(row)
-            groupBG:SetColorTexture(0.12, 0.12, 0.16, 0.82)
+            groupBG:SetColorTexture(MarketSync.GetThemeColor("header"))
             groupBG:Hide()
             row.groupBG = groupBG
 
@@ -286,6 +372,10 @@ local function CreateCraftingTreeFrame()
             local check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
             check:SetSize(20, 20); check:SetPoint("LEFT", icon, "RIGHT", 4, 0)
             row.check = check
+            local buyCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            buyCheck:SetSize(18, 18)
+            buyCheck:SetPoint("RIGHT", row, "RIGHT", -3, 0)
+            row.buyCheck = buyCheck
 
             -- Main Item Text (Quantity + Name)
             local itemText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -305,6 +395,21 @@ local function CreateCraftingTreeFrame()
         return row
     end
 
+    function f:ExpandActiveNodes()
+        if not self.currentRecipe then return end
+        local cost = MarketSync.CalculateGroundUpCraftCost(self.currentRecipe,
+            self.userOverrides, self.targetQuantity)
+        local function Expand(nodes)
+            for _, node in ipairs(nodes or {}) do
+                if node.chooseCraft and node.subMats and #node.subMats > 0 then
+                    self.expandedNodes[node.itemID] = true
+                    Expand(node.subMats)
+                end
+            end
+        end
+        Expand(cost and cost.reagentsTree)
+    end
+
     function f:RefreshTree()
         if not self.currentRecipe then return end
 
@@ -321,26 +426,32 @@ local function CreateCraftingTreeFrame()
         self.subtitle:SetText(string.format("|cffffd700%s|r (Total Yield: %d)", rName, cost.outputQty))
 
         -- Summary Strings
-        self.sumDirect:SetText("Direct Purchase Cost: " .. FormatMoney(cost.directCraftCost))
-        self.sumEffective:SetText("Effective Cost: " .. FormatMoney(cost.effectiveCost))
-
-        if cost.savings > 0 then
-            self.sumSavings:SetText(string.format("Gold Saved: |cff00ff00%s (%d%% saved)|r", FormatMoney(cost.savings), cost.savingsPct))
+        local outputItemID = tonumber(self.currentRecipe.outputItemID)
+        if outputItemID and outputItemID > 0 then
+            self.btnCraftList:Enable()
+            self.btnCraftList:SetText("Save Craft... v")
         else
-            self.sumSavings:SetText("|cff888888No savings (Direct purchase is optimal)|r")
+            self.btnCraftList:Disable()
+            self.btnCraftList:SetText("No item output")
         end
+        local plan = MarketSync.BuildCraftPurchasePlan(BuildCurrentCraftRequest(self))
+        self.sumDirect:SetText("Net AH sale: " .. FormatMoney(profitData.netRevenue))
+        self.sumEffective:SetText("Material value: " .. FormatMoney(cost.effectiveCost))
+        self.sumSavings:SetText(string.format("Buy: %s (%d units)  |  Provide: %d units",
+            FormatMoney(plan.estimatedBuyCost), plan.buyUnits, plan.providedUnits))
 
-        if profitData.outputPrice > 0 then
+        if profitData.outputPrice > 0 and not cost.hasMissing then
             local pVal = profitData.effectiveProfit
-            local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+            local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020-"
             local pStr = FormatMoney(math.abs(pVal))
-            self.sumProfit:SetText(string.format("Net Profit: %s%s|r (%d%%)", pCol, pStr, profitData.effectiveMarginPct))
+            self.sumProfit:SetText(string.format("Value profit: %s%s|r  ROI %d%%", pCol, pStr, profitData.effectiveMarginPct))
         else
-            self.sumProfit:SetText("|cff888888Profit: No AH price|r")
+            self.sumProfit:SetText("|cff888888Profit: price missing|r")
         end
 
-        -- Render every tier so the user can inspect the recipe even when the
-        -- current choice is to buy an intermediate item.
+    -- Only the active acquisition branch contributes materials. A bought or
+    -- self-provided parent stops the tree; its saved child preferences remain
+    -- available if the player switches that parent back to Craft.
         local displayRows = {}
         local function AddGroup(nodes, depth, parentNode)
             if not nodes or #nodes == 0 then return end
@@ -362,7 +473,8 @@ local function CreateCraftingTreeFrame()
             })
             for _, node in ipairs(nodes) do
                 table.insert(displayRows, { kind = "item", node = node, depth = depth })
-                if node.subMats and #node.subMats > 0 and self.expandedNodes[node.itemID] then
+                if node.chooseCraft and node.subMats and #node.subMats > 0
+                    and self.expandedNodes[node.itemID] then
                     AddGroup(node.subMats, depth + 1, node)
                 end
             end
@@ -393,6 +505,7 @@ local function CreateCraftingTreeFrame()
             row.check:Hide()
             row.itemText:Hide()
             row.detailText:Hide()
+            row.buyCheck:Hide()
 
             if rowData.kind == "group" then
                 row:SetHeight(22)
@@ -409,6 +522,7 @@ local function CreateCraftingTreeFrame()
                         local shouldCraft = check:GetChecked() == true
                         for _, craftNode in ipairs(rowData.craftableNodes) do
                             self.userOverrides[craftNode.itemID] = shouldCraft
+                            self.expandedNodes[craftNode.itemID] = shouldCraft
                         end
                         self:RefreshTree()
                     end)
@@ -431,7 +545,7 @@ local function CreateCraftingTreeFrame()
             row.groupBG:Hide()
 
             local indentX = depth * 16
-            if node.subMats and #node.subMats > 0 then
+            if node.chooseCraft and node.subMats and #node.subMats > 0 then
                 row.expand:ClearAllPoints()
                 row.expand:SetPoint("LEFT", row, "LEFT", indentX, 0)
                 row.expand:SetText(self.expandedNodes[node.itemID] and "-" or "+")
@@ -454,9 +568,9 @@ local function CreateCraftingTreeFrame()
 
             -- Item Text
             local nameColor = node.chooseCraft and "|cff00ffff" or "|cffffffff"
-            local sourceTag = node.isVendor and "|cff00ffcc[Vendor]|r "
-                or (node.canCraft and (node.chooseCraft and "|cff00ffff[CRAFT]|r " or "|cffffd75e[BUY]|r ")
-                or "|cffaaaaaa[RAW]|r ")
+            local sourceTag = node.chooseCraft and "|cff00ffff[CRAFT]|r "
+                or (self.selectedBuys[node.itemID] == false and "|cffaaaaff[PROVIDE]|r "
+                or (node.isVendor and "|cff00ffcc[BUY VENDOR]|r " or "|cffffd75e[BUY AH]|r "))
             row.itemText:SetText(string.format("%s%s%s x%d|r", sourceTag, nameColor, node.name, node.qty))
 
             -- Checkbox logic for craftable intermediate
@@ -470,9 +584,15 @@ local function CreateCraftingTreeFrame()
                 row.check:SetChecked(node.chooseCraft == true)
                 row.check:SetScript("OnLeave", function() GameTooltip:Hide() end)
                 row.check:SetScript("OnClick", function(chk)
-                    f.userOverrides[node.itemID] = chk:GetChecked()
+                    local shouldCraft = chk:GetChecked() == true
+                    f.userOverrides[node.itemID] = shouldCraft
+                    f.expandedNodes[node.itemID] = shouldCraft
                     f:RefreshTree()
                 end)
+                if not node.chooseCraft then
+                    row.buyCheck:SetChecked(self.selectedBuys[node.itemID] ~= false)
+                    row.buyCheck:Show()
+                end
 
                 -- Show the selected method and make the cheaper alternative explicit.
                 local buyStr = FormatMoney(node.directTotalPrice)
@@ -499,13 +619,22 @@ local function CreateCraftingTreeFrame()
                     else
                         GameTooltip:AddLine("Both choices cost the same.", 0.8, 0.8, 0.8, true)
                     end
-                    GameTooltip:AddLine("Checked: craft it. Unchecked: buy it. Expand the arrow to inspect the recipe either way.", 0.8, 0.8, 0.8, true)
+                    GameTooltip:AddLine("Checked: craft and show inputs. Unchecked: use this item directly; child inputs leave the active plan.", 0.8, 0.8, 0.8, true)
                     GameTooltip:Show()
                 end)
             else
-                row.check:Hide()
-                row.itemText:ClearAllPoints()
-                row.itemText:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+                row.check:Show()
+                row.check:SetChecked(self.selectedBuys[node.itemID] ~= false)
+                row.check:SetScript("OnEnter", function(check)
+                    GameTooltip:SetOwner(check, "ANCHOR_RIGHT")
+                    GameTooltip:SetText("Buy checked; provide yourself when unchecked")
+                    GameTooltip:Show()
+                end)
+                row.check:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                row.check:SetScript("OnClick", function(chk)
+                    self.selectedBuys[node.itemID] = chk:GetChecked() == true
+                    self:RefreshTree()
+                end)
 
                 -- Raw material detail
                 if node.directUnitPrice and node.directUnitPrice > 0 then
@@ -517,7 +646,14 @@ local function CreateCraftingTreeFrame()
                 end
             end
 
+            row.buyCheck:SetScript("OnClick", function(chk)
+                self.selectedBuys[node.itemID] = chk:GetChecked() == true
+                self:RefreshTree()
+            end)
+
             row.detailText:Show()
+            row.detailText:ClearAllPoints()
+            row.detailText:SetPoint("RIGHT", row, "RIGHT", row.buyCheck:IsShown() and -25 or -8, 0)
             row.itemText:Show()
             row:Show()
             curY = curY - 26
@@ -531,10 +667,21 @@ local function CreateCraftingTreeFrame()
     return f
 end
 
-function MarketSync.OpenCraftingTree(recipeOrOutputItemID, anchorFrame)
+function MarketSync.OpenCraftingTree(recipeOrOutputItemID, anchorFrame, savedCraftSet)
     local f = CreateCraftingTreeFrame()
-    f.targetQuantity = 1
-    f.userOverrides = {}
+    local itemID = type(recipeOrOutputItemID) == "table" and tonumber(recipeOrOutputItemID.outputItemID)
+        or tonumber(recipeOrOutputItemID)
+    local function Clone(source)
+        local result = {}
+        for key, value in pairs(source or {}) do result[key] = value end
+        return result
+    end
+    f.targetQuantity = savedCraftSet and (tonumber((savedCraftSet.quantities or {})[itemID]) or 1) or 1
+    f.userOverrides = Clone(savedCraftSet and savedCraftSet.choices)
+    f.selectedBuys = Clone(savedCraftSet and savedCraftSet.selectedBuys)
+    f.craftListName = savedCraftSet and savedCraftSet.name
+        or (MarketSync.AHSidecar and MarketSync.AHSidecar.GetActiveCraftListName
+            and MarketSync.AHSidecar.GetActiveCraftListName()) or "Crafts"
     f.expandedNodes = {}
     f.allExpanded = false
     f.expansionInitialized = false
@@ -553,6 +700,7 @@ function MarketSync.OpenCraftingTree(recipeOrOutputItemID, anchorFrame)
     end
 
     f.currentRecipe = recipe
+    f:ExpandActiveNodes()
 
     if anchorFrame and anchorFrame:IsShown() then
         f:ClearAllPoints()
@@ -617,6 +765,19 @@ local function InitClassicTradeSkillHook()
     end)
     infoFrame.btnBreakdown = btnBreakdown
 
+    local btnCraftList = CreateFrame("Button", nil, infoFrame, "UIPanelButtonTemplate")
+    btnCraftList:SetSize(96, 18)
+    btnCraftList:SetPoint("TOPRIGHT", btnBreakdown, "BOTTOMRIGHT", 0, -2)
+    btnCraftList:SetText("+ Craft List")
+    btnCraftList:SetNormalFontObject("GameFontNormalSmall")
+    btnCraftList:SetScript("OnClick", function()
+        local recipe = infoFrame.currentRecipe
+        if recipe and MarketSync.OpenCraftListForRecipe then
+            MarketSync.OpenCraftListForRecipe(recipe)
+        end
+    end)
+    infoFrame.btnCraftList = btnCraftList
+
     local function UpdateCraftingInfo()
         if not MarketSyncDB or MarketSyncDB.EnableProfessionCraftInfo == false then
             infoFrame:Hide()
@@ -665,6 +826,11 @@ local function InitClassicTradeSkillHook()
             recipeIndex = recipeIndex,
         }
         infoFrame.currentRecipe = recipe
+        if outputItemID and outputItemID > 0 then
+            btnCraftList:Enable()
+        else
+            btnCraftList:Disable()
+        end
 
         local profitData = MarketSync.CalculateRecipeProfit(recipe)
         if not profitData or not profitData.costData then
@@ -704,7 +870,9 @@ local function InitClassicTradeSkillHook()
             infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)%s", pCol, pStr, mCol, profitData.groundUpMarginPct, directComp))
             infoFrame.profitLabel:Show()
         else
-            infoFrame.profitLabel:SetText("|cff888888Profit: No AH price for output item|r")
+            infoFrame.profitLabel:SetText(outputItemID and
+                "|cff888888Profit: No AH price for output item|r" or
+                "|cff888888Profit: No item output|r")
             infoFrame.profitLabel:Show()
         end
 
@@ -824,6 +992,19 @@ local function InitModernProfessionsHook()
     end)
     infoFrame.btnBreakdown = btnBreakdown
 
+    local btnCraftList = CreateFrame("Button", nil, infoFrame, "UIPanelButtonTemplate")
+    btnCraftList:SetSize(96, 18)
+    btnCraftList:SetPoint("TOPRIGHT", btnBreakdown, "BOTTOMRIGHT", 0, -2)
+    btnCraftList:SetText("+ Craft List")
+    btnCraftList:SetNormalFontObject("GameFontNormalSmall")
+    btnCraftList:SetScript("OnClick", function()
+        local recipe = infoFrame.currentRecipe
+        if recipe and MarketSync.OpenCraftListForRecipe then
+            MarketSync.OpenCraftListForRecipe(recipe)
+        end
+    end)
+    infoFrame.btnCraftList = btnCraftList
+
     local function UpdateModernCraftingInfo()
         if not MarketSyncDB or MarketSyncDB.EnableProfessionCraftInfo == false then
             infoFrame:Hide()
@@ -867,6 +1048,11 @@ local function InitModernProfessionsHook()
             recipeIndex = recipeID,
         }
         infoFrame.currentRecipe = recipe
+        if outputItemID and outputItemID > 0 then
+            btnCraftList:Enable()
+        else
+            btnCraftList:Disable()
+        end
 
         local profitData = MarketSync.CalculateRecipeProfit(recipe)
         if not profitData or not profitData.costData then
@@ -893,7 +1079,9 @@ local function InitModernProfessionsHook()
             infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.groundUpMarginPct))
             infoFrame.profitLabel:Show()
         else
-            infoFrame.profitLabel:SetText("|cff888888Profit: No AH price for output item|r")
+            infoFrame.profitLabel:SetText(outputItemID and
+                "|cff888888Profit: No AH price for output item|r" or
+                "|cff888888Profit: No item output|r")
             infoFrame.profitLabel:Show()
         end
 

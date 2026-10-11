@@ -410,6 +410,9 @@ function AH.Attach()
 
     frame:HookScript("OnShow", function()
         MarketSync.IsAuctionHouseOpen = true
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(true)
+        end
         if AH.RefreshTabVisibility then
             AH.RefreshTabVisibility()
         end
@@ -429,6 +432,9 @@ function AH.Attach()
     end)
 
     frame:HookScript("OnHide", function()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(false)
+        end
         if panelScanner.Content and panelScanner.Content.Hide then panelScanner.Content:Hide() end
         panelScanner:Hide()
         if panelProcessing.Content and panelProcessing.Content.Hide then panelProcessing.Content:Hide() end

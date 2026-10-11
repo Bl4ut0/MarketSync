@@ -309,6 +309,7 @@ function MarketSync.InitializeDB()
             BlockedUsers = {},
             PassiveSync = true,
             DebugMode = false,
+            EnableDebuggingTab = true,
             EnableChatPriceCheck = true,
             EnableNotificationSounds = true,
             BuildCacheOnStartup = false,
@@ -332,6 +333,7 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.PassiveSync == nil then MarketSyncDB.PassiveSync = true end
     if MarketSyncDB.EnableNeutralSync == nil then MarketSyncDB.EnableNeutralSync = true end
     if MarketSyncDB.DebugMode == nil then MarketSyncDB.DebugMode = false end
+    if MarketSyncDB.EnableDebuggingTab == nil then MarketSyncDB.EnableDebuggingTab = true end
     -- The first theme build stored Forever as its implicit default. Migrate that
     -- default once so older clients pick their native look automatically.
     if not MarketSyncDB.UIThemeAutoMigrated then
@@ -362,6 +364,10 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.BuildCacheOnStartup == nil then MarketSyncDB.BuildCacheOnStartup = false end
     if not MarketSyncDB.CacheSpeed then MarketSyncDB.CacheSpeed = 2 end
     if not MarketSyncDB.MinimapIcon then MarketSyncDB.MinimapIcon = { hide = false, angle = 3.75 } end
+    if MarketSyncDB.MinimapIcon.lock == nil and MarketSyncDB.MinimapIcon.locked ~= nil then
+        MarketSyncDB.MinimapIcon.lock = MarketSyncDB.MinimapIcon.locked == true
+    end
+    MarketSyncDB.MinimapIcon.locked = nil
     if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
@@ -534,6 +540,166 @@ function MarketSync.GetEstimatedRAMUsage()
     return estMB, totalItems, personalCount, guildCount, neutralCount
 end
 
+-- Diagnostic sizes are sampled Lua-table footprint estimates, not allocator
+-- measurements. WoW only exposes whole-add-on memory; individual SavedVariables
+-- and search indexes cannot be measured independently by the client API.
+local function EstimateDiagnosticValue(value, depth, seen, budget)
+    if budget.left <= 0 then return 0 end
+    budget.left = budget.left - 1
+    local kind = type(value)
+    if kind == "string" then return #value + 24 end
+    if kind == "number" or kind == "boolean" then return 8 end
+    if kind ~= "table" or depth <= 0 or seen[value] then return 0 end
+    seen[value] = true
+    local bytes = 56
+    for key, child in pairs(value) do
+        bytes = bytes + 24 + EstimateDiagnosticValue(key, depth - 1, seen, budget)
+            + EstimateDiagnosticValue(child, depth - 1, seen, budget)
+        if budget.left <= 0 then break end
+    end
+    return bytes
+end
+
+local diagnosticTableCache = setmetatable({}, { __mode = "k" })
+local function SampleDiagnosticTable(value, maxSamples, force)
+    if type(value) ~= "table" then return { count = 0, estimatedKB = 0 } end
+    local now = type(GetTime) == "function" and GetTime()
+        or (type(time) == "function" and time() or 0)
+    local cached = diagnosticTableCache[value]
+    if not force and cached and now >= cached.at and now - cached.at < 15 then
+        return cached.result
+    end
+    local count, samples, sampleBytes = 0, 0, 0
+    for key, row in pairs(value) do
+        count = count + 1
+        if samples < maxSamples then
+            samples = samples + 1
+            local budget = { left = 300 }
+            sampleBytes = sampleBytes + 24 + EstimateDiagnosticValue(key, 2, {}, budget)
+                + EstimateDiagnosticValue(row, 5, {}, budget)
+        end
+    end
+    local estimatedBytes = 56 + (samples > 0 and sampleBytes * count / samples or 0)
+    local result = { count = count, estimatedKB = estimatedBytes / 1024, sampled = samples }
+    diagnosticTableCache[value] = { at = now, result = result }
+    return result
+end
+
+function MarketSync.GetDiagnosticsSnapshot(force)
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or {}
+    local db = MarketSyncDB or {}
+    local sampleLimit = 80
+    local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore
+        and MarketSync.Provider.GetLiveStore() or nil
+    local storage = {
+        personal = SampleDiagnosticTable(realmDB.PersonalData, sampleLimit, force),
+        guild = SampleDiagnosticTable(realmDB.ItemMetadata, sampleLimit, force),
+        provider = SampleDiagnosticTable(liveStore, sampleLimit, force),
+        neutral = SampleDiagnosticTable(realmDB.NeutralData, sampleLimit, force),
+        history = SampleDiagnosticTable(realmDB.HistoryLog, sampleLimit, force),
+        itemInfo = SampleDiagnosticTable(db.ItemInfoCache, sampleLimit, force),
+        recipes = SampleDiagnosticTable(realmDB.KnownCraftingRecipesByCharacter, sampleLimit, force),
+        alerts = SampleDiagnosticTable(realmDB.NotificationRequests, sampleLimit, force),
+    }
+    local storedKB = 0
+    for name, part in pairs(storage) do
+        -- The provider store can be shared with Auctionator and may alias
+        -- personal data. Report it separately, not as MarketSync-owned storage.
+        if name ~= "provider" then storedKB = storedKB + part.estimatedKB end
+    end
+
+    local indexes = MarketSync.GetIndexStatus and MarketSync.GetIndexStatus() or {}
+    local indexRows = (tonumber(indexes.personalResolved) or 0)
+        + (tonumber(indexes.guildResolved) or 0)
+        + (tonumber(indexes.neutralResolved) or 0)
+    local scanner = MarketSync.Scanner or {}
+    local runtime = {
+        indexRows = indexRows,
+        indexEstimatedKB = indexRows * 0.95,
+        recentResults = #(scanner.RecentResults or {}),
+        scanQueue = #(scanner.Queue or {}),
+        peers = SampleDiagnosticTable(MarketSync.SwarmPeers, sampleLimit).count,
+    }
+
+    local addonKB
+    if type(UpdateAddOnMemoryUsage) == "function" then pcall(UpdateAddOnMemoryUsage) end
+    if type(GetAddOnMemoryUsage) == "function" then
+        local ok, amount = pcall(GetAddOnMemoryUsage, "MarketSync")
+        if ok and type(amount) == "number" and amount >= 0 then addonKB = amount end
+    end
+    local luaHeapKB
+    if type(collectgarbage) == "function" then
+        local ok, amount = pcall(collectgarbage, "count")
+        if ok and type(amount) == "number" then luaHeapKB = amount end
+    end
+
+    return {
+        addonKB = addonKB,
+        luaHeapKB = luaHeapKB,
+        storage = storage,
+        storedEstimatedKB = storedKB,
+        runtime = runtime,
+        indexes = indexes,
+        scanner = {
+            active = scanner.Active == true,
+            full = scanner.FullScanMode == true,
+            scope = scanner.ScanScope or "main",
+            status = tostring(scanner.Status or "Idle"),
+            current = tonumber(scanner.Progress and scanner.Progress.current) or 0,
+            total = tonumber(scanner.Progress and scanner.Progress.total) or 0,
+        },
+        sync = MarketSync.GetSyncTaskStatus and MarketSync.GetSyncTaskStatus() or {},
+        scanTimes = {
+            personal = tonumber(realmDB.PersonalScanTime) or 0,
+            full = tonumber(realmDB.FullScanTime) or 0,
+            partial = tonumber(realmDB.PartialScanTime) or 0,
+            neutral = tonumber(realmDB.NeutralScanTime) or 0,
+        },
+        network = {
+            txRate = tonumber(MarketSync.TxRate) or 0,
+            rxRate = tonumber(MarketSync.RxRate) or 0,
+            otherBytes = tonumber(MarketSync.OtherTxBytesRate) or 0,
+            otherAPIs = tonumber(MarketSync.OtherTxAPIRate) or 0,
+        },
+    }
+end
+
+function MarketSync.PrintDiagnosticsSnapshot()
+    local snapshot = MarketSync.GetDiagnosticsSnapshot(true)
+    local storage, runtime, index = snapshot.storage, snapshot.runtime, snapshot.indexes
+    local scanner, sync, network = snapshot.scanner, snapshot.sync, snapshot.network
+    local function DescribePart(label, part)
+        print(string.format("[MarketSync diagnostics] %s: %d records, ~%.1f KB sampled footprint",
+            label, part.count or 0, part.estimatedKB or 0))
+    end
+    print("|cffffd700[MarketSync diagnostics]|r Current in-memory snapshot; nothing was saved.")
+    print(string.format("[MarketSync diagnostics] Add-on memory: %s; all-addons Lua heap: %s",
+        snapshot.addonKB and string.format("%.1f KB", snapshot.addonKB) or "unavailable",
+        snapshot.luaHeapKB and string.format("%.1f KB", snapshot.luaHeapKB) or "unavailable"))
+    DescribePart("Personal", storage.personal)
+    DescribePart("Guild metadata", storage.guild)
+    DescribePart("Provider live store (shared, excluded from subtotal)", storage.provider)
+    DescribePart("Neutral", storage.neutral)
+    DescribePart("Item info cache", storage.itemInfo)
+    DescribePart("History", storage.history)
+    DescribePart("Recipes", storage.recipes)
+    DescribePart("Alerts", storage.alerts)
+    print(string.format("[MarketSync diagnostics] Indexes: personal %d/%d (%d pending), guild %d/%d (%d pending), neutral %d/%d (%d pending); ~%.1f KB estimated active indexes",
+        index.personalResolved or 0, index.personalTotal or 0, index.personalPending or 0,
+        index.guildResolved or 0, index.guildTotal or 0, index.guildPending or 0,
+        index.neutralResolved or 0, index.neutralTotal or 0, index.neutralPending or 0,
+        runtime.indexEstimatedKB or 0))
+    print(string.format("[MarketSync diagnostics] Scanner: %s; %d/%d; scope=%s; %s",
+        scanner.active and "active" or "idle", scanner.current, scanner.total,
+        scanner.scope, scanner.status))
+    print(string.format("[MarketSync diagnostics] Sync: %s; scope=%s; controls=%d (%d B); frozen=%d entries; pending=%d B; received=%d; sent=%d; throttled=%s",
+        tostring(sync.phase or "unknown"), tostring(sync.scope or "unknown"), sync.controlQueued or 0,
+        sync.queuedControlBytes or 0, sync.frozenEntryCount or 0, sync.pendingFrameBytes or 0,
+        sync.receivedItems or 0, sync.sentItems or 0, tostring(sync.throttled == true)))
+    print(string.format("[MarketSync diagnostics] Traffic: Tx %d items/s, Rx %d items/s; other addons %d B/s, %d API/s",
+        network.txRate, network.rxRate, network.otherBytes, network.otherAPIs))
+end
+
 -- ================================================================
 -- SETTINGS NAVIGATION HELPER
 -- ================================================================
@@ -553,18 +719,9 @@ function MarketSync.OpenSettings()
         end
         opened = true
     end
-    -- Fallback: if options window didn't open (e.g. in combat or unhooked), open Tab 7 on MainFrame
-    if not opened or (InterfaceOptionsFrame and not InterfaceOptionsFrame:IsShown() and (not SettingsPanel or not SettingsPanel:IsShown())) then
-        if MarketSync_ToggleUI then
-            if not MarketSyncMainFrame or not MarketSyncMainFrame:IsShown() then
-                MarketSync_ToggleUI()
-            end
-            if MarketSync.SelectMainFrameTab then
-                MarketSync.SelectMainFrameTab(7)
-            elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[7] then
-                MarketSyncMainFrame.tabs[7]:Click()
-            end
-        end
+    -- Configuration is no longer duplicated in the portable window.
+    if not opened then
+        print("|cFFFF8800[MarketSync]|r Unable to open AddOns settings right now. Try again outside combat.")
     end
 end
 
@@ -1529,8 +1686,8 @@ function MarketSync.CreateModernDialog(name, width, height, titleText)
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(0.075, 0.070, 0.065, 0.98)
-    frame:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.95)
+    frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
+    frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     if name then MarketSync.RegisterEscapeFrame(frame) end
 
@@ -1560,7 +1717,7 @@ function MarketSync.CreateModernDialog(name, width, height, titleText)
     headerSep:SetHeight(1)
     headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 2, -2)
     headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -2, -2)
-    headerSep:SetColorTexture(0.40, 0.35, 0.20, 0.50)
+    headerSep:SetColorTexture(MarketSync.GetThemeColor("border"))
     frame.headerSep = headerSep
 
     frame:Hide()
@@ -1582,12 +1739,49 @@ function MarketSync.GetUIThemePreference()
     return MarketSyncDB and MarketSyncDB.UITheme or "auto"
 end
 
+function MarketSync.IsLegacyUITheme()
+    return MarketSync.GetUITheme() == "legacy"
+end
+
+-- Client flavor controls API/layout compatibility; this palette controls only
+-- MarketSync-owned colors, including popouts and embedded panels.
+local UI_PALETTES = {
+    legacy = {
+        dialog = { 0.045, 0.048, 0.055, 0.99 }, inset = { 0.055, 0.060, 0.070, 0.97 },
+        border = { 0.30, 0.31, 0.33, 0.95 }, header = { 0.12, 0.13, 0.15, 0.98 },
+        headerBorder = { 0.32, 0.33, 0.35, 0.90 },
+        rowOdd = { 0.06, 0.065, 0.075, 0.70 }, rowEven = { 0.10, 0.11, 0.13, 0.70 },
+        hover = { 0.20, 0.22, 0.24, 0.95 },
+        thumb = { 0.27, 0.30, 0.34, 0.85 }, thumbHover = { 0.45, 0.49, 0.54, 0.95 },
+    },
+    forever = {
+        dialog = { 0.075, 0.070, 0.065, 0.98 }, inset = { 0.075, 0.070, 0.065, 0.96 },
+        border = { 0.38, 0.32, 0.22, 0.90 }, header = { 0.12, 0.11, 0.10, 0.95 },
+        headerBorder = { 0.32, 0.28, 0.20, 0.85 },
+        rowOdd = { 0.06, 0.055, 0.05, 0.70 }, rowEven = { 0.10, 0.095, 0.09, 0.70 },
+        hover = { 0.24, 0.20, 0.12, 0.95 },
+        thumb = { 0.24, 0.20, 0.14, 0.85 }, thumbHover = { 0.48, 0.38, 0.18, 0.95 },
+    },
+}
+
+function MarketSync.GetThemeColor(role)
+    local palette = UI_PALETTES[MarketSync.IsLegacyUITheme() and "legacy" or "forever"]
+    local color = palette[role] or palette.inset
+    return color[1], color[2], color[3], color[4]
+end
+
 function MarketSync.SetUITheme(theme)
     if theme ~= "legacy" and theme ~= "forever" and theme ~= "auto" then return false end
     if not MarketSyncDB then return false end
     if MarketSyncDB.UITheme == theme then return true end
     MarketSyncDB.UITheme = theme
-    if type(ReloadUI) == "function" then ReloadUI() end
+    -- Theme layout is chosen while frames are constructed. A dropdown click
+    -- is an insecure addon callback on some clients, so calling ReloadUI here
+    -- can taint the protected Reload() path. Save the choice and let the
+    -- player reload via the game's /reload command when convenient.
+    if type(print) == "function" then
+        print("|cffffd700[MarketSync]|r Theme saved. Type /reload to apply it.")
+    end
     return true
 end
 
@@ -1602,15 +1796,15 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
         tile = false, tileSize = 0, edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    inset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-    inset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    inset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    inset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     -- Subtle top inner highlight line matching Blizzard AH insets (warm bronze/gold sheen)
     local topHighlight = inset:CreateTexture(nil, "BORDER")
     topHighlight:SetHeight(1)
     topHighlight:SetPoint("TOPLEFT", 1, -1)
     topHighlight:SetPoint("TOPRIGHT", -1, -1)
-    topHighlight:SetColorTexture(0.50, 0.42, 0.25, 0.25)
+    topHighlight:SetColorTexture(MarketSync.GetThemeColor("border"))
     inset.topHighlight = topHighlight
 
     if x and y then
@@ -1641,15 +1835,15 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
         edgeSize = 1,
         insets = { left = 0, right = 0, top = 0, bottom = 0 }
     })
-    hdr:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
-    hdr:SetBackdropBorderColor(0.32, 0.28, 0.20, 0.85)
+    hdr:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    hdr:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
 
     -- Vertical separator on right side
     local sep = hdr:CreateTexture(nil, "OVERLAY")
     sep:SetWidth(1)
     sep:SetPoint("TOPRIGHT", 0, -2)
     sep:SetPoint("BOTTOMRIGHT", 0, 2)
-    sep:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    sep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     hdr.sep = sep
 
     local label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1669,10 +1863,10 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     hdr.arrow = arrow
 
     hdr:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.24, 0.20, 0.12, 0.95)
+        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
     end)
     hdr:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.12, 0.11, 0.10, 0.95)
+        self:SetBackdropColor(MarketSync.GetThemeColor("header"))
     end)
 
     return hdr
@@ -1707,13 +1901,13 @@ function MarketSync.StyleModernTab(tab)
 
     local bg = tab:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.08, 0.07, 0.06, 0.95)
+    bg:SetColorTexture(MarketSync.GetThemeColor("dialog"))
     tab._modernBg = bg
 
     local border = tab:CreateTexture(nil, "BORDER")
     border:SetPoint("TOPLEFT", 1, -1)
     border:SetPoint("BOTTOMRIGHT", -1, 1)
-    border:SetColorTexture(0.30, 0.25, 0.16, 0.85)
+    border:SetColorTexture(MarketSync.GetThemeColor("border"))
     tab._modernBorder = border
 
     local hl = tab:CreateTexture(nil, "HIGHLIGHT")
@@ -1730,13 +1924,13 @@ function MarketSync.StyleModernTab(tab)
 
     tab.SetSelected = function(self, isSelected)
         if isSelected then
-            if self._modernBg and self._modernBg.SetColorTexture then self._modernBg:SetColorTexture(0.16, 0.13, 0.08, 0.98) end
+            if self._modernBg and self._modernBg.SetColorTexture then self._modernBg:SetColorTexture(MarketSync.GetThemeColor("header")) end
             if self._modernBorder and self._modernBorder.SetColorTexture then self._modernBorder:SetColorTexture(1.0, 0.82, 0.0, 0.95) end
             local t = self.GetFontString and self:GetFontString()
             if t and t.SetTextColor then t:SetTextColor(1.0, 0.82, 0.0) end
         else
-            if self._modernBg and self._modernBg.SetColorTexture then self._modernBg:SetColorTexture(0.08, 0.07, 0.06, 0.95) end
-            if self._modernBorder and self._modernBorder.SetColorTexture then self._modernBorder:SetColorTexture(0.30, 0.25, 0.16, 0.85) end
+            if self._modernBg and self._modernBg.SetColorTexture then self._modernBg:SetColorTexture(MarketSync.GetThemeColor("dialog")) end
+            if self._modernBorder and self._modernBorder.SetColorTexture then self._modernBorder:SetColorTexture(MarketSync.GetThemeColor("border")) end
             local t = self.GetFontString and self:GetFontString()
             if t and t.SetTextColor then t:SetTextColor(0.75, 0.70, 0.60) end
         end
@@ -1796,7 +1990,7 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
     local thumb = (sbName and _G[sbName .. "ThumbTexture"]) or (scrollBar.GetThumbTexture and scrollBar:GetThumbTexture()) or scrollBar.ThumbTexture
     if thumb then
         thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
-        thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) -- Warm bronze/stone
+        thumb:SetColorTexture(MarketSync.GetThemeColor("thumb"))
         thumb:SetSize(barWidth, 32)
     end
 
@@ -1838,10 +2032,10 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
     -- Hover effect on thumb
     if scrollBar.HookScript then
         scrollBar:HookScript("OnEnter", function()
-            if thumb and thumb.SetColorTexture then thumb:SetColorTexture(0.48, 0.38, 0.18, 0.95) end
+            if thumb and thumb.SetColorTexture then thumb:SetColorTexture(MarketSync.GetThemeColor("thumbHover")) end
         end)
         scrollBar:HookScript("OnLeave", function()
-            if thumb and thumb.SetColorTexture then thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85) end
+            if thumb and thumb.SetColorTexture then thumb:SetColorTexture(MarketSync.GetThemeColor("thumb")) end
         end)
     end
 
@@ -1852,7 +2046,7 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
             if sb == scrollBar then
                 if thumb and thumb.SetColorTexture then
                     thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
-                    thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85)
+                    thumb:SetColorTexture(MarketSync.GetThemeColor("thumb"))
                     local curH = thumb:GetHeight() or 32
                     thumb:SetSize(barWidth, math.max(20, curH))
                 end
@@ -1895,17 +2089,17 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
     -- Thumb pill
     local thumb = slider:CreateTexture(nil, "OVERLAY")
     thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
-    thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85)
+    thumb:SetColorTexture(MarketSync.GetThemeColor("thumb"))
     thumb:SetSize(barWidth, 32)
     slider:SetThumbTexture(thumb)
     slider.thumb = thumb
 
     -- Hover effect
     slider:SetScript("OnEnter", function()
-        thumb:SetColorTexture(0.48, 0.38, 0.18, 0.95)
+        thumb:SetColorTexture(MarketSync.GetThemeColor("thumbHover"))
     end)
     slider:SetScript("OnLeave", function()
-        thumb:SetColorTexture(0.24, 0.20, 0.14, 0.85)
+        thumb:SetColorTexture(MarketSync.GetThemeColor("thumb"))
     end)
 
     -- Up Chevron Button
@@ -2093,7 +2287,7 @@ function MarketSync.ShowItemContextMenu(anchorFrame, opts)
                 UIDropDownMenu_AddButton(info, level)
             end
 
-            if MarketSync.ShowAnalytics and (dbKey or itemID or itemName) then
+            if not opts.hideAnalytics and MarketSync.ShowAnalytics and (dbKey or itemID or itemName) then
                 local info = UIDropDownMenu_CreateInfo()
                 info.text = "Show Analytics"
                 info.notCheckable = true
@@ -2126,6 +2320,20 @@ function MarketSync.ShowItemContextMenu(anchorFrame, opts)
                     info.menuList = "FAVORITE_LISTS"
                     UIDropDownMenu_AddButton(info, level)
                 end
+            end
+
+            local favorites = MarketSync.Favorites
+            local listName = opts.listName
+            if listName and itemID and favorites and favorites.IsItemInList
+                and favorites.RemoveFromList and favorites.IsItemInList(listName, itemID) then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "Remove from " .. listName
+                info.notCheckable = true
+                info.func = function()
+                    CloseDropDownMenus()
+                    favorites.RemoveFromList(listName, itemID)
+                end
+                UIDropDownMenu_AddButton(info, level)
             end
 
             if itemLink then

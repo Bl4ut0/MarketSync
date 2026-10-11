@@ -11,7 +11,7 @@ local activeBrowseTab = 1
 -- HELPER: CreateModernInset
 -- Matches Blizzard Auction House sleek dark bronze/stone inset panels
 -- ================================================================
-function MarketSync.CreateModernInset(parent, x, y, width, height)
+if not MarketSync.CreateModernInset then function MarketSync.CreateModernInset(parent, x, y, width, height)
     local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     inset:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -43,12 +43,13 @@ function MarketSync.CreateModernInset(parent, x, y, width, height)
     end
     return inset
 end
+end
 
 -- ================================================================
 -- HELPER: CreateAHColumnHeader
 -- Matches Blizzard Auction House column headers (clean dark bronze/stone + sort arrow)
 -- ================================================================
-function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
+if not MarketSync.CreateAHColumnHeader then function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     local hdr = CreateFrame("Button", nil, parent, "BackdropTemplate")
     hdr:SetSize(width, height or 20)
     hdr.sortKey = sortKey
@@ -103,6 +104,7 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     end)
 
     return hdr
+end
 end
 
 -- ================================================================
@@ -205,6 +207,71 @@ local function CreateMainFrame()
         MainFrame:Hide()
     end)
     MainFrame.CloseBtn = closeBtn
+
+    -- Keep the collapsed sidecar as a small bump attached to the window edge.
+    -- Both surfaces reuse the same Shopping / Craft / Bags sidecar.
+    local sidecarTab = CreateFrame("Button", nil, MainFrame, "BackdropTemplate")
+    sidecarTab:SetSize(18, 38)
+    sidecarTab:SetPoint("TOPLEFT", MainFrame, "TOPRIGHT", -2, -60)
+    if sidecarTab.SetFrameLevel then
+        sidecarTab:SetFrameLevel((MainFrame.GetFrameLevel and MainFrame:GetFrameLevel() or 0) + 10)
+    end
+    sidecarTab:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    sidecarTab:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    sidecarTab:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    local sidecarArrow = sidecarTab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    sidecarArrow:SetPoint("CENTER", 0, 0)
+    sidecarArrow:SetText(">")
+    sidecarTab:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("MarketSync Lists", 1, 0.82, 0)
+        GameTooltip:AddLine("Open Shopping, Craft, and Bags", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    sidecarTab:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(MarketSync.GetThemeColor("header"))
+        GameTooltip:Hide()
+    end)
+    sidecarTab:SetScript("OnClick", function()
+        local sidecar = MarketSync.AHSidecar
+        if not sidecar or not sidecar.Frame then
+            local host = AuctionHouseFrame or AuctionFrame or MainFrame
+            if MarketSync.CreateAHSidecar then MarketSync.CreateAHSidecar(host) end
+            sidecar = MarketSync.AHSidecar
+        end
+        if sidecar and sidecar.ShowForMain then
+            sidecar.MainToggleButton = sidecarTab
+            sidecar.ShowForMain(sidecar.currentMode or "lists")
+        end
+    end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(sidecarTab, {
+            name = "Open MarketSync Lists",
+            context = "Button",
+            description = "Open the portable Shopping, Craft, and Bags breakout panel",
+        })
+    end
+    MainFrame:HookScript("OnShow", function()
+        local sidecar = MarketSync.AHSidecar
+        if not sidecar or not sidecar.Frame then
+            local host = AuctionHouseFrame or AuctionFrame or MainFrame
+            if MarketSync.CreateAHSidecar then MarketSync.CreateAHSidecar(host) end
+            sidecar = MarketSync.AHSidecar
+        end
+        if sidecar then sidecar.MainToggleButton = sidecarTab end
+        if sidecar and sidecar.ShowForMain and
+            (not MarketSyncDB or MarketSyncDB.MainSidecarExpanded ~= false) then
+            sidecar.ShowForMain(sidecar.currentMode or "lists")
+        else
+            sidecarTab:Show()
+        end
+    end)
 
     -- --- TITLE ---
     local titleText = MainFrame.GetTitleText and MainFrame:GetTitleText()
@@ -359,7 +426,7 @@ local function CreateMainFrame()
     -- ================================================================
     -- BOTTOM TABS
     -- ================================================================
-    local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Settings"}
+    local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Debugging"}
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -437,7 +504,7 @@ local function CreateMainFrame()
             "Analytics",
             "Processing",
             "Alerts",
-            "Settings"
+            "Debugging"
         }
         
         local tooltips = {
@@ -447,7 +514,7 @@ local function CreateMainFrame()
             "Inspect in-depth price trends, historical distribution, and market metrics.",
             "Organized controls on the left, auction-style arbitrage and crafting results on the right.",
             "Track targets by threshold and watch lists.",
-            "Configure MarketSync background settings, caches, and UI behaviors.",
+            "Maintenance, task and resource monitoring. Configure options under AddOns settings.",
         }
 
         local versionStr = "v" .. tostring(MarketSync.GetAddOnMetadata("MarketSync", "Version") or "1.0")
@@ -516,6 +583,9 @@ local function CreateMainFrame()
             elseif i == 5 and MarketSyncDB and not MarketSyncDB.EnableProcessingTab then
                 shouldHide = true
             elseif i == 6 and MarketSyncDB and not MarketSyncDB.EnableAlertsTab then
+                shouldHide = true
+            elseif i == 7 and MarketSyncDB and MarketSyncDB.EnableDebuggingTab == false
+                and not MainFrame.debuggingOpenOverride then
                 shouldHide = true
             end
 
@@ -647,7 +717,7 @@ local function CreateMainFrame()
     end
 
     -- ================================================================
-    -- TAB 7: SETTINGS
+    -- TAB 7: DEBUGGING (configuration is in Blizzard AddOns settings)
     -- ================================================================
     SettingsContent = CreateFrame("Frame", nil, MainFrame)
     SettingsContent:SetAllPoints()
@@ -1205,14 +1275,14 @@ local function CreateMainFrame()
         tile = false, tileSize = 0, edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    betaBox:SetBackdropColor(0.04, 0.04, 0.05, 0.85)
-    betaBox:SetBackdropBorderColor(0.45, 0.35, 0.15, 0.70)
+    betaBox:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    betaBox:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     local betaTopHighlight = betaBox:CreateTexture(nil, "BORDER")
     betaTopHighlight:SetHeight(1)
     betaTopHighlight:SetPoint("TOPLEFT", 1, -1)
     betaTopHighlight:SetPoint("TOPRIGHT", -1, -1)
-    betaTopHighlight:SetColorTexture(0.70, 0.50, 0.15, 0.40)
+    betaTopHighlight:SetColorTexture(MarketSync.GetThemeColor("border"))
 
     local betaHeader = betaBox:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     betaHeader:SetPoint("TOPLEFT", betaBox, "TOPLEFT", 8, -6)
@@ -1503,7 +1573,7 @@ local function CreateMainFrame()
 
                 local hl = row:CreateTexture(nil, "HIGHLIGHT")
                 hl:SetAllPoints()
-                hl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
+                hl:SetColorTexture(MarketSync.GetThemeColor("hover"))
                 row.hl = hl
 
                 row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -1528,9 +1598,9 @@ local function CreateMainFrame()
             end
 
             if count % 2 == 1 then
-                row.bg:SetColorTexture(0.10, 0.095, 0.09, 0.70)
+                row.bg:SetColorTexture(MarketSync.GetThemeColor("rowEven"))
             else
-                row.bg:SetColorTexture(0.06, 0.055, 0.05, 0.70)
+                row.bg:SetColorTexture(MarketSync.GetThemeColor("rowOdd"))
             end
 
             local isBlocked = MarketSyncDB.BlockedUsers and MarketSyncDB.BlockedUsers[user]
@@ -1690,21 +1760,133 @@ local function CreateMainFrame()
             SettingsContent.ramText:SetText(string.format("|cff888888Est. Index RAM:|r |cffffffff~%.1f MB|r\n|cff888888(%d stored items)|r", estMB, totalStored))
         end
     end
-    MainFrame.UpdateRightStats = UpdateSettingsStats
+    -- The legacy in-window controls are retained only for their existing helper
+    -- dialogs (Smart Rules and User Management). Configuration itself now lives
+    -- solely in Blizzard's AddOns settings page.
+    for _, region in ipairs({boxMemory, boxAH, boxAudio, boxSwarm,
+        header1, header2, header3, header4,
+        btnRebuildIndex, btnResetData, btnNetworkMonitor,
+        lblCache, lblData, lblDebug}) do
+        region:Hide()
+    end
 
+    local debugTools = MarketSync.CreateModernInset(SettingsContent, 18, -82, 390, 300)
+    local debugResources = MarketSync.CreateModernInset(SettingsContent, 420, -82, 394, 300)
+    local debugHeading = SettingsContent:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    debugHeading:SetPoint("TOPLEFT", SettingsContent, "TOPLEFT", 24, -49)
+    debugHeading:SetText("Debugging & Maintenance")
+
+    local function DebugButton(parent, label, x, y, width, callback)
+        local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+        button:SetSize(width, 24)
+        button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+        button:SetText(label)
+        button:SetScript("OnClick", callback)
+        return button
+    end
+
+    local toolsTitle = debugTools:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    toolsTitle:SetPoint("TOPLEFT", 14, -14)
+    toolsTitle:SetText("Maintenance tools")
+    local toolsHint = debugTools:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    toolsHint:SetPoint("TOPLEFT", 14, -36)
+    toolsHint:SetWidth(360)
+    toolsHint:SetJustifyH("LEFT")
+    toolsHint:SetText("Configure behavior in AddOns settings. Use these tools to inspect performance or refresh stored indexes.")
+
+    DebugButton(debugTools, "Rebuild Index", 14, -88, 168, function()
+        if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+        if MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
+    end)
+    DebugButton(debugTools, "Reset Market Data...", 198, -88, 176, function()
+        if MarketSync.IsSyncBusy and MarketSync.IsSyncBusy() then
+            print("|cFFFF8800[MarketSync]|r Wait for the active sync to finish before resetting data.")
+        elseif StaticPopup_Show then
+            StaticPopup_Show("MARKETSYNC_CONFIRM_MARKET_DATA_RESET")
+        end
+    end)
+    DebugButton(debugTools, "Task Manager", 14, -126, 168, function()
+        if MarketSync.ToggleTaskManager then MarketSync.ToggleTaskManager() end
+    end)
+    DebugButton(debugTools, "Rate Limiter", 198, -126, 176, function()
+        if MarketSync.ToggleRateMonitor then MarketSync.ToggleRateMonitor() end
+    end)
+    DebugButton(debugTools, "Network Monitor", 14, -164, 168, function()
+        if MarketSync.ToggleNetworkMonitor then MarketSync.ToggleNetworkMonitor() end
+    end)
+    DebugButton(debugTools, "Print Diagnostics", 198, -164, 176, function()
+        if MarketSync.PrintDiagnosticsSnapshot then MarketSync.PrintDiagnosticsSnapshot() end
+    end)
+    DebugButton(debugTools, "Open AddOns Settings", 14, -202, 360, function()
+        if MarketSync.OpenSettings then MarketSync.OpenSettings() end
+    end)
+
+    local resourceTitle = debugResources:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    resourceTitle:SetPoint("TOPLEFT", 14, -14)
+    resourceTitle:SetText("Resource Monitor")
+    local resourceText = debugResources:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    resourceText:SetPoint("TOPLEFT", 14, -45)
+    resourceText:SetWidth(360)
+    resourceText:SetJustifyH("LEFT")
+    if resourceText.SetJustifyV then resourceText:SetJustifyV("TOP") end
+
+    local function RefreshDebugResources()
+        local snapshot = MarketSync.GetDiagnosticsSnapshot and MarketSync.GetDiagnosticsSnapshot() or {}
+        local storage, runtime, index = snapshot.storage or {}, snapshot.runtime or {}, snapshot.indexes or {}
+        local function MB(kb) return string.format("%.1f MB", (tonumber(kb) or 0) / 1024) end
+        local function Part(name)
+            local part = storage[name] or {}
+            return string.format("%d rows, %s", part.count or 0, MB(part.estimatedKB))
+        end
+        resourceText:SetText(table.concat({
+            "|cffffd700Measured add-on:|r " .. (snapshot.addonKB and MB(snapshot.addonKB) or "Unavailable on this client"),
+            "|cff888888All-addons Lua heap: " .. (snapshot.luaHeapKB and MB(snapshot.luaHeapKB) or "Unavailable") .. "|r",
+            "",
+            "|cffffd700Saved data (estimated in-memory):|r",
+            "Personal: " .. Part("personal"),
+            "Guild metadata: " .. Part("guild"),
+            "Provider store*: " .. Part("provider"),
+            "Neutral: " .. Part("neutral"),
+            "Item info: " .. Part("itemInfo"),
+            "History: " .. Part("history"),
+            "Recipes + alerts: " .. MB(((storage.recipes or {}).estimatedKB or 0) + ((storage.alerts or {}).estimatedKB or 0)),
+            "Subtotal: " .. MB(snapshot.storedEstimatedKB),
+            "",
+            "|cffffd700Active search indexes (estimated):|r",
+            string.format("Personal %d / %d  Guild %d / %d", index.personalResolved or 0, index.personalTotal or 0,
+                index.guildResolved or 0, index.guildTotal or 0),
+            string.format("Neutral %d / %d   About %s", index.neutralResolved or 0, index.neutralTotal or 0,
+                MB(runtime.indexEstimatedKB)),
+            string.format("Scanner queue %d  Recent %d  Peers %d", runtime.scanQueue or 0,
+                runtime.recentResults or 0, runtime.peers or 0),
+            "|cff888888*Shared provider store excluded from subtotal.|r",
+            "|cff888888Estimates do not sum to measured total.|r",
+        }, "\n"))
+    end
     SettingsContent.lastUpdate = 0
     SettingsContent:SetScript("OnUpdate", function(self, elapsed)
         self.lastUpdate = self.lastUpdate + elapsed
-        if self.lastUpdate >= 0.5 then
+        if self.lastUpdate >= 10 then
             self.lastUpdate = 0
-            UpdateSettingsStats()
+            RefreshDebugResources()
         end
     end)
     SettingsContent:SetScript("OnShow", function(self)
         self.lastUpdate = 0
-        UpdateSettingsStats()
-        if UpdateMemorySettingsVisibility then UpdateMemorySettingsVisibility() end
-        if UpdateAudioSettingsVisibility then UpdateAudioSettingsVisibility() end
+        RefreshDebugResources()
+    end)
+
+    function MarketSync.OpenDebuggingWindow()
+        if not MainFrame:IsShown() then MainFrame:Show() end
+        MainFrame.debuggingOpenOverride = true
+        RefreshTabVisibility()
+        SelectTab(7)
+    end
+    MainFrame:HookScript("OnHide", function(self)
+        if self.debuggingOpenOverride then
+            self.debuggingOpenOverride = nil
+            RefreshTabVisibility()
+        end
     end)
 
     -- ================================================================

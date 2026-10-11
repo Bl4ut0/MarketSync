@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-11
+
+### Added
+- Added separate saved craft-request lists with quantities, editable Buy/Craft/Provide decisions, and raw-material purchase exports.
+- Added detailed runtime diagnostics and a background Task Manager, with settings centralized in the AddOns settings page.
+- Added shared item actions to Scanner list items and Analytics rows/header, including contextual list removal and price alerts.
+
+### Changed
+- Broad Processing searches now use built price indexes and saved recipes, yield work across frames, and cancel when hidden or switched to another mode.
+- Processing prefers fresher cached observations instead of stale lower prices from another source.
+- Batched Network Monitor log/peer rendering and stopped rendering while hidden.
+- Improved settings spacing, adaptive button padding, material-menu icon sizing, sidecar access, and theme coverage.
+- Simplified alert controls with market-price defaults and auction-house scope checkboxes.
+
+### Fixed
+- Recovered localized Browse names and icons when item data arrives after placeholder retries end, including tooltip-triggered loads.
+- Handled output-less SoD profession actions without indexing a nil output item ID.
+- Corrected current-character profession filtering and improved same-name sync identity checks.
+- Removed the automatic protected reload call when changing themes; users apply the saved theme with /reload.
+
+This version is a release candidate. Processing and Alerts remain opt-in beta features; live timeout and multi-client behavior still require in-game validation.
+
 ## [0.9.5] - 2026-10-07
 
 ### Added

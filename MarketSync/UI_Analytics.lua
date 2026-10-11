@@ -468,6 +468,16 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local itemRows = {}
     local rowH = 24
 
+    local function ShowAnalyticsItemMenu(anchor, item, listName)
+        if not item or not MarketSync.ShowItemContextMenu then return end
+        MarketSync.ShowItemContextMenu(anchor, {
+            itemID = item.itemID, dbKey = item.dbKey,
+            itemName = item.name, itemLink = item.itemLink or item.link,
+            icon = item.icon, price = item.price,
+            listName = listName, hideAnalytics = true,
+        })
+    end
+
     local function HandleItemDrop()
         local infoType, itemID, itemLink = GetCursorInfo()
         if infoType == "item" and (itemID or itemLink) then
@@ -740,13 +750,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 local itemDBKey = tostring(item.dbKey or item.itemID)
                 local isSelected = (selectedDBKey and selectedDBKey == itemDBKey)
                 if isSelected then
-                    row:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     row:SetBackdropBorderColor(1.0, 0.82, 0.0, 0.95)
                 elseif i % 2 == 0 then
-                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                     row:SetBackdropBorderColor(0, 0, 0, 0)
                 else
-                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                     row:SetBackdropBorderColor(0, 0, 0, 0)
                 end
 
@@ -754,7 +764,12 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name)
                 row.price:SetText(FormatMoneyPlain(item.price))
 
-                row:SetScript("OnClick", function()
+                row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                row:SetScript("OnClick", function(self, button)
+                    if button == "RightButton" then
+                        ShowAnalyticsItemMenu(self, item, currentMode == "favorites" and selectedListName or nil)
+                        return
+                    end
                     selectedDBKey = itemDBKey
                     panel:ShowItem(selectedDBKey, nil, item.name, item.icon, item.price)
                     RefreshItemsList()
@@ -762,7 +777,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
                 row:SetScript("OnEnter", function(self)
                     if not isSelected then
-                        self:SetBackdropColor(0.30, 0.25, 0.12, 0.80)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     end
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     local link = select(2, SafeGetItemInfo(item.itemID))
@@ -773,16 +788,17 @@ function MarketSync.CreateAnalyticsPanel(parent)
                     end
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddLine("|cFF00FF00Click|r: View price analytics & trends", 0.8, 0.8, 0.8)
+                    GameTooltip:AddLine("|cFF00FF00Right-click|r: Item actions, lists & alerts", 0.8, 0.8, 0.8)
                     GameTooltip:Show()
                 end)
 
                 row:SetScript("OnLeave", function(self)
                     if isSelected then
-                        self:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     elseif i % 2 == 0 then
-                        self:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                     else
-                        self:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                     end
                     GameTooltip:Hide()
                 end)
@@ -888,6 +904,12 @@ function MarketSync.CreateAnalyticsPanel(parent)
     banner:SetPoint("TOPRIGHT", -10, isEmbedded and -8 or -6)
     banner:SetHeight(BANNER_H)
     panel.banner = banner
+    banner:EnableMouse(true)
+    banner:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then
+            ShowAnalyticsItemMenu(self, panel.currentItem, currentMode == "favorites" and selectedListName or nil)
+        end
+    end)
 
     local icon = banner:CreateTexture(nil, "ARTWORK")
     icon:SetSize(isEmbedded and 40 or 36, isEmbedded and 40 or 36)
@@ -1001,7 +1023,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     sep1:SetHeight(1)
     sep1:SetPoint("TOPLEFT", rightInset, "TOPLEFT", 10, isEmbedded and -56 or -52)
     sep1:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", -10, isEmbedded and -56 or -52)
-    sep1:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    sep1:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     panel.sep1 = sep1
 
     -- 2. Historical Trend Section (Unified inside rightInset, no double-borders)
@@ -1076,7 +1098,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     sep2:SetHeight(1)
     sep2:SetPoint("TOPLEFT", graphCard, "BOTTOMLEFT", 10, 0)
     sep2:SetPoint("TOPRIGHT", graphCard, "BOTTOMRIGHT", -10, 0)
-    sep2:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    sep2:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     panel.sep2 = sep2
 
     -- 3. Metrics & Insights Section (Unified inside rightInset, no double-borders)
@@ -1125,7 +1147,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     vDivider:SetWidth(1)
     vDivider:SetPoint("TOP", metricsCard, "TOP", 0, -8)
     vDivider:SetPoint("BOTTOM", metricsCard, "BOTTOM", 0, isEmbedded and 10 or 8)
-    vDivider:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    vDivider:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
 
     -- Right Column: Intraday Analytics (30-Minute Buckets)
     local rightMetricsTitle = metricsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlight")

@@ -140,7 +140,15 @@ function AH.AttachLegacy()
         AH.Sidecar = MarketSync.CreateAHSidecar(auctionFrame)
         SidecarFor("native")
     end
+    auctionFrame:HookScript("OnShow", function()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(true)
+        end
+    end)
     auctionFrame:HookScript("OnHide", function()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(false)
+        end
         HidePanels()
         if MarketSync.Scanner and MarketSync.Scanner.Active then
             MarketSync.Scanner.Cancel("Auction House closed")

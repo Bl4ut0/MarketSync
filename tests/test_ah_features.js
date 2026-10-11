@@ -510,6 +510,16 @@ test('Modern Dialog Helpers and Task Manager / Rate Monitor update logic', () =>
     assert(rf.addonRows[2].nameText:GetText():find("Auctionator"), "Addon row 2 should contain Auctionator")
     assert(not rf.addonRows[3]:IsShown(), "Third addon row should be hidden")
 
+    MarketSync.ToggleTaskManager()
+    local tm = MarketSyncTaskManagerFrame
+    assert(tm and tm:IsShown(), "Task Manager should be separate from the rate limiter")
+    assert(tm.workText:GetText():find("Scanner"), "Task Manager should show scanner work")
+    assert(tm.workText:GetText():find("Search cache build"), "Task Manager should show cache build work")
+    assert(tm.workText:GetText():find("Guild sync"), "Task Manager should show sync work")
+    assert(tm.memoryText:GetText():find("Memory & data"), "Task Manager should show memory details")
+    assert(rf.TitleText:GetText():find("Network Rate Limiter"),
+      "Rate limiter window should not be mislabeled Task Manager")
+
     -- Test ToggleBlock logic
     MarketSyncDB = { BlockedUsers = {} }
     MarketSync.ToggleBlock("GnomishSeller")
@@ -1551,7 +1561,7 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(mainFrame.tabs[4]:GetText() == "Analytics", "Tab 4 must be Analytics")
     assert(mainFrame.tabs[5]:GetText() == "Processing", "Tab 5 must be Processing")
     assert(mainFrame.tabs[6]:GetText() == "Alerts", "Tab 6 must be Alerts")
-    assert(mainFrame.tabs[7]:GetText() == "Settings", "Tab 7 must be Settings")
+    assert(mainFrame.tabs[7]:GetText() == "Debugging", "Tab 7 must be Debugging")
 
     -- Test SelectMainFrameTab
     assert(type(MarketSync.SelectMainFrameTab) == "function", "SelectMainFrameTab should be exposed")
@@ -1591,6 +1601,17 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     MarketSyncDB.EnableAlertsTab = true
     mainFrame.RefreshTabVisibility()
     assert(mainFrame.tabs[6]:IsShown(), "Tab 6 (Alerts) should be shown when EnableAlertsTab is true")
+
+    MarketSyncDB.EnableDebuggingTab = false
+    mainFrame.RefreshTabVisibility()
+    assert(not mainFrame.tabs[7]:IsShown(), "Debugging tab should be optional")
+    assert(type(MarketSync.OpenDebuggingWindow) == "function", "Debugging window shortcut should exist")
+    MarketSync.OpenDebuggingWindow()
+    assert(mainFrame.tabs[7]:IsShown() and mainFrame.activeTabID == 7,
+      "settings shortcut should open Debugging even while its tab is hidden")
+    MarketSyncDB.EnableDebuggingTab = true
+    mainFrame.debuggingOpenOverride = nil
+    mainFrame.RefreshTabVisibility()
 
     -- Test ShowItemHistory delegation to ShowAnalytics
     local analyticsCalledWith = nil
@@ -1837,6 +1858,11 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   const mockEnv = `
     MarketSync = MarketSync or {}
     MarketSyncDB = {}
+    MarketSync.GetThemeColor = function() return 0.1, 0.1, 0.1, 1 end
+    MarketSync.GetProcessingIndexSources = function() return {} end
+    MarketSync.BuildProcessingCacheSnapshot = function()
+      return { prices = { [10940] = { itemID = 10940, name = "Strange Dust", price = 100 } } }
+    end
     UIParent = {}
     C_Timer = { After = function() end }
     createdFrames = {}
@@ -1978,15 +2004,12 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(classicProc.resultRows[1].width == 866, "Classic AH processing should fill its available width")
     assert(#classicProc.resultRows == 6, "Classic AH processing rows must stay above the footer")
 
-    -- Uncached reagent IDs request data, then the client-localized item name
-    -- replaces the placeholder in the existing craft result and tooltip.
-    local localizedNameLoaded, requestedID = false, nil
+    -- Broad Craft Profit results use only saved item metadata. They must not
+    -- request every missing reagent from the server while building rows.
+    local requestedID = nil
     C_Item = { RequestLoadItemDataByID = function(id) requestedID = id end }
     MarketSync.GetItemInfo = function(id)
       if id == 21072 then return "Smoked Sagefish", "|Hitem:21072|h[Smoked Sagefish]|h" end
-      if id == 21071 and localizedNameLoaded then
-        return "Poisson localisé", "|Hitem:21071|h[Poisson localisé]|h"
-      end
     end
     MarketSync.FindProfitableCrafts = function()
       return {{ outputItemID = 21072, outputName = "Smoked Sagefish", recipeName = "Smoked Sagefish",
@@ -2002,11 +2025,46 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     end
     assert(runCraft and runCraft.scripts.OnClick, "Expected Processing run button")
     runCraft.scripts.OnClick()
-    assert(requestedID == 21071, "Uncached reagent data should be requested")
-    assert(procAH.displayRows[1].detail:find("Loading item #21071", 1, true), "Uncached reagent should be marked as loading")
-    localizedNameLoaded = true
-    procAH.scripts.OnEvent(procAH, "GET_ITEM_INFO_RECEIVED", 21071, true)
-    assert(procAH.displayRows[1].detail:find("Poisson localisé", 1, true), "Localized reagent name should replace its ID")
+    assert(requestedID == nil, "Bulk craft search must not request uncached reagent data")
+    assert(procAH.displayRows[1].detail:find("Item 21071", 1, true),
+      "Uncached reagent should use an ID placeholder")
+    MarketSyncDB.ItemInfoCache = { [21071] = { n = "Poisson localisé" } }
+    runCraft.scripts.OnClick()
+    assert(procAH.displayRows[1].detail:find("Poisson localisé", 1, true),
+      "A later cached localized name should appear on rerun")
+
+    -- A large cache snapshot must yield to the next frame before results are
+    -- published, instead of freezing the UI during one button click.
+    local scheduledSteps = {}
+    C_Timer.After = function(_, fn) scheduledSteps[#scheduledSteps + 1] = fn end
+    MarketSync.BuildProcessingCacheSnapshot = function(yieldStep)
+      yieldStep()
+      return { prices = {} }
+    end
+    procAH.displayRows = {}
+    runCraft.scripts.OnClick()
+    assert(#scheduledSteps == 1 and #procAH.displayRows == 0,
+      "Processing should schedule unfinished cache work for another frame")
+    scheduledSteps[1]()
+    assert(#procAH.displayRows == 1, "Scheduled work should publish the cached craft result")
+    scheduledSteps = {}
+    procAH.displayRows = {}
+    runCraft.scripts.OnClick()
+    procAH.scripts.OnHide(procAH)
+    scheduledSteps[1]()
+    assert(#procAH.displayRows == 0, "Hidden processing must not publish pending results")
+    scheduledSteps = {}
+    runCraft.scripts.OnClick()
+    local switchedMode = false
+    for _, frame in ipairs(createdFrames) do
+      if frame:GetText() == "Process Scan" and frame.scripts and frame.scripts.OnClick then
+        frame.scripts.OnClick(frame)
+        if procAH.activeMode == "process" then switchedMode = true; break end
+      end
+    end
+    assert(switchedMode, "Expected to switch the embedded processing mode")
+    scheduledSteps[1]()
+    assert(#procAH.displayRows == 0, "Mode switch must discard pending craft results")
 
     -- Test mouse wheel scrolling on processing panel
     procMain.displayRows = {}
@@ -2035,6 +2093,7 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(#alertsMain.rows == 9, "MainFrame alerts rows should be 9, got: " .. tostring(#alertsMain.rows))
 
     local menuButtons = 0
+    local materialMenus = 0
     for _, frame in ipairs(createdFrames) do
       if frame._menu then
         menuButtons = menuButtons + 1
@@ -2044,9 +2103,28 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
         frame.scripts.OnClick(frame)
         assert(lastOpenedMenu and lastOpenedMenu.menu == frame._menu
           and lastOpenedMenu.anchor == frame, "Dropdown click must open its own menu")
+        if frame._menu.name and frame._menu.name:find("ProcessingTargetDropdown", 1, true) then
+          local originalTargets = MarketSync.GetProcessingTargets
+          local originalAddButton = UIDropDownMenu_AddButton
+          local labels = {}
+          local longName = "A very long localized processing material name"
+          MarketSync.GetProcessingTargets = function()
+            return { { itemID = 10940, name = longName, icon = 134400 } }
+          end
+          UIDropDownMenu_AddButton = function(info) labels[#labels + 1] = info end
+          frame._initFunc(frame._menu, 1)
+          assert(#labels == 2 and labels[2].text:find(longName, 1, true),
+            "Material menu must retain full localized names for adaptive sizing")
+          assert(labels[2].text:find("|T134400:16:16:0:0|t  ", 1, true) and labels[2].icon == nil,
+            "Icon and trailing padding must be part of the measured label, not spill beyond it")
+          MarketSync.GetProcessingTargets = originalTargets
+          UIDropDownMenu_AddButton = originalAddButton
+          materialMenus = materialMenus + 1
+        end
       end
     end
     assert(menuButtons >= 5, "Expected Processing and Alerts menu buttons")
+    assert(materialMenus == 3, "Check adaptive materials menus in portable, embedded, and Classic layouts")
 
     -- Embedded AH alerts panel
     local ahAlertsContainer = CreateFrame("Frame", "AHAlertsContainer")
@@ -2168,6 +2246,7 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     MarketSync = MarketSync or {}
     _G = _G or {}
     local framesCreated = {}
+    settingsTestFrames = framesCreated
     function CreateFrame(frameType, name, parent, template)
       local f = {
         name = name,
@@ -2192,6 +2271,9 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
         GetScript = function(self, ev) return self.scripts[ev] end,
         SetText = function(self, t) self.text = t end,
         GetText = function(self) return self.text or "" end,
+        GetFontString = function(self)
+          return { GetStringWidth = function() return #(self.text or "") * 7 end }
+        end,
         CreateTexture = function() return { SetHeight = function() end, SetPoint = function() end, SetColorTexture = function() end, SetTexture = function() end } end,
         CreateFontString = function()
           local fs = {
@@ -2282,15 +2364,25 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     assert(MarketSyncDB.OnDemandGuild == true, "OnDemandGuild must default to true")
     assert(MarketSyncDB.OnDemandNeutral == true, "OnDemandNeutral must default to true")
     assert(MarketSyncDB.BuildCacheOnStartup == false, "BuildCacheOnStartup must default to false")
+    assert(MarketSyncDB.EnableDebuggingTab == true, "Debugging tab must remain visible by default")
+    assert(MarketSyncDB.MinimapIcon.hide == false, "Minimap icon must remain visible by default")
     assert(MarketSyncDB.EnableProfessionCraftInfo ~= false, "Trade skill costs must default to enabled")
     assert(MarketSync.GetUIThemePreference() == "auto", "Auto must be the default theme preference")
     assert(MarketSync.GetUITheme() == "forever", "Auto resolves to Forever on the modern client")
     MarketSync.Scanner = { IsLegacyAH = true }
     assert(MarketSync.GetUITheme() == "legacy", "Auto resolves to Legacy on a classic AH client")
     MarketSync.Scanner = nil
+    local themeReloaded = false
+    ReloadUI = function() themeReloaded = true end
     assert(MarketSync.SetUITheme("legacy") == true and MarketSync.GetUITheme() == "legacy")
+    assert(not themeReloaded, "Theme selection must not call protected ReloadUI from a dropdown")
+    local legacyR, legacyG, legacyB = MarketSync.GetThemeColor("inset")
+    assert(legacyB > legacyR and legacyB > legacyG,
+      "Forced Legacy on a modern client should select the slate palette")
     assert(MarketSync.SetUITheme("unknown") == false and MarketSync.GetUITheme() == "legacy")
     assert(MarketSync.SetUITheme("forever") == true)
+    local foreverR, foreverG, foreverB = MarketSync.GetThemeColor("inset")
+    assert(foreverR > foreverB, "Forever should restore the warm native palette")
 
     -- 2. Verify RAM usage estimator
     local realmDB = MarketSync.GetRealmDB()
@@ -2299,14 +2391,48 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     local estMB, totalItems, pCount, gCount, nCount = MarketSync.GetEstimatedRAMUsage()
     assert(totalItems >= 3, "totalItems should be at least 3, got: " .. tostring(totalItems))
     assert(estMB >= 0.5, "Estimated RAM should be >= 0.5 MB, got: " .. tostring(estMB))
+    local diagnostic = MarketSync.GetDiagnosticsSnapshot(true)
+    assert(diagnostic.storage.personal.count == 2, "diagnostics should count personal storage")
+    assert(diagnostic.storage.neutral.count == 1, "diagnostics should count neutral storage")
+    assert(diagnostic.storedEstimatedKB > 0, "diagnostics should estimate stored table footprint")
+    assert(diagnostic.addonKB == nil, "unavailable measured addon memory must remain explicitly unavailable")
 
     -- 3. Verify OpenSettings and Core settings panel
     assert(type(MarketSync.OpenSettings) == "function", "MarketSync.OpenSettings should exist")
+    assert(type(MarketSync.SetMinimapIconHidden) == "function", "Minimap visibility setter should exist")
+    local iconShown = nil
+    LibStub = function(name)
+      if name == "LibDBIcon-1.0" then
+        return {
+          IsRegistered = function() return true end,
+          Hide = function() iconShown = false end,
+          Show = function() iconShown = true end,
+        }
+      end
+    end
+    MarketSync.SetMinimapIconHidden(true)
+    assert(MarketSyncDB.MinimapIcon.hide == true and iconShown == false,
+      "Hide Minimap Icon should persist and immediately hide the icon")
+    MarketSync.SetMinimapIconHidden(false)
+    assert(MarketSyncDB.MinimapIcon.hide == false and iconShown == true,
+      "Unhide should persist and immediately show the icon")
     assert(MarketSync.SettingsPanel ~= nil, "MarketSync.SettingsPanel should be registered")
     if MarketSync.SettingsPanel.GetScript and MarketSync.SettingsPanel:GetScript("OnShow") then
       MarketSync.SettingsPanel:GetScript("OnShow")(MarketSync.SettingsPanel)
     end
     assert(MarketSync.SettingsPanel.initialized == true, "SettingsPanel should initialize controls on show")
+    local paddedButtons = 0
+    for _, frame in ipairs(settingsTestFrames) do
+      if frame.type == "Button" and frame.text and
+          (frame.parent == MarketSync.SettingsPanel or
+           (frame.parent and frame.parent.parent == _G.MarketSyncConfigCanvas)) then
+        assert(frame.width >= #frame.text * 7 + 32, "Settings button requires 16px padding per side: " .. frame.text)
+        assert(frame.height == 26, "Settings buttons should share a comfortable height")
+        paddedButtons = paddedButtons + 1
+      end
+    end
+    assert(paddedButtons == 6, "Expected all six settings buttons to use padded sizing")
+    assert(_G.MarketSyncConfigCanvas.height > 1180, "Scroll canvas must include the newly padded cards")
     assert(_G.MarketSyncAddonUndercutSlider == nil,
       "Blizzard AddOn Settings should not create an undercut slider")
     if MarketSync.SettingsPanel.RefreshSettingsValues then
@@ -2316,9 +2442,22 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
       MarketSync.SettingsPanel.RefreshSettingsValues()
       MarketSyncDB.LowRamMode = false
       MarketSync.SettingsPanel.RefreshSettingsValues()
+      local expandedHeight = _G.MarketSyncConfigCanvas.height
       MarketSyncDB.LowRamMode = true
       MarketSync.SettingsPanel.RefreshSettingsValues()
+      assert(_G.MarketSyncConfigCanvas.height == expandedHeight - 30,
+        "Scroll height must follow collapsed memory settings without clipping the final card")
     end
+    assert(StaticPopupDialogs.MARKETSYNC_CONFIRM_MARKET_DATA_RESET,
+      "Reset Market Data must require a confirmation dialog")
+    local reloaded = false
+    ReloadUI = function() reloaded = true end
+    realmDB.PersonalData["item:1001"] = { m = 100 }
+    StaticPopupDialogs.MARKETSYNC_CONFIRM_MARKET_DATA_RESET.OnAccept()
+    assert(next(realmDB.PersonalData) == nil and next(realmDB.NeutralData) == nil,
+      "confirmed reset should clear current-realm auction scan data")
+    assert(MarketSyncDB.LowRamMode == true and reloaded,
+      "reset should retain settings and reload the UI")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('Low RAM & Settings check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
@@ -2344,6 +2483,29 @@ test('Browse row hover and sidecar tooltips do not duplicate auction scan or pri
   assert(processingCode.includes('delta / livePrice * 100'), 'UI_Processing must compute standard ROI based on net profit over cost');
 });
 
+
+test('Alerts scope and Craft popout controls are wired without old presets', () => {
+  const alerts = fs.readFileSync(path.join(marketSyncDir, 'UI_Notifications.lua'), 'utf8');
+  const sidecar = fs.readFileSync(path.join(marketSyncDir, 'UI_AHSidecar.lua'), 'utf8');
+  const processing = fs.readFileSync(path.join(marketSyncDir, 'UI_Processing.lua'), 'utf8');
+  const crafting = fs.readFileSync(path.join(marketSyncDir, 'UI_CraftingInfo.lua'), 'utf8');
+  assert(!alerts.includes('btnUndercut:SetText'), 'Old undercut preset must be removed');
+  assert(!alerts.includes('btnMarket:SetText'), 'Old market preset must be removed');
+  assert(alerts.includes('mainScopeCheck') && alerts.includes('neutralScopeCheck'), 'AH scope checkboxes missing');
+  assert(alerts.includes('SetThresholdCopper(math.floor(marketPrice))'), 'Market price default missing');
+  assert(sidecar.includes('Sidecar.AddCraftRecipe') && sidecar.includes('Sidecar.ShowForMain'), 'Craft popout missing');
+  assert(processing.includes('OpenCraftSidecar(row.itemID)'), 'Processing craft-list action missing');
+  assert(processing.includes('Interface\\\\Buttons\\\\UI-SortArrow'), 'Resync control should use an available UI texture');
+  const main = fs.readFileSync(path.join(marketSyncDir, 'UI_Main.lua'), 'utf8');
+  assert(main.includes('sidecarTab:SetSize(18, 38)') &&
+    main.includes('sidecarArrow:SetText(">")') &&
+    main.includes('sidecar.ShowForMain(sidecar.currentMode or "lists")'),
+    'Portable window should expose its breakout as a compact edge tab');
+  assert(sidecar.includes('toggleBtn:SetSize(18, 38)'),
+    'Auction House collapsed breakout should use the same compact edge tab');
+  assert(crafting.match(/OpenCraftListForRecipe\(recipe\)/g)?.length === 2,
+    'Classic and modern profession overlays must both expose Craft Lists');
+});
 
 test('AST syntax check on all MarketSync Lua files', () => {
   const files = fs.readdirSync(marketSyncDir).filter(f => f.endsWith('.lua'));

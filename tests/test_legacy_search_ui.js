@@ -52,6 +52,7 @@ run(`
   GetMoney = function() return 100000 end
   MarketSync = {
     FormatMoney = function(value) return tostring(value) .. "c" end,
+    GetThemeColor = function() return 0.1, 0.1, 0.1, 1 end,
     Scanner = {
       LiveSearchResults = {},
       Status = "Idle",

@@ -34,8 +34,8 @@ local function CreateCustomCheckBox(parent, onClick)
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    cb:SetBackdropColor(0.10, 0.09, 0.08, 0.95)
-    cb:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    cb:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    cb:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     cb.checkTex = cb:CreateTexture(nil, "OVERLAY")
     cb.checkTex:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
@@ -71,7 +71,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     local legacyAH = MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH
-    if legacyAH then
+    if MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme() then
         local background = panel:CreateTexture(nil, "BACKGROUND")
         background:SetAllPoints(panel)
         background:SetColorTexture(0.045, 0.048, 0.055, 0.99)
@@ -89,8 +89,8 @@ function MarketSync.CreateAHScannerPanel(parent)
             edgeSize = 1,
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
-        leftInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-        leftInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+        leftInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+        leftInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     end
     leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
     leftInset:SetWidth(leftWidth)
@@ -105,8 +105,8 @@ function MarketSync.CreateAHScannerPanel(parent)
             edgeSize = 1,
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
-        rightInset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-        rightInset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+        rightInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+        rightInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     end
     rightInset:SetPoint("TOPLEFT", leftInset, "TOPRIGHT", 6, 0)
     rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
@@ -161,7 +161,7 @@ function MarketSync.CreateAHScannerPanel(parent)
     divider:SetPoint("TOPLEFT", toggleSelectBtn, "BOTTOMLEFT", -2, -8)
     divider:SetPoint("RIGHT", -4, 0)
     divider:SetHeight(1)
-    divider:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    divider:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
 
     -- Active List Header
     local activeListLabel = leftInset:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -355,13 +355,13 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row.count:SetText(string.format("|cff888888(%d)|r", count))
 
                 if listName == selectedListName then
-                    row:SetBackdropColor(0.32, 0.25, 0.08, 0.85)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     row.name:SetTextColor(1, 0.82, 0)
                 elseif i % 2 == 0 then
-                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                     row.name:SetTextColor(0.85, 0.85, 0.85)
                 else
-                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                     row.name:SetTextColor(0.85, 0.85, 0.85)
                 end
 
@@ -423,7 +423,8 @@ function MarketSync.CreateAHScannerPanel(parent)
 
             if item then
                 if not row then
-                    row = CreateFrame("Frame", nil, itemsScrollContent)
+                    row = CreateFrame("Button", nil, itemsScrollContent)
+                    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                     row:SetHeight(rowH)
                     row:SetPoint("LEFT", 0, 0)
                     row:SetPoint("RIGHT", 0, 0)
@@ -452,6 +453,17 @@ function MarketSync.CreateAHScannerPanel(parent)
 
                 row.icon:SetTexture(item.icon)
                 row.name:SetText(MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name)
+
+                row:SetScript("OnClick", function(self, button)
+                    if button == "RightButton" and MarketSync.ShowItemContextMenu then
+                        MarketSync.ShowItemContextMenu(self, {
+                            itemID = item.itemID, itemName = item.name,
+                            itemLink = item.link, icon = item.icon,
+                            price = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(item.itemID),
+                            listName = selectedListName,
+                        })
+                    end
+                end)
 
                 row.delBtn:SetScript("OnClick", function()
                     if MarketSync.Favorites then
@@ -648,8 +660,8 @@ function MarketSync.CreateAHScannerPanel(parent)
         edgeFile = "Interface\\Buttons\\WHITE8X8",
         edgeSize = 1,
     })
-    progressBar:SetBackdropColor(0.07, 0.08, 0.09, 0.95)
-    progressBar:SetBackdropBorderColor(0.30, 0.31, 0.33, 0.90)
+    progressBar:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    progressBar:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     progressBar:SetMinMaxValues(0, 1)
     progressBar:SetValue(0)
 
@@ -745,9 +757,9 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row:SetPoint("TOPRIGHT", 0, -(i - 1) * rowH)
 
                 if i % 2 == 0 then
-                    row:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                 else
-                    row:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                    row:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                 end
 
                 -- Dynamically resolve item name and icon if missing or fallback
@@ -792,7 +804,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row.time:SetText(date("%H:%M:%S", data.time))
 
                 row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(0.30, 0.25, 0.12, 0.40)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     if data.itemKey and data.itemKey.itemID then
                         local link = select(2, SafeGetItemInfo(data.itemKey.itemID))
@@ -827,9 +839,9 @@ function MarketSync.CreateAHScannerPanel(parent)
 
                 row:SetScript("OnLeave", function(self)
                     if i % 2 == 0 then
-                        self:SetBackdropColor(0.10, 0.095, 0.09, 0.70)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
                     else
-                        self:SetBackdropColor(0.06, 0.055, 0.05, 0.70)
+                        self:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                     end
                     GameTooltip:Hide()
                 end)
@@ -837,18 +849,20 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                 row:SetScript("OnClick", function(self, mouseButton)
                     if mouseButton == "RightButton" then
+                        local itemID = data.itemID or (data.itemKey and data.itemKey.itemID)
                         local dbKey = data.dbKey or (data.itemKey and MarketSync.NormalizeItemKey
-                            and select(1, MarketSync.NormalizeItemKey(data.itemKey))) or tostring(data.itemID)
+                            and select(1, MarketSync.NormalizeItemKey(data.itemKey))) or (itemID and tostring(itemID))
                         local link = data.itemKey and data.itemKey.itemLink
-                            or select(2, SafeGetItemInfo(data.itemID)) or data.name
+                            or select(2, SafeGetItemInfo(itemID))
                         if MarketSync.ShowItemContextMenu then
                             MarketSync.ShowItemContextMenu(row, {
-                                itemID = data.itemID,
+                                itemID = itemID,
                                 itemLink = link,
                                 itemName = data.name,
                                 icon = data.icon,
                                 price = data.unitPrice,
                                 dbKey = dbKey,
+                                listName = selectedListName,
                             })
                         elseif MarketSync.ShowAnalytics and data.itemID then
                             MarketSync.ShowAnalytics(dbKey, link, data.name, data.icon, data.unitPrice)
@@ -869,7 +883,7 @@ function MarketSync.CreateAHScannerPanel(parent)
                         description = function()
                             local priceStr = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(data.unitPrice) or (tostring(data.unitPrice) .. " copper")
                             local qtyStr = (data.available or 1) .. " available"
-                            return string.format("%s, Unit buyout: %s, %s. Left-click to search in Auction House, Right-click for analytics.", data.name or "", priceStr, qtyStr)
+                            return string.format("%s, Unit buyout: %s, %s. Left-click to search in Auction House, Right-click for item actions.", data.name or "", priceStr, qtyStr)
                         end,
                         getIndexInfo = function()
                             return { index = i, total = #results }

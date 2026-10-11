@@ -10,6 +10,34 @@ local FormatMoney = MarketSync.FormatMoney
 local MonitorFrame = nil
 local earlyCacheLogs = {}
 local earlyNetworkLogs = {}
+local RenderSwarmUI
+local monitorRefreshPending = false
+local function ScheduleMonitorRefresh()
+    if monitorRefreshPending or not MonitorFrame or not MonitorFrame:IsShown() then return end
+    if not C_Timer or not C_Timer.After then return end
+    monitorRefreshPending = true
+    C_Timer.After(0.2, function()
+        monitorRefreshPending = false
+        if not MonitorFrame or not MonitorFrame:IsShown() then return end
+        if RenderSwarmUI then RenderSwarmUI() end
+        -- Bound both retained history and display work; hidden monitors only buffer.
+        for _, stream in ipairs({
+            { earlyNetworkLogs, MonitorFrame.logScroll },
+            { earlyCacheLogs, MonitorFrame.cacheScroll },
+        }) do
+            for i = 1, math.min(20, #stream[1]) do
+                stream[2]:AddMessage(table.remove(stream[1], 1))
+            end
+        end
+        if #earlyNetworkLogs > 0 or #earlyCacheLogs > 0 then ScheduleMonitorRefresh() end
+    end)
+end
+
+local function QueueMonitorLog(queue, message)
+    queue[#queue + 1] = message
+    if #queue > 500 then table.remove(queue, 1) end
+    ScheduleMonitorRefresh()
+end
 local CACHE_LOG_TAGS = {
     "[Start]",
     "[Personal]",
@@ -50,14 +78,14 @@ local function CreateMonitorFrame()
     MonitorFrame:SetToplevel(true)
     MonitorFrame:Hide()
 
-    -- Quick button to open Task Manager right in the header
+    -- Quick button to inspect all active background work.
     local btnTaskMgr = CreateFrame("Button", nil, MonitorFrame.Header, "UIPanelButtonTemplate")
     btnTaskMgr:SetSize(110, 20)
     btnTaskMgr:SetPoint("RIGHT", MonitorFrame.CloseButton, "LEFT", -6, 0)
     btnTaskMgr:SetText("Task Manager")
     btnTaskMgr:SetScript("OnClick", function()
-        if MarketSync.ToggleRateMonitor then
-            MarketSync.ToggleRateMonitor()
+        if MarketSync.ToggleTaskManager then
+            MarketSync.ToggleTaskManager()
         end
     end)
 
@@ -85,7 +113,7 @@ local function CreateMonitorFrame()
 
     local limitBadge = statsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     limitBadge:SetPoint("RIGHT", -16, 0)
-    limitBadge:SetText("Throttle Limit: ~800 B/s")
+    limitBadge:SetText("DATA budget: 640 B/s")
 
     -- Log / Console Header & Inset
     local logHeader = MarketSync.CreateAHColumnHeader(MonitorFrame, 450, 20, "Network Event Log")
@@ -139,6 +167,7 @@ local function CreateMonitorFrame()
     btnClearCache:SetText("Clear")
     btnClearCache:SetScript("OnClick", function()
         if MonitorFrame and MonitorFrame.cacheScroll then
+            wipe(earlyCacheLogs)
             MonitorFrame.cacheScroll:Clear()
             MonitorFrame.cacheScroll:AddMessage("|cff888888Cache log cleared.|r")
         end
@@ -168,27 +197,14 @@ local function CreateMonitorFrame()
     btnCloseMon:SetScript("OnClick", function() MonitorFrame:Hide() end)
 
     -- Dump early logs
-    for _, log in ipairs(earlyNetworkLogs) do
-        MonitorFrame.logScroll:AddMessage(log)
-    end
-    wipe(earlyNetworkLogs)
-
-    for _, log in ipairs(earlyCacheLogs) do
-        MonitorFrame.cacheScroll:AddMessage(log)
-    end
-    wipe(earlyCacheLogs)
+    ScheduleMonitorRefresh()
 
 end
 
 function MarketSync.LogCacheEvent(msg)
     local timestamp = date("%H:%M:%S")
     local formattedMsg = string.format("[%s] %s", timestamp, msg)
-    if MonitorFrame and MonitorFrame.cacheScroll then
-        MonitorFrame.cacheScroll:AddMessage(formattedMsg)
-    else
-        table.insert(earlyCacheLogs, formattedMsg)
-        if #earlyCacheLogs > 500 then table.remove(earlyCacheLogs, 1) end
-    end
+    QueueMonitorLog(earlyCacheLogs, formattedMsg)
 end
 
 function MarketSync.ToggleNetworkMonitor()
@@ -197,10 +213,9 @@ function MarketSync.ToggleNetworkMonitor()
         MonitorFrame:Hide()
     else
         MonitorFrame:Show()
-        -- Force a refresh so we see ourselves instantly
-        if MarketSync.UpdateSwarmUI then
-            MarketSync.UpdateSwarmUI(UnitName("player"), nil)
-        end
+        ScheduleMonitorRefresh()
+        -- Refresh existing queue entries without manufacturing a second local row.
+        if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(nil, nil) end
     end
 end
 
@@ -215,12 +230,7 @@ function MarketSync.LogNetworkEvent(msg)
         return
     end
     local formattedMsg = date("%H:%M:%S") .. " " .. msg
-    if MonitorFrame and MonitorFrame.logScroll then
-        MonitorFrame.logScroll:AddMessage(formattedMsg)
-    else
-        table.insert(earlyNetworkLogs, formattedMsg)
-        if #earlyNetworkLogs > 500 then table.remove(earlyNetworkLogs, 1) end
-    end
+    QueueMonitorLog(earlyNetworkLogs, formattedMsg)
 end
 
 -- ================================================================
@@ -229,37 +239,31 @@ end
 MarketSync.SwarmPeers = {}
 
 function MarketSync.UpdateSwarmUI(user, status)
-    if not user then return end
-    
-    if status then
-        MarketSync.SwarmPeers[user] = { status = status, time = time() }
-    else
-        -- Instead of deleting the user when they finish, drop them to Idle
-        if MarketSync.SwarmPeers[user] then
-            local fallback = (user == UnitName("player") and not IsInGuild()) and "No Guild" or "Idle"
-            MarketSync.SwarmPeers[user].status = fallback
-            MarketSync.SwarmPeers[user].time = time()
+    if user then
+        if status then
+            MarketSync.SwarmPeers[user] = { status = status, time = time() }
+        else
+            -- Instead of deleting the user when they finish, drop them to Idle.
+            if MarketSync.SwarmPeers[user] then
+                local isLocal = MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(user)
+                local fallback = (isLocal and not IsInGuild()) and "No Guild" or "Idle"
+                MarketSync.SwarmPeers[user].status = fallback
+                MarketSync.SwarmPeers[user].time = time()
+            end
         end
     end
     
+    ScheduleMonitorRefresh()
+end
+
+RenderSwarmUI = function()
     if not MonitorFrame or not MonitorFrame:IsShown() then return end
-    
-    MonitorFrame.swarmText:Clear()
     local now = time()
-    
-    local myName = UnitName("player")
-    local myDefaultStatus = IsInGuild() and "Idle" or "No Guild"
-    
-    if myName and not MarketSync.SwarmPeers[myName] then
-        MarketSync.SwarmPeers[myName] = { status = myDefaultStatus, time = now }
-    elseif myName and MarketSync.SwarmPeers[myName] and (MarketSync.SwarmPeers[myName].status == "Idle" or MarketSync.SwarmPeers[myName].status == "No Guild") then
-        MarketSync.SwarmPeers[myName].status = myDefaultStatus
-    end
     
     local sortedPeers = {}
     for peer, info in pairs(MarketSync.SwarmPeers) do
-        -- Expire Idle statuses after 5 minutes of total silence (except for ourselves)
-        if peer ~= myName and (now - info.time > 300) then
+        -- Expire silent queue entries, including our own completed activity.
+        if now - info.time > 300 then
             MarketSync.SwarmPeers[peer] = nil
         else
             table.insert(sortedPeers, { name = peer, status = info.status, time = info.time })
@@ -314,27 +318,178 @@ function MarketSync.UpdateSwarmUI(user, status)
         return a.name < b.name -- Alphabetical tie breaker
     end)
     
-    local count = 0
+    local lines = {}
     for _, peerInfo in ipairs(sortedPeers) do
         local statusText = peerInfo.status or "Idle"
         local color = GetStatusColor(statusText)
         
-        MonitorFrame.swarmText:AddMessage(peerInfo.name .. ": " .. color .. statusText .. "|r")
-        count = count + 1
+        lines[#lines + 1] = peerInfo.name .. ": " .. color .. statusText .. "|r"
+        if #lines >= 50 then break end
     end
     
-    if count == 0 then MonitorFrame.swarmText:AddMessage("No active peers.") end
+    if #lines == 0 then lines[1] = "No active peers." end
+    local signature = table.concat(lines, "\n")
+    if MonitorFrame.swarmSignature == signature then return end
+    MonitorFrame.swarmSignature = signature
+    MonitorFrame.swarmText:Clear()
+    for _, line in ipairs(lines) do MonitorFrame.swarmText:AddMessage(line) end
 end
 
 -- ================================================================
--- RATE MONITOR (TASK MANAGER)
+-- TASK MANAGER: background scanner, cache, sync, and memory state
+-- ================================================================
+local TaskManagerFrame = nil
+
+local function FormatTaskTime(epoch)
+    if not epoch or epoch <= 0 then return "Never" end
+    return date("%Y-%m-%d %H:%M", epoch)
+end
+
+local function RefreshTaskManager(force)
+    if not TaskManagerFrame or not TaskManagerFrame:IsShown() then return end
+    local data = MarketSync.GetDiagnosticsSnapshot and MarketSync.GetDiagnosticsSnapshot(force == true) or {}
+    local scan, sync, index = data.scanner or {}, data.sync or {}, data.indexes or {}
+    local times, network = data.scanTimes or {}, data.network or {}
+    local storage, runtime = data.storage or {}, data.runtime or {}
+    local function IndexLine(label, resolved, total, pending, building, incoming)
+        return string.format("%s: %d/%d ready, %d pending%s%s", label,
+            resolved or 0, total or 0, pending or 0,
+            building and " [building]" or "", (incoming or 0) > 0 and " [sync inbound " .. incoming .. "]" or "")
+    end
+    TaskManagerFrame.workText:SetText(table.concat({
+        "|cffffd700Scanner|r",
+        string.format("State: %s  Mode: %s  Scope: %s", scan.active and "Active" or "Idle",
+            scan.full and "Full AH" or "Targeted", scan.scope or "main"),
+        string.format("Progress: %d/%d  Queue: %d", scan.current or 0, scan.total or 0,
+            runtime.scanQueue or 0),
+        "Status: " .. tostring(scan.status or "Idle"),
+        "Last full: " .. FormatTaskTime(times.full),
+        "Last partial: " .. FormatTaskTime(times.partial),
+        "Last neutral: " .. FormatTaskTime(times.neutral),
+        "",
+        "|cffffd700Search cache build|r",
+        IndexLine("Personal", index.personalResolved, index.personalTotal, index.personalPending,
+            index.personalBuilding),
+        IndexLine("Guild", index.guildResolved, index.guildTotal, index.guildPending,
+            index.guildBuilding, index.guildIncoming),
+        IndexLine("Neutral", index.neutralResolved, index.neutralTotal, index.neutralPending,
+            index.neutralBuilding, index.neutralIncoming),
+        "",
+        "|cffffd700Guild sync|r",
+        string.format("Lane: %s  Scope: %s", sync.phase or "unknown", sync.scope or "none"),
+        "Source: " .. tostring(sync.source or "none"),
+        string.format("Outbound: %s  Inbound: %s  Throttled: %s", tostring(sync.outbound == true),
+            tostring(sync.inbound == true), tostring(sync.throttled == true)),
+        string.format("Control queued: %d  Sent: %d  Received: %d", sync.controlQueued or 0,
+            sync.sentItems or 0, sync.receivedItems or 0),
+        string.format("Transfer snapshot: %d entries  Pending frame: %d B", sync.frozenEntryCount or 0,
+            sync.pendingFrameBytes or 0),
+        string.format("Queued control payload: %d B", sync.queuedControlBytes or 0),
+        string.format("Traffic: Tx %d/s, Rx %d/s; other addons %d B/s, %d API/s",
+            network.txRate or 0, network.rxRate or 0, network.otherBytes or 0,
+            network.otherAPIs or 0),
+    }, "\n"))
+
+    local function Part(name)
+        local part = storage[name] or {}
+        return string.format("%d records, ~%.1f KB", part.count or 0, part.estimatedKB or 0)
+    end
+    TaskManagerFrame.memoryText:SetText(table.concat({
+        "|cffffd700Memory & data|r",
+        "MarketSync measured: " .. (data.addonKB and string.format("%.1f KB", data.addonKB) or "unavailable"),
+        "Lua heap (all addons): " .. (data.luaHeapKB and string.format("%.1f KB", data.luaHeapKB) or "unavailable"),
+        "",
+        "SavedVariables (sampled estimates):",
+        "Personal: " .. Part("personal"),
+        "Guild metadata: " .. Part("guild"),
+        "Provider store*: " .. Part("provider"),
+        "Neutral: " .. Part("neutral"),
+        "History: " .. Part("history"),
+        "Item info: " .. Part("itemInfo"),
+        "Recipes: " .. Part("recipes"),
+        "Alerts: " .. Part("alerts"),
+        string.format("Storage subtotal: ~%.1f KB", data.storedEstimatedKB or 0),
+        "",
+        string.format("Active indexes: %d rows, ~%.1f KB", runtime.indexRows or 0,
+            runtime.indexEstimatedKB or 0),
+        string.format("Recent scan results: %d  Peers: %d", runtime.recentResults or 0,
+            runtime.peers or 0),
+        "",
+        "|cff888888*Provider store may belong to Auctionator; excluded from subtotal. Component estimates cannot be added to measured memory.|r",
+    }, "\n"))
+end
+
+local function CreateTaskManagerFrame()
+    if TaskManagerFrame then return end
+    TaskManagerFrame = MarketSync.CreateModernDialog("MarketSyncTaskManagerFrame", 760, 570,
+        "|cFFFFD100MarketSync Task Manager|r")
+    TaskManagerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    TaskManagerFrame:SetFrameLevel(110)
+    TaskManagerFrame:SetToplevel(true)
+    TaskManagerFrame:Hide()
+
+    local workPanel = MarketSync.CreateModernInset(TaskManagerFrame, 14, -48, 454, 460)
+    local memoryPanel = MarketSync.CreateModernInset(TaskManagerFrame, 476, -48, 270, 460)
+    local workText = workPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    workText:SetPoint("TOPLEFT", 12, -12)
+    workText:SetWidth(430)
+    workText:SetJustifyH("LEFT")
+    TaskManagerFrame.workText = workText
+    local memoryText = memoryPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    memoryText:SetPoint("TOPLEFT", 10, -12)
+    memoryText:SetWidth(250)
+    memoryText:SetJustifyH("LEFT")
+    TaskManagerFrame.memoryText = memoryText
+
+    local function Action(label, x, width, callback)
+        local button = CreateFrame("Button", nil, TaskManagerFrame, "UIPanelButtonTemplate")
+        button:SetSize(width, 22)
+        button:SetPoint("BOTTOMLEFT", TaskManagerFrame, "BOTTOMLEFT", x, 16)
+        button:SetText(label)
+        button:SetScript("OnClick", callback)
+    end
+    Action("Refresh", 14, 90, function() RefreshTaskManager(true) end)
+    Action("Rate Limiter", 112, 112, function()
+        if MarketSync.ToggleRateMonitor then MarketSync.ToggleRateMonitor() end
+    end)
+    Action("Network Monitor", 232, 140, function()
+        if MarketSync.ToggleNetworkMonitor then MarketSync.ToggleNetworkMonitor() end
+    end)
+    Action("Print Diagnostics", 380, 145, function()
+        if MarketSync.PrintDiagnosticsSnapshot then MarketSync.PrintDiagnosticsSnapshot() end
+    end)
+    Action("Close", 656, 90, function() TaskManagerFrame:Hide() end)
+
+    TaskManagerFrame.elapsed = 0
+    TaskManagerFrame:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = self.elapsed + elapsed
+        if self.elapsed >= 5 then
+            self.elapsed = 0
+            RefreshTaskManager()
+        end
+    end)
+end
+
+function MarketSync.ToggleTaskManager()
+    if not TaskManagerFrame then CreateTaskManagerFrame() end
+    if TaskManagerFrame:IsShown() then
+        TaskManagerFrame:Hide()
+    else
+        TaskManagerFrame.elapsed = 0
+        TaskManagerFrame:Show()
+        RefreshTaskManager(true)
+    end
+end
+
+-- ================================================================
+-- NETWORK RATE LIMITER
 -- ================================================================
 local RateMonitorFrame = nil
 
 local function CreateRateMonitorFrame()
     if RateMonitorFrame then return end
 
-    RateMonitorFrame = MarketSync.CreateModernDialog("MarketSyncRateMonitorFrame", 400, 440, "|cFFFFD100Task Manager: Rate Limiter|r")
+    RateMonitorFrame = MarketSync.CreateModernDialog("MarketSyncRateMonitorFrame", 400, 440, "|cFFFFD100Network Rate Limiter|r")
     RateMonitorFrame:SetPoint("CENTER", UIParent, "CENTER", 200, 0)
     RateMonitorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     RateMonitorFrame:SetFrameLevel(105)
@@ -369,7 +524,7 @@ local function CreateRateMonitorFrame()
 
     local limitLabel = card1:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     limitLabel:SetPoint("TOPLEFT", 14, -84)
-    limitLabel:SetText("Throttle Threshold: ~800 B/s")
+    limitLabel:SetText("DATA budget 640 B/s; gauge shows total traffic")
 
     -- Modern Progress Bar Track & Fill
     local barTrack = CreateFrame("Frame", nil, card1, "BackdropTemplate")
@@ -381,8 +536,8 @@ local function CreateRateMonitorFrame()
         edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 }
     })
-    barTrack:SetBackdropColor(0.10, 0.09, 0.08, 0.95)
-    barTrack:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+    barTrack:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    barTrack:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     local rateBar = CreateFrame("StatusBar", nil, barTrack)
     rateBar:SetPoint("TOPLEFT", 1, -1)
@@ -427,9 +582,9 @@ local function CreateRateMonitorFrame()
         local rowBg = row:CreateTexture(nil, "BACKGROUND")
         rowBg:SetAllPoints()
         if i % 2 == 1 then
-            rowBg:SetColorTexture(0.10, 0.095, 0.09, 0.70)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("rowEven"))
         else
-            rowBg:SetColorTexture(0.06, 0.055, 0.05, 0.70)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("rowOdd"))
         end
         row.bg = rowBg
 

@@ -46,6 +46,63 @@ test('AST syntax check on MarketSync sync and alerts files', () => {
   }
 });
 
+test('Swarm monitor refresh does not invent a duplicate local-name peer', () => {
+  const source = fs.readFileSync(path.join(marketSyncDir, 'UI_Monitor.lua'), 'utf8');
+  const start = source.indexOf('MarketSync.SwarmPeers = {}');
+  const end = source.indexOf('-- TASK MANAGER: background scanner', start);
+  assert(start >= 0 && end > start, 'Could not isolate swarm monitor logic');
+  const scheduler = source.slice(source.indexOf('local RenderSwarmUI'), source.indexOf('local CACHE_LOG_TAGS'));
+  const swarmLogic = scheduler + source.slice(start, end).replace(/-- =+\s*$/, '');
+  const L = createLuaEnv(`
+    UnitName = function() return "John" end
+    MarketSync.IsLocalSyncIdentity = function(name)
+      return name == "John" or name == "John Itemrack"
+    end
+    scheduled = {}
+    C_Timer.After = function(_, fn) scheduled[#scheduled + 1] = fn end
+    earlyNetworkLogs, earlyCacheLogs = {}, {}
+    MonitorFrame = {
+      shown = true,
+      IsShown = function(self) return self.shown end,
+      logScroll = { AddMessage = function() end },
+      cacheScroll = { AddMessage = function() end },
+      swarmText = {
+        entries = {},
+        Clear = function(self) self.entries = {} end,
+        AddMessage = function(self, message) table.insert(self.entries, message) end,
+      },
+    }
+  `);
+  const script = `${swarmLogic}\n
+    MarketSync.UpdateSwarmUI("John Itemrack", "Ready")
+    MarketSync.UpdateSwarmUI(nil, nil)
+    assert(#scheduled == 1, "peer updates should coalesce")
+    table.remove(scheduled, 1)()
+    assert(MarketSync.SwarmPeers["John"] == nil, "refresh inserted a shadow row")
+    assert(#MonitorFrame.swarmText.entries == 1, "expected exactly one person")
+    MarketSync.UpdateSwarmUI("John", "Receiving")
+    assert(MarketSync.SwarmPeers["John"].status == "Receiving", "explicit local activity was lost")
+    table.remove(scheduled, 1)()
+    local clears = 0
+    MonitorFrame.swarmText.Clear = function() clears = clears + 1 end
+    MarketSync.UpdateSwarmUI("John", "Receiving")
+    table.remove(scheduled, 1)()
+    assert(clears == 0, "unchanged status must not rebuild the display")
+    for i = 1, 60 do QueueMonitorLog(earlyNetworkLogs, tostring(i)) end
+    assert(#scheduled == 1, "log updates should coalesce")
+    table.remove(scheduled, 1)()
+    assert(#earlyNetworkLogs == 40, "only 20 log lines may render per tick")
+    MonitorFrame.shown = false
+    table.remove(scheduled, 1)()
+    assert(#earlyNetworkLogs == 40 and #scheduled == 0, "hidden monitor must stop rendering")
+    for i = 1, 600 do QueueMonitorLog(earlyNetworkLogs, tostring(i)) end
+    assert(#earlyNetworkLogs == 500 and #scheduled == 0, "hidden history must be bounded")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) {
+    throw new Error(to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
 // Helper to create a sandbox WoW environment
 function createLuaEnv(extraSetup) {
   const L = lauxlib.luaL_newstate();
@@ -203,6 +260,7 @@ function createLuaEnv(extraSetup) {
       return f
     end
     MarketSync = MarketSync or {}
+    MarketSync.GetThemeColor = function() return 0.1, 0.1, 0.1, 1 end
     MarketSync.StandardSounds = {
       { id = 8959, name = "Raid Warning" },
       { id = 5674, name = "Auction Window Open" },
@@ -423,6 +481,13 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
 
   const script = `
     local realmDB = MarketSync.GetRealmDB()
+    local task = MarketSync.GetSyncTaskStatus()
+    assert(task.phase == "idle" and task.controlQueued == 0,
+      "task manager should expose idle sync lane and control queue")
+    assert(MarketSync.IsLocalSyncIdentity("LocalPlayer-Faerlina"), "full local identity must match")
+    assert(MarketSync.IsLocalSyncIdentity("LocalPlayer"), "legacy short local identity must match")
+    assert(not MarketSync.IsLocalSyncIdentity("LocalPlayer-OtherRealm"),
+      "same short name on another realm must remain a distinct person")
 
     -- Populate mock personal scan data across 50 items with rich 30-min timeseries
     local scanDay = 20500

@@ -180,11 +180,11 @@ local function StyleModernSubTab(btn, isActive, text)
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
         if isActive then
-            btn:SetBackdropColor(0.38, 0.28, 0.10, 0.98)
+            btn:SetBackdropColor(MarketSync.GetThemeColor("hover"))
             btn:SetBackdropBorderColor(1.0, 0.85, 0.20, 1.0)
         else
-            btn:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
-            btn:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
+            btn:SetBackdropColor(MarketSync.GetThemeColor("header"))
+            btn:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
         end
     end
     local fs = btn.GetFontString and btn:GetFontString()
@@ -208,8 +208,8 @@ local function StyleModernSubTab(btn, isActive, text)
             StripBlizzardTextures(self)
             if not self._isActive then
                 if self.SetBackdropColor then
-                    self:SetBackdropColor(0.20, 0.17, 0.12, 0.95)
-                    self:SetBackdropBorderColor(0.70, 0.58, 0.25, 0.95)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
+                    self:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
                 end
                 local s = self.GetFontString and self:GetFontString()
                 if s and s.SetTextColor then s:SetTextColor(1.0, 0.90, 0.60) end
@@ -219,8 +219,8 @@ local function StyleModernSubTab(btn, isActive, text)
             StripBlizzardTextures(self)
             if not self._isActive then
                 if self.SetBackdropColor then
-                    self:SetBackdropColor(0.12, 0.10, 0.08, 0.92)
-                    self:SetBackdropBorderColor(0.32, 0.26, 0.18, 0.85)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("header"))
+                    self:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
                 end
                 local s = self.GetFontString and self:GetFontString()
                 if s and s.SetTextColor then s:SetTextColor(0.75, 0.70, 0.60) end
@@ -253,8 +253,8 @@ local function ShowBulkImportPopup(listLabel, candidates, onSaved)
             edgeSize = 16,
             insets = { left = 4, right = 4, top = 4, bottom = 4 },
         })
-        popup:SetBackdropColor(0.055, 0.045, 0.035, 0.98)
-        popup:SetBackdropBorderColor(0.65, 0.50, 0.18, 1)
+        popup:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
+        popup:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
         if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(popup) end
 
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -830,77 +830,37 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
     panel.SetThresholdCopper = SetThresholdCopper
 
-    local btnUndercut = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnUndercut:SetSize(48, 20)
-    btnUndercut:SetPoint("TOPLEFT", editorBox, "TOPLEFT", 10, -140)
-    btnUndercut:SetText("-10%")
-    StyleModernPillButton(btnUndercut, "-10%")
-
-    local btnMarket = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnMarket:SetSize(52, 20)
-    btnMarket:SetPoint("LEFT", btnUndercut, "RIGHT", 6, 0)
-    btnMarket:SetText("Market")
-    StyleModernPillButton(btnMarket, "Market")
-
-    local function ApplyThresholdPreset(multiplier)
-        local mp = panel.editorMarketPrice or 0
-        if mp <= 0 then
-            local target = panel.editorItemLink or panel.editorItemID or targetBox:GetText()
-            if target and target ~= "" then
-                mp = (MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(target)) or 0
-                if mp > 0 then
-                    panel.editorMarketPrice = mp
-                    itemSlotMarket:SetText("Market: " .. FormatMoneyColored(mp))
-                end
-            end
-        end
-
-        if mp > 0 then
-            local targetCopper = math.max(0, math.floor(mp * multiplier))
-            SetThresholdCopper(targetCopper)
-        else
-            local cur = GetThresholdCopper()
-            if cur > 0 and multiplier < 1.0 then
-                local targetCopper = math.max(0, math.floor(cur * multiplier))
-                SetThresholdCopper(targetCopper)
-            end
-        end
-    end
-
-    local function RefreshUndercutButtons()
-        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        btnUndercut:SetText("-" .. tostring(pct) .. "%")
-    end
-    panel.RefreshUndercutButtons = RefreshUndercutButtons
-
-    btnUndercut:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        GameTooltip:SetText(string.format("Set threshold to %d%% below market price.", pct), 1, 1, 1)
-        GameTooltip:AddLine("Configure default percentage in Settings (Beta section).", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
-    btnUndercut:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    btnUndercut:SetScript("OnClick", function()
-        local pct = (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10
-        ApplyThresholdPreset(math.max(0, 1 - (pct / 100)))
-    end)
-    btnMarket:SetScript("OnClick", function() ApplyThresholdPreset(1.0) end)
-
-    -- Dedicated Scope Row
+    -- Auction-house scope: both checked means all scopes in the saved request.
     local scopeLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    scopeLabel:SetPoint("TOPLEFT", 10, -166)
-    scopeLabel:SetText("Scope:")
-
-    local scopeDropdown = BuildScopeDropdown(
-        parentPrefix .. "NotificationsScopeDropdown",
-        editorBox,
-        LEFT_W - 68,
-        function() return panel.editorScope end,
-        function(v) panel.editorScope = v end
-    )
-    scopeDropdown:SetPoint("LEFT", scopeLabel, "RIGHT", 6, 0)
+    scopeLabel:SetPoint("TOPLEFT", 10, -146)
+    scopeLabel:SetText("Auction houses:")
+    local mainScopeCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
+    mainScopeCheck:SetSize(18, 18)
+    mainScopeCheck:SetPoint("TOPLEFT", 8, -163)
+    local mainScopeText = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    mainScopeText:SetPoint("LEFT", mainScopeCheck, "RIGHT", 1, 0)
+    mainScopeText:SetText("Main")
+    local neutralScopeCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
+    neutralScopeCheck:SetSize(18, 18)
+    neutralScopeCheck:SetPoint("LEFT", mainScopeText, "RIGHT", 12, 0)
+    local neutralScopeText = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    neutralScopeText:SetPoint("LEFT", neutralScopeCheck, "RIGHT", 1, 0)
+    neutralScopeText:SetText("Neutral")
+    local function SetScopeChecks(scope)
+        panel.editorScope = scope or "all"
+        mainScopeCheck:SetChecked(scope ~= "neutral")
+        neutralScopeCheck:SetChecked(scope ~= "main")
+    end
+    local function UpdateScopeFromChecks(changed)
+        if not mainScopeCheck:GetChecked() and not neutralScopeCheck:GetChecked() then
+            changed:SetChecked(true)
+        end
+        panel.editorScope = mainScopeCheck:GetChecked() and
+            (neutralScopeCheck:GetChecked() and "all" or "main") or "neutral"
+    end
+    mainScopeCheck:SetScript("OnClick", UpdateScopeFromChecks)
+    neutralScopeCheck:SetScript("OnClick", UpdateScopeFromChecks)
+    SetScopeChecks("all")
 
     -- Urgent Checkbox
     local urgentCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
@@ -1114,13 +1074,13 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Horizontal separator bar above headers
     local headerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
-    headerSep:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     headerSep:SetPoint("TOPLEFT", 0, -30)
     headerSep:SetSize(ROW_WIDTH, 1)
 
     -- Header background strip
     local headerStrip = rightBox:CreateTexture(nil, "BACKGROUND", nil, 1)
-    headerStrip:SetColorTexture(0.12, 0.11, 0.10, 0.95)
+    headerStrip:SetColorTexture(MarketSync.GetThemeColor("header"))
     headerStrip:SetPoint("TOPLEFT", 0, -31)
     headerStrip:SetSize(ROW_WIDTH, 18)
 
@@ -1204,12 +1164,12 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         local bg = row:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetColorTexture(i % 2 == 0 and 0.10 or 0.06, i % 2 == 0 and 0.095 or 0.055, i % 2 == 0 and 0.09 or 0.05, 0.70)
+        bg:SetColorTexture(MarketSync.GetThemeColor(i % 2 == 0 and "rowEven" or "rowOdd"))
         row.bg = bg
 
         local hl = row:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
-        hl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
+        hl:SetColorTexture(MarketSync.GetThemeColor("hover"))
 
         local accent = row:CreateTexture(nil, "OVERLAY")
         accent:SetSize(3, ROW_HEIGHT)
@@ -1324,12 +1284,11 @@ function MarketSync.CreateNotificationsPanel(parent)
                         {
                             text = "Edit in Alert Form",
                             func = function()
+                                SetEditorItem(req.matchValue or req.displayName or row.itemID)
                                 panel.editorEditingID = req.id
                                 btnSave:SetText("Update Alert")
-                                SetEditorItem(req.matchValue or req.displayName or row.itemID)
                                 SetThresholdCopper(req.thresholdCopper)
-                                panel.editorScope = req.scope or "all"
-                                SetDropdownLabel(scopeDropdown, ScopeLabel(panel.editorScope))
+                                SetScopeChecks(req.scope or "all")
                                 urgentCheck:SetChecked(req.urgent == true)
                             end
                         },
@@ -1389,12 +1348,11 @@ function MarketSync.CreateNotificationsPanel(parent)
 
             -- Left click: load into editor
             if row.request then
+                SetEditorItem(row.request.matchValue or row.request.displayName or row.itemID)
                 panel.editorEditingID = row.request.id
                 btnSave:SetText("Update Alert")
-                SetEditorItem(row.request.matchValue or row.request.displayName or row.itemID)
                 SetThresholdCopper(row.request.thresholdCopper)
-                panel.editorScope = row.request.scope or "all"
-                SetDropdownLabel(scopeDropdown, ScopeLabel(panel.editorScope))
+                SetScopeChecks(row.request.scope or "all")
                 urgentCheck:SetChecked(row.request.urgent == true)
             elseif row.historyEntry then
                 SetEditorItem(row.historyEntry.itemLink or row.historyEntry.itemID or row.historyEntry.itemName)
@@ -1417,7 +1375,7 @@ function MarketSync.CreateNotificationsPanel(parent)
 
     -- Footer inside rightBox
     local footerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
-    footerSep:SetColorTexture(0.35, 0.30, 0.20, 0.60)
+    footerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     footerSep:SetPoint("BOTTOMLEFT", 0, 30)
     footerSep:SetSize(ROW_WIDTH, 1)
 
@@ -1540,14 +1498,37 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         -- Check market price
         local priceInfo = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(link or itemID or raw)
-        local marketPrice = priceInfo and priceInfo.price or (MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(link or itemID or raw)) or 0
+        local marketPrice = priceInfo and tonumber(priceInfo.price) or 0
+        if marketPrice <= 0 then
+            marketPrice = (MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(link or itemID or raw)) or 0
+        end
         panel.editorMarketPrice = marketPrice
+        local savedRequest
+        if MarketSync.ListNotificationRequests then
+            for _, req in ipairs(MarketSync.ListNotificationRequests()) do
+                local matchesID = itemID and req.matchType == "itemID"
+                    and tonumber(req.matchValue) == itemID
+                local matchesName = name and req.matchType == "name"
+                    and tostring(req.matchValue):lower() == name:lower()
+                if matchesID or matchesName then
+                    savedRequest = req
+                    if req.scope == panel.editorScope then break end
+                end
+            end
+        end
+        panel.editorEditingID = savedRequest and savedRequest.id or nil
+        btnSave:SetText(savedRequest and "Update Alert" or "Add Alert")
+        if savedRequest then
+            SetThresholdCopper(savedRequest.thresholdCopper)
+            SetScopeChecks(savedRequest.scope or "all")
+            urgentCheck:SetChecked(savedRequest.urgent == true)
+        elseif marketPrice > 0 then
+            SetThresholdCopper(math.floor(marketPrice))
+        else
+            SetThresholdCopper(0)
+        end
         if marketPrice > 0 then
             itemSlotMarket:SetText("Market: " .. FormatMoneyColored(marketPrice))
-            local curThresh = GetThresholdCopper()
-            if curThresh == 0 then
-                SetThresholdCopper(math.floor(marketPrice * 0.9))
-            end
         else
             itemSlotMarket:SetText("Market: |cff888888--|r")
         end
@@ -1566,9 +1547,7 @@ function MarketSync.CreateNotificationsPanel(parent)
         itemSlotMarket:SetText("Market: |cff888888--|r")
         targetBox:SetText("")
         SetThresholdCopper(0)
-        panel.editorScope = "all"
-        SetDropdownLabel(scopeDropdown, "All Scopes")
-        if panel.RefreshUndercutButtons then panel.RefreshUndercutButtons() end
+        SetScopeChecks("all")
         urgentCheck:SetChecked(false)
         btnSave:SetText("Add Alert")
     end
@@ -2002,9 +1981,6 @@ function MarketSync.CreateNotificationsPanel(parent)
         end
         if soundCheck then
             soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
-        end
-        if RefreshUndercutButtons then
-            RefreshUndercutButtons()
         end
         UpdateSubTabButtons()
         RefreshImportDropdown()

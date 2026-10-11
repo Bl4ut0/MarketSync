@@ -1206,9 +1206,14 @@ frame:SetScript("OnEvent", function(self, event, ...)
         -- Accept messages from main prefix OR any data prefix
         if prefix ~= PREFIX and not isDataPrefix then return end
 
-        -- Strip realm suffix: sender comes as "Name-Realm" but UnitName returns just "Name"
+        -- Keep the full sender identity for self detection. A short-name match
+        -- alone can incorrectly discard another guild member on a different realm.
         local senderName = sender and sender:match("^([^%-]+)") or sender
-        if senderName == UnitName("player") then return end
+        if MarketSync.IsLocalSyncIdentity then
+            if MarketSync.IsLocalSyncIdentity(sender) then return end
+        elseif senderName == UnitName("player") and not (sender and sender:find("-", 1, true)) then
+            return
+        end
 
         local senderIdentity = sender or senderName or "Unknown"
         local senderKey = NormalizePriceCheckSender(senderIdentity)

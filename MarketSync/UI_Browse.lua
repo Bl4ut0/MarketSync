@@ -128,6 +128,7 @@ local PersonalPending = {}    -- { dbKey = itemID }
 local PersonalDirtyKeys = {}
 local personalRefreshScheduled = false
 local browsePanels = setmetatable({}, { __mode = "k" })
+local unresolvedBrowseEntries = {}
 local GuildPending = {}       -- { dbKey = itemID }
 local NeutralPending = {}     -- { dbKey = itemID }
 local PersonalTotal = 0
@@ -165,6 +166,7 @@ local RARITY_HEX = {
 -- ================================================================
 local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
     local name, link, rarity, ilvl, minLevel, icon, classID, subClassID
+    local isPlaceholder = false
     local suffixText
     local suffixID = type(dbKey) == "string" and tonumber(dbKey:match("^p:%d+:(%-?%d+)$")) or nil
     if type(dbKey) == "string" then
@@ -197,6 +199,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         name, link, rarity, ilvl, minLevel, itemType, itemSubType, _, _, icon, _, classID, subClassID = MarketSync.GetItemInfo(itemID)
         if not name then
             if allowFallback then
+                isPlaceholder = true
                 name = "Item #" .. itemID
                 rarity = 1
                 ilvl = 0
@@ -210,7 +213,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         end
 
         -- 3. Write through to persistent cache for future sessions
-        if MarketSyncDB and name and not allowFallback then
+        if MarketSyncDB and name and not isPlaceholder then
             if not MarketSyncDB.ItemInfoCache then
                 MarketSyncDB.ItemInfoCache = {}
             end
@@ -252,7 +255,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
 
     local hex = RARITY_HEX[rarity] or RARITY_HEX[1]
     local validLink = link
-    if not validLink or not validLink:find("item:%d+:") then
+    if not isPlaceholder and (not validLink or not validLink:find("item:%d+:")) then
         local _, realLink = MarketSync.GetItemInfo(itemID)
         if realLink and realLink:find("item:%d+:") then
             validLink = realLink
@@ -335,15 +338,82 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         end
     end
 
-    return {
+    local entry = {
         name = displayName, nameLower = displayName:lower(), link = link,
         rarity = rarity or 1, ilvl = ilvl or 0, minLevel = minLevel or 0,
         icon = icon, classID = classID, subClassID = subClassID,
         price = price, age = age, dbKey = dbKey, itemID = itemID,
         source = source, exactTime = exactTime,
         hasMeta = (source ~= "Personal"),
+        isPlaceholder = isPlaceholder,
     }
+    if isPlaceholder then
+        local entries = unresolvedBrowseEntries[itemID]
+        if not entries then
+            entries = setmetatable({}, { __mode = "k" })
+            unresolvedBrowseEntries[itemID] = entries
+        end
+        entries[entry] = true
+    end
+    return entry
 end
+
+-- LATE BROWSE ITEM RESOLUTION: placeholders remain eligible after bulk retries stop.
+-- Only process IDs reported loaded or explicitly hovered, never the whole DB.
+local loadedBrowseIDs = {}
+local browseResolveScheduled = false
+local function ScheduleBrowseItemResolution(itemID)
+    itemID = tonumber(itemID)
+    if not itemID or not unresolvedBrowseEntries[itemID] then return end
+    loadedBrowseIDs[itemID] = true
+    if browseResolveScheduled or not C_Timer or not C_Timer.After then return end
+    browseResolveScheduled = true
+    local function Step()
+        local checked, changed = 0, false
+        while checked < 20 do
+            local id = next(loadedBrowseIDs)
+            if not id then break end
+            local entries = unresolvedBrowseEntries[id]
+            local entry = entries and next(entries)
+            if not entry then
+                loadedBrowseIDs[id] = nil
+                unresolvedBrowseEntries[id] = nil
+            else
+                entries[entry] = nil
+                checked = checked + 1
+                local resolved = BuildIndexEntry(entry.dbKey, id, { m = entry.price }, "personal", false)
+                if resolved then
+                    -- Mutate in place so index and existing result references both update.
+                    for _, key in ipairs({ "name", "nameLower", "link", "rarity", "ilvl",
+                        "minLevel", "icon", "classID", "subClassID" }) do
+                        entry[key] = resolved[key]
+                    end
+                    entry.isPlaceholder = false
+                    changed = true
+                else
+                    -- No immediate retry loop for invalid or still-unavailable IDs.
+                    entries[entry] = true
+                    loadedBrowseIDs[id] = nil
+                end
+            end
+        end
+        if changed then
+            for panel in pairs(browsePanels) do
+                if panel:IsShown() and panel.UpdateResults then panel:UpdateResults() end
+            end
+        end
+        if next(loadedBrowseIDs) then C_Timer.After(0.1, Step)
+        else browseResolveScheduled = false end
+    end
+    C_Timer.After(0.1, Step)
+end
+
+local browseItemEvents = CreateFrame("Frame")
+browseItemEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+pcall(browseItemEvents.RegisterEvent, browseItemEvents, "ITEM_DATA_LOAD_RESULT")
+browseItemEvents:SetScript("OnEvent", function(_, _, itemID, success)
+    if success ~= false then ScheduleBrowseItemResolution(itemID) end
+end)
 
 -- ================================================================
 -- PARSE ITEM ID from a dbKey
@@ -357,6 +427,8 @@ end
 
 -- ================================================================
 function MarketSync.InvalidateIndexCache()
+    wipe(unresolvedBrowseEntries)
+    wipe(loadedBrowseIDs)
     PersonalIndexReady = false
     GuildIndexReady = false
     NeutralIndexReady = false
@@ -672,7 +744,7 @@ local function BuildSearchIndex(callback)
 
         -- Resolve Personal pending
         for dbKey, itemID in pairs(PersonalPending) do
-            if processed >= retryBatchSize and not forceFallback then break end
+            if processed >= retryBatchSize then break end
             local data = (pStore and pStore[dbKey]) or (gStore and gStore[dbKey])
             if data then
                 pendingRetryAttempts[dbKey] = (pendingRetryAttempts[dbKey] or 0) + 1
@@ -698,7 +770,7 @@ local function BuildSearchIndex(callback)
 
         -- Resolve Guild pending (for items not in Personal)
         for dbKey, itemID in pairs(GuildPending) do
-            if processed >= retryBatchSize and not forceFallback then break end
+            if processed >= retryBatchSize then break end
             if not PersonalPending[dbKey] then -- Skip if already checked above
                 local data = (gStore and gStore[dbKey]) or (pStore and pStore[dbKey])
                 if data then
@@ -719,7 +791,7 @@ local function BuildSearchIndex(callback)
 
         -- Resolve Neutral pending from isolated neutral store
         for dbKey, itemID in pairs(NeutralPending) do
-            if processed >= retryBatchSize and not forceFallback then break end
+            if processed >= retryBatchSize then break end
             local data = nStore and nStore[dbKey]
             if data then
                 pendingRetryAttempts[dbKey] = (pendingRetryAttempts[dbKey] or 0) + 1
@@ -1013,6 +1085,13 @@ MarketSync.GetIndexStatus = function()
     }
 end
 
+-- Processing consumes only rows already resolved by the throttled Browse
+-- index build. Never hand it the raw Auctionator DB or pending item IDs.
+MarketSync.GetProcessingIndexSources = function()
+    if PersonalIndexBuilding or (not PersonalIndexReady and not GuildIndexReady) then return nil end
+    return PersonalIndexReady and PersonalIndex or {}, GuildIndexReady and GuildIndex or nil
+end
+
 -- Expose for use by Frame module and startup trigger
 MarketSync.BuildSearchIndex = BuildSearchIndex
 
@@ -1030,11 +1109,11 @@ local function StyleModernPillButton(btn, text, isGold)
             insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
         if isGold then
-            btn:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
+            btn:SetBackdropColor(MarketSync.GetThemeColor("hover"))
             btn:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
         else
-            btn:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
-            btn:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+            btn:SetBackdropColor(MarketSync.GetThemeColor("header"))
+            btn:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
         end
     end
     local fs = btn.GetFontString and btn:GetFontString()
@@ -1055,10 +1134,10 @@ local function StyleModernPillButton(btn, text, isGold)
         btn:HookScript("OnEnter", function(self)
             if self.SetBackdropColor then
                 if isGold then
-                    self:SetBackdropColor(0.32, 0.24, 0.10, 0.98)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     self:SetBackdropBorderColor(1.0, 0.88, 0.30, 1.0)
                 else
-                    self:SetBackdropColor(0.22, 0.19, 0.14, 0.95)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     self:SetBackdropBorderColor(0.95, 0.78, 0.25, 0.95)
                 end
             end
@@ -1068,11 +1147,11 @@ local function StyleModernPillButton(btn, text, isGold)
         btn:HookScript("OnLeave", function(self)
             if self.SetBackdropColor then
                 if isGold then
-                    self:SetBackdropColor(0.24, 0.18, 0.08, 0.95)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
                     self:SetBackdropBorderColor(0.85, 0.70, 0.20, 0.95)
                 else
-                    self:SetBackdropColor(0.13, 0.12, 0.10, 0.95)
-                    self:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+                    self:SetBackdropColor(MarketSync.GetThemeColor("header"))
+                    self:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
                 end
             end
             local s = self.GetFontString and self:GetFontString()
@@ -1170,8 +1249,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    filterPopup:SetBackdropColor(0.035, 0.03, 0.025, 0.97)
-    filterPopup:SetBackdropBorderColor(0.75, 0.56, 0.20, 1)
+    filterPopup:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
+    filterPopup:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     filterPopup:Hide()
     filterBtn:SetScript("OnClick", function()
         if filterPopup:IsShown() then filterPopup:Hide() else filterPopup:Show() end
@@ -1565,7 +1644,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             lowRamNotice:SetBackdropColor(0.08, 0.08, 0.10, 0.90)
         end
         if lowRamNotice.SetBackdropBorderColor then
-            lowRamNotice:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.85)
+            lowRamNotice:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
         end
     end
 
@@ -1755,16 +1834,16 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
         if i % 2 == 0 then
-            rowBg:SetColorTexture(0.10, 0.095, 0.09, 0.50)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("rowEven"))
         else
-            rowBg:SetColorTexture(0.06, 0.055, 0.05, 0.50)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("rowOdd"))
         end
         row.rowBg = rowBg
 
         local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
         rowHl:SetPoint("TOPLEFT", 34, 0)
         rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(0.30, 0.25, 0.12, 0.40)
+        rowHl:SetColorTexture(MarketSync.GetThemeColor("hover"))
 
         -- Name text
         local nameText = row:CreateFontString(nil, "BACKGROUND", "GameFontNormal")
@@ -1818,6 +1897,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             if row.link then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink(row.link)
+                if row.itemData then ScheduleBrowseItemResolution(row.itemData.itemID) end
                 GameTooltip:AddLine(" ")
                 if panel.dataSource == "neutral" then
                     GameTooltip:AddLine("|cff00ccffNeutral cache item|r", 1, 1, 1)
@@ -1884,6 +1964,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             if self.link then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink(self.link)
+                if self.itemData then ScheduleBrowseItemResolution(self.itemData.itemID) end
                 GameTooltip:AddLine(" ")
                 if panel.dataSource == "neutral" then
                     GameTooltip:AddLine("|cff00ccffNeutral cache item|r", 1, 1, 1)

@@ -88,22 +88,22 @@ local function CreateGraph(parent, width, height)
 
     -- Border
     local borderLeft = graph:CreateTexture(nil, "BORDER")
-    borderLeft:SetColorTexture(0.6, 0.5, 0.2, 0.8)
+    borderLeft:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     borderLeft:SetSize(1, height)
     borderLeft:SetPoint("TOPLEFT", 0, 0)
 
     local borderBottom = graph:CreateTexture(nil, "BORDER")
-    borderBottom:SetColorTexture(0.6, 0.5, 0.2, 0.8)
+    borderBottom:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     borderBottom:SetSize(width, 1)
     borderBottom:SetPoint("BOTTOMLEFT", 0, 0)
 
     local borderTop = graph:CreateTexture(nil, "BORDER")
-    borderTop:SetColorTexture(0.6, 0.5, 0.2, 0.4)
+    borderTop:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     borderTop:SetSize(width, 1)
     borderTop:SetPoint("TOPLEFT", 0, 0)
 
     local borderRight = graph:CreateTexture(nil, "BORDER")
-    borderRight:SetColorTexture(0.6, 0.5, 0.2, 0.4)
+    borderRight:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     borderRight:SetSize(1, height)
     borderRight:SetPoint("TOPRIGHT", 0, 0)
 
@@ -332,7 +332,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
 
     -- Thin separator under header
     local headerSep = panel:CreateTexture(nil, "ARTWORK")
-    headerSep:SetColorTexture(0.6, 0.5, 0.2, 0.4)
+    headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     headerSep:SetSize(780, 1)
     headerSep:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", LEFT_MARGIN, CONTENT_TOP + 3)
 
@@ -383,7 +383,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     end
 
     local listSep = panel:CreateTexture(nil, "ARTWORK")
-    listSep:SetColorTexture(0.6, 0.5, 0.2, 0.4)
+    listSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     listSep:SetSize(listWidth, 1)
     listSep:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", LIST_START_X, CONTENT_TOP - 12)
     panel.listSep = listSep
@@ -554,7 +554,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     end
 
     local salesSep = panel.salesFrame:CreateTexture(nil, "ARTWORK")
-    salesSep:SetColorTexture(0.6, 0.5, 0.2, 0.4)
+    salesSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
     salesSep:SetSize(780, 1)
     salesSep:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", LEFT_MARGIN, salesHeaderY - 12)
 

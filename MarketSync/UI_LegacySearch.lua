@@ -18,7 +18,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
 
     local background = panel:CreateTexture(nil, "BACKGROUND")
     background:SetAllPoints(panel)
-    background:SetColorTexture(0.035, 0.037, 0.042, 0.99)
+    background:SetColorTexture(MarketSync.GetThemeColor("dialog"))
 
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -10)
@@ -50,8 +50,8 @@ function MarketSync.CreateLegacySearchPanel(parent)
     header:SetHeight(24)
     header:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-    header:SetBackdropColor(0.12, 0.12, 0.13, 0.98)
-    header:SetBackdropBorderColor(0.25, 0.25, 0.27, 0.95)
+    header:SetBackdropColor(MarketSync.GetThemeColor("header"))
+    header:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
     local columns = {
         { "Item / variant", 32 }, { "Unit buyout", colPrice },
         { "Stack", colStack }, { "Auctions", colAuctions }, { "Available", colAvailable },
@@ -71,8 +71,8 @@ function MarketSync.CreateLegacySearchPanel(parent)
         edgeFile = "Interface\\Buttons\\WHITE8X8",
         edgeSize = 1,
     })
-    selectionBar:SetBackdropColor(0.085, 0.083, 0.077, 0.98)
-    selectionBar:SetBackdropBorderColor(0.33, 0.31, 0.25, 0.95)
+    selectionBar:SetBackdropColor(MarketSync.GetThemeColor("inset"))
+    selectionBar:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     local selectionTitle = selectionBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     selectionTitle:SetPoint("TOPLEFT", selectionBar, "TOPLEFT", 12, -8)
     selectionTitle:SetText("Selected auction")
@@ -92,8 +92,8 @@ function MarketSync.CreateLegacySearchPanel(parent)
     resultsArea:SetPoint("BOTTOMRIGHT", selectionBar, "TOPRIGHT", 0, 5)
     resultsArea:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-    resultsArea:SetBackdropColor(0.025, 0.026, 0.03, 0.98)
-    resultsArea:SetBackdropBorderColor(0.25, 0.25, 0.27, 0.95)
+    resultsArea:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
+    resultsArea:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
     local emptyOverlay = CreateFrame("Frame", nil, resultsArea)
     emptyOverlay:SetAllPoints(resultsArea)
