@@ -1,6 +1,6 @@
 # MarketSync 0.9.6
 
-Release candidate for Forever 1.60.1 (build 70205). Published as GitHub beta `v0.9.6-beta.1`; this candidate does not promote `main` or upload to CurseForge.
+Release for Forever 1.60.1 (build 70205), tagged `v0.9.6`. Promoted to `main` for CurseForge publication as a Release-type file titled `MarketSync Pre-Release 0.9.6`.
 
 ## What's New
 
