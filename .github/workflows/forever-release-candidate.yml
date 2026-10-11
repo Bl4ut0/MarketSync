@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+      update_file_id:
+        description: 'Correct game-version labels and notes on an existing CurseForge file; no upload'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -45,6 +50,7 @@ jobs:
         run: |
           npm test
           python -m unittest discover -s tests -p test_package.py
+          python -m unittest discover -s tests -p test_curseforge_versions.py
       - name: Validate release metadata
         id: metadata
         shell: bash
@@ -128,7 +134,7 @@ jobs:
 
   publish-curseforge-prerelease:
     # Manual publication is an explicit recovery path for a failed upload of the current main version.
-    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && needs.validate-and-package.outputs.release_ready == 'true') || (github.event_name == 'workflow_dispatch' && inputs.publish_existing_version == true))
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && needs.validate-and-package.outputs.release_ready == 'true') || (github.event_name == 'workflow_dispatch' && (inputs.publish_existing_version == true || inputs.update_file_id != '')))
     needs: validate-and-package
     runs-on: ubuntu-latest
     environment: curseforge-beta
@@ -138,12 +144,14 @@ jobs:
         with:
           name: marketsync-${{ needs.validate-and-package.outputs.version }}-${{ github.sha }}
           path: dist
-      - name: Upload Forever pre-release to CurseForge
+      - name: Publish supported client versions to CurseForge
         shell: bash
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           VERSION: ${{ needs.validate-and-package.outputs.version }}
           FOREVER_VERSION: ${{ needs.validate-and-package.outputs.forever_version }}
+          UPDATE_FILE_ID: ${{ inputs.update_file_id }}
+          PUBLISH_EXISTING: ${{ inputs.publish_existing_version }}
         run: |
           set -euo pipefail
           if [[ -z "$CF_API_TOKEN" ]]; then
@@ -153,18 +161,25 @@ jobs:
           versions=$(curl --fail-with-body --silent --show-error --retry 3 \
             -H "x-api-token: $CF_API_TOKEN" \
             https://wow.curseforge.com/api/game/wow/versions)
-          game_version_id=$(jq -r --arg version "$FOREVER_VERSION" \
-            '[.[] | select(.gameVersionTypeID == 88568 and .name == $version)] | if length == 1 then .[0].id else empty end' \
-            <<< "$versions")
-          if [[ -z "$game_version_id" ]]; then
-            echo "Exact CurseForge Forever version $FOREVER_VERSION was not found; upload stopped." >&2
-            exit 1
-          fi
+          game_version_ids=$(python tools/curseforge_versions.py <<< "$versions")
+          echo "Supported CurseForge versions: $(jq -c --argjson ids "$game_version_ids" '[.[] | select(.id as $id | $ids | index($id)) | {id, name, gameVersionTypeID}]' <<< "$versions")"
           metadata=$(jq -cn \
             --arg name "MarketSync Pre-Release $VERSION" \
             --arg changelog "$(cat "RELEASE-$VERSION.md")" \
-            --argjson gameVersionId "$game_version_id" \
-            '{displayName: $name, gameVersions: [$gameVersionId], releaseType: "release", changelog: $changelog, changelogType: "markdown"}')
+            --argjson gameVersionIds "$game_version_ids" \
+            '{displayName: $name, gameVersions: $gameVersionIds, releaseType: "release", changelog: $changelog, changelogType: "markdown"}')
+          if [[ -n "$UPDATE_FILE_ID" ]]; then
+            [[ "$UPDATE_FILE_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$PUBLISH_EXISTING" != true ]]
+            metadata=$(jq -c --argjson id "$UPDATE_FILE_ID" '. + {fileID: $id}' <<< "$metadata")
+            response=$(curl --fail-with-body --silent --show-error \
+              -H "x-api-token: $CF_API_TOKEN" \
+              --form-string "metadata=$metadata" \
+              https://wow.curseforge.com/api/projects/1466264/update-file)
+            echo "$response"
+            test "$(jq -r '.id' <<< "$response")" = "$UPDATE_FILE_ID"
+            exit 0
+          fi
           curl --fail-with-body --silent --show-error \
             -H "x-api-token: $CF_API_TOKEN" \
             --form-string "metadata=$metadata" \

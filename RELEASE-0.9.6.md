@@ -21,4 +21,4 @@ Release for Forever 1.60.1 (build 70205), tagged `v0.9.6`. Promoted to `main` fo
 
 Automated regression, network simulation, and packaging checks accompany this candidate; they do not replace live-client validation. Re-test large-cache Processing, tab switching, sync with the monitor open/closed, and late item resolution. The reported execution-time warning is not yet confirmed resolved in-game.
 
-Processing and Alerts remain opt-in beta features. Era, SoD, and TBC archives are Actions test artifacts, not promoted multi-flavor releases. No saved auction data is reset by this update.
+Processing and Alerts remain opt-in beta features. The unified release supports Forever 1.60.1, Classic Era / SoD 1.15.9, and TBC 2.5.6. Separate flavor archives remain available as Actions test artifacts. No saved auction data is reset by this update.
