@@ -171,11 +171,14 @@ jobs:
           if [[ -n "$UPDATE_FILE_ID" ]]; then
             [[ "$UPDATE_FILE_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "$PUBLISH_EXISTING" != true ]]
-            metadata=$(jq -c --argjson id "$UPDATE_FILE_ID" '. + {fileID: $id}' <<< "$metadata")
-            response=$(curl --fail-with-body --silent --show-error \
+            metadata=$(jq -cn --argjson id "$UPDATE_FILE_ID" --argjson ids "$game_version_ids" '{fileID: $id, gameVersions: $ids}')
+            if ! response=$(curl --fail-with-body --silent --show-error \
               -H "x-api-token: $CF_API_TOKEN" \
               --form-string "metadata=$metadata" \
-              https://wow.curseforge.com/api/projects/1466264/update-file)
+              https://wow.curseforge.com/api/projects/1466264/update-file); then
+              echo "$response" >&2
+              exit 1
+            fi
             echo "$response"
             test "$(jq -r '.id' <<< "$response")" = "$UPDATE_FILE_ID"
             exit 0

@@ -16,7 +16,7 @@ The CurseForge file is named `MarketSync-<version>.zip`, its display name is `Ma
 
 The unified release is labeled for Forever 1.60.1, Classic Era / SoD 1.15.9, and TBC 2.5.6. `tools/curseforge_versions.py` resolves all three exact version IDs from the live catalog and checks their Interface numbers against the packaged TOC. Missing or ambiguous matches stop publication. Update the resolver targets when supported client versions change.
 
-To correct labels/notes on an already uploaded file without creating a duplicate, dispatch on `main` with `update_file_id` set to the verified CurseForge file ID. Leave `publish_existing_version` disabled. This uses the file-management API and verifies the returned file ID.
+To correct game-version labels on an already uploaded file without creating a duplicate, dispatch on `main` with `update_file_id` set to the verified CurseForge file ID. Leave `publish_existing_version` disabled. This uses the file-management API and verifies the returned file ID; other file metadata is preserved.
 
 1. Finish and test changes on `forever`; bump the TOC and package version plus `RELEASE-<version>.md`.
 2. For an optional GitHub-only beta, tag the tested `forever` commit `v<version>-beta.1`, then use `.2`, `.3`, etc. for further beta builds of that version. These create GitHub prereleases and do not touch CurseForge.
