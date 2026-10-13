@@ -1,8 +1,8 @@
-# MarketSync 0.9.7-rc1 — Forever Release Candidate
+# MarketSync 0.9.7-rc2 — Forever Release Candidate
 
 **Scan once. Share prices with your guild. Browse the market away from the Auction House.**
 
-MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, shopping lists, and analytics. Release candidate 0.9.7-rc1 targets Forever 1.60.1 (Interface 16001), Classic Era / SoD 1.15.9, and TBC 2.5.6. Legacy-client behavior remains in testing.
+MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, shopping lists, and analytics. Release candidate 0.9.7-rc2 targets Forever 1.60.1 (Interface 16001), Classic Era / SoD 1.15.9, and TBC 2.5.6. Legacy-client behavior remains in testing.
 
 Auctionator is optional: MarketSync includes its own native, frame-sliced auction scanner, or can seamlessly capture Auctionator full scans when both addons are installed.
 
@@ -12,8 +12,10 @@ Auctionator is optional: MarketSync includes its own native, frame-sliced auctio
 
 * **Browse Offline**: Search your personal scans, guild-synced prices, and neutral-AH data in separate views away from the auctioneer.
 * **Share Verified Scans**: Compatible guild members automatically exchange compressed price observations in the background over hidden addon channels.
+* **Keep Factions Separate**: Alliance and Horde use separate saved prices, histories, alerts, and guild-sync markets. Older unlabelled prices stay archived; scan again after upgrading to rc2.
 * **Connect Across Forever Partitions**: Numbered backend realms within one playset share guild-sync data. PvP, PvE, RP, and HC stay separate; other clients retain exact realm matching.
 * **Search a Whole Classic List**: The enhanced Classic Search page collects live price and stack groups for shopping lists and craft materials into one table, with source-page verification before buying.
+* **Keep Factions Separate**: Alliance and Horde use separate saved prices, histories, alerts, and guild-sync markets. Older unlabelled prices stay archived; scan again after upgrading to rc2.
 * **Connect Across Forever Partitions**: Numbered backend realms within one playset share guild-sync data. PvP, PvE, RP, and HC stay separate; other clients retain exact realm matching.
 * **Search a Whole Classic List**: The enhanced Classic Search page collects live price and stack groups for shopping lists and craft materials into one table, with source-page verification before buying.
 * **Item Variant Fidelity**: Full scans track random-suffix items (e.g., *“of the Boar”*, *“of the Falcon”*) as distinct price records rather than flattening them into the base item.

@@ -112,6 +112,7 @@ function createLuaEnv(extraSetup) {
     time = function() return 1773780000 end
     GetTime = function() return 1000 end
     IsInGuild = function() return true end
+    UnitFactionGroup = function() return "Horde" end
     GetNormalizedRealmName = function() return "Faerlina" end
     GetRealmName = function() return "Faerlina" end
     UnitName = function(u) return "LocalPlayer" end
@@ -563,6 +564,22 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
     assert(startedN == false, "Cross-scope broadcast must not collide with active send")
 
     for i = 1, 300 do AdvanceTxClock(); transmitTick() end
+    local factionQualifiedBegin = false
+    for _, frame in ipairs(outboundFrames) do
+      if frame:match("^BEGIN;") and frame:find(";Faerlina@Horde;", 1, true) then
+        factionQualifiedBegin = true
+      end
+    end
+    assert(factionQualifiedBegin, "broadcast BEGIN must identify the sender's faction market")
+    MarketSync.SendAdvertisement()
+    MarketSync.SendNeutralAdvertisement()
+    for i = 1, 30 do AdvanceTxClock(); transmitTick() end
+    local mainFaction, neutralFaction = false, false
+    for _, frame in ipairs(outboundFrames) do
+      if frame:find("ADV;Faerlina@Horde;", 1, true) == 1 then mainFaction = true end
+      if frame:find("NADV;Faerlina@Horde;", 1, true) == 1 then neutralFaction = true end
+    end
+    assert(mainFaction and neutralFaction, "both advertisement scopes must carry faction identity")
     local sentBoar, sentEagle = false, false
     for _, frame in ipairs(outboundFrames) do
       if frame:find("sp:4471:12_", 1, true) then sentBoar = true end

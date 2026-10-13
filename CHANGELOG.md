@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7-rc2] - 2026-10-13
+
+### Fixed
+- Separated saved auction prices, history, alerts, and sync freshness by faction. Guild price-sync announcements, requests, and transfers now require an explicit matching faction while retaining Forever playset matching across numbered partitions. Existing unlabelled realm prices remain archived; each faction starts a fresh price history after upgrade.
+
 ## [0.9.7-rc1] - 2026-10-13
 
 ### Fixed

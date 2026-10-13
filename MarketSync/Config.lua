@@ -54,6 +54,32 @@ function MarketSync.IsSameSyncRealm(left, right)
         and normalized == MarketSync.NormalizeSyncRealm(right)
 end
 
+function MarketSync.GetPlayerMarketFaction()
+    local faction = UnitFactionGroup and UnitFactionGroup("player")
+    if faction == "Horde" or faction == "Alliance" then return faction end
+    return "Unknown"
+end
+
+function MarketSync.GetFactionRealmKey()
+    local realm = GetNormalizedRealmName() or GetRealmName()
+    return realm and (realm .. "@" .. MarketSync.GetPlayerMarketFaction()) or nil
+end
+
+-- Use the existing realm wire field for a fail-closed faction boundary. Older
+-- clients reject the qualified realm rather than importing the wrong market.
+function MarketSync.GetSyncMarketRealm()
+    local realm = MarketSync.myRealm or GetNormalizedRealmName() or GetRealmName()
+    return tostring(realm or "Unknown") .. "@" .. MarketSync.GetPlayerMarketFaction()
+end
+
+function MarketSync.IsSameSyncMarketRealm(remote, localRealm)
+    if type(remote) ~= "string" then return false end
+    local realm, faction = remote:match("^(.+)@([^@]+)$")
+    local localFaction = MarketSync.GetPlayerMarketFaction()
+    return localFaction ~= "Unknown" and faction == localFaction
+        and MarketSync.IsSameSyncRealm(realm, localRealm)
+end
+
 -- Robust helper to get addon metadata across different WoW versions
 function MarketSync.GetAddOnMetadata(addon, field)
     -- Modern WoW (10.0+)
@@ -477,9 +503,11 @@ function MarketSync.InitializeDB()
     end
 end
 
--- Fast helper function to get the partitioned database for the current realm
+-- Auction records belong to a faction as well as a realm. Old unqualified
+-- partitions stay intact as an archive: their prices may already contain both
+-- factions, so assigning them to the first character to log in is unsafe.
 function MarketSync.GetRealmDB()
-    local realm = GetNormalizedRealmName() or GetRealmName()
+    local realm = MarketSync.GetFactionRealmKey()
     if not realm or not MarketSyncDB or not MarketSyncDB.RealmData then return {} end
     if not MarketSyncDB.RealmData[realm] then
         MarketSyncDB.RealmData[realm] = {
@@ -501,6 +529,14 @@ function MarketSync.GetRealmDB()
                 defaultCooldownSec = 300,
             },
         }
+        -- Profession knowledge is not an auction quote. Retain existing saved
+        -- character recipes while starting fresh, separate price histories.
+        local oldRealm = GetNormalizedRealmName() or GetRealmName()
+        local archived = MarketSyncDB.RealmData[oldRealm]
+        if archived then
+            MarketSyncDB.RealmData[realm].KnownCraftingRecipesByCharacter = archived.KnownCraftingRecipesByCharacter or {}
+            MarketSyncDB.RealmData[realm].KnownProfessionsByCharacter = archived.KnownProfessionsByCharacter or {}
+        end
     end
     local realmDB = MarketSyncDB.RealmData[realm]
     if not realmDB.NeutralData then realmDB.NeutralData = {} end

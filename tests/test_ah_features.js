@@ -762,7 +762,7 @@ test('Analytics and Processing history decoupling from Auctionator', () => {
     CreateFrame = function() return { SetScript = function() end, RegisterEvent = function() end } end
     MarketSyncDB = {
       RealmData = {
-        ["Faerlina"] = {
+        ["Faerlina@Horde"] = {
           PersonalData = {
             ["4471"] = {
               m = 400,

@@ -1204,6 +1204,7 @@ end
 -- ================================================================
 function MarketSync.CanSync()
     if not IsInGuild() then return false end
+    if MarketSync.GetPlayerMarketFaction() == "Unknown" then return false end
     if not MarketSyncDB then return true end
     if not MarketSyncDB.AllowSyncInCombat and InCombatLockdown and InCombatLockdown() then return false end
     
@@ -1876,7 +1877,7 @@ function MarketSync.SendAdvertisement()
         or ((MarketSyncDB and MarketSyncDB.PassiveSync == false) and "DISABLED" or "READY")
     local scanTime = tonumber(MarketSync.GetRealmDB().SwarmTSF) or 0
     QueueControlMessage(string.format("ADV;%s;%d;%d;%s;%d;%d;%s",
-        MarketSync.myRealm, status == "READY" and myLatestScanDay or 0,
+        MarketSync.GetSyncMarketRealm(), status == "READY" and myLatestScanDay or 0,
         status == "READY" and myRecentItemCount or 0, GetLocalAddonVersion(),
         status == "READY" and scanTime or 0, SYNC_PROTOCOL_REVISION, status), "ADV")
     lastAdvertisementAt = now
@@ -1904,7 +1905,7 @@ function MarketSync.SendNeutralAdvertisement()
         or ((MarketSyncDB and MarketSyncDB.EnableNeutralSync == false) and "DISABLED" or "READY")
     local scanTime = tonumber(MarketSync.GetRealmDB().NeutralSwarmTSF) or 0
     QueueControlMessage(string.format("NADV;%s;%d;%d;%s;%d;%d;%s",
-        MarketSync.myRealm, status == "READY" and myLatestNeutralScanDay or 0,
+        MarketSync.GetSyncMarketRealm(), status == "READY" and myLatestNeutralScanDay or 0,
         status == "READY" and myRecentNeutralItemCount or 0, GetLocalAddonVersion(),
         status == "READY" and scanTime or 0, SYNC_PROTOCOL_REVISION, status), "NADV")
     lastNeutralAdvertisementAt = now
@@ -1940,7 +1941,7 @@ local function SendDirectedPullNow(scope, sinceRevision, sourceIdentity, adverti
 
     local msgType = scope == "N" and "NPULL" or "PULL"
     local pullPayload = string.format("%s;%s;%s;%d;%d;%d;%d;%s", msgType,
-        MarketSync.myRealm, tostring(sourceIdentity), tonumber(advertisedRevision) or 0,
+        MarketSync.GetSyncMarketRealm(), tostring(sourceIdentity), tonumber(advertisedRevision) or 0,
         tonumber(advertisedScanTime) or 0, tonumber(sinceRevision) or 0,
         SYNC_PROTOCOL_REVISION, GetLocalAddonVersion())
 
@@ -2066,7 +2067,7 @@ local function FreezeTransferSource(scope, realmDB, baseRevision, revision)
 end
 
 local function CreateTransferProducer(sessionId, scope, baseRevision, revision, scanTime, frozenSource)
-    local realm = MarketSync.myRealm or GetNormalizedRealmName() or GetRealmName() or "Unknown"
+    local realm = MarketSync.GetSyncMarketRealm()
     local addonVersion = GetLocalAddonVersion()
 
     return coroutine.create(function()
