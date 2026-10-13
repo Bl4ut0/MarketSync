@@ -289,7 +289,7 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         local currentDay = MarketSync.GetCurrentScanDay()
         age = math.max(0, currentDay - dbDay)
         if age == 0 or (type(age) == "number" and age < 1) then
-            exactTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime
+            exactTime = tonumber(data.observedAt)
         end
     elseif sourceMode == "neutral" then
         local currentDay = MarketSync.GetCurrentScanDay()
@@ -338,6 +338,14 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         end
     end
 
+    if sourceMode ~= "neutral" then
+        local record = type(data) == "table" and data or {}
+        if sourceMode ~= "personal" and record.source then source = record.source end
+        exactTime = tonumber(record.observedAt)
+            or (record.latestBucket and MarketSync.ScanDayToTimestamp
+                and (MarketSync.ScanDayToTimestamp(math.floor(record.latestBucket / 48)) + record.latestBucket % 48 * 1800))
+        if exactTime then age = math.max(0, time() - exactTime) / 86400 end
+    end
     local entry = {
         name = displayName, nameLower = displayName:lower(), link = link,
         rarity = rarity or 1, ilvl = ilvl or 0, minLevel = minLevel or 0,
@@ -557,7 +565,7 @@ local function BuildSearchIndex(callback)
     NeutralResolved = 0
 
     local co = coroutine.create(function()
-        local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+        local liveStore = MarketSync.GetRealmDB().GuildData
             or (Auctionator and Auctionator.Database and Auctionator.Database.db)
         if not liveStore and not (MarketSyncDB and MarketSync.GetRealmDB().PersonalData) then
             PersonalIndexReady = true; GuildIndexReady = true; NeutralIndexReady = true
@@ -739,7 +747,7 @@ local function BuildSearchIndex(callback)
         local neutralRemove = {}
         local pStore = MarketSyncDB and MarketSync.GetRealmDB().PersonalData
         local nStore = MarketSyncDB and MarketSync.GetRealmDB().NeutralData
-        local gStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+        local gStore = MarketSync.GetRealmDB().GuildData
             or (Auctionator and Auctionator.Database and Auctionator.Database.db)
 
         -- Resolve Personal pending
@@ -908,7 +916,7 @@ end
 -- Called by sync module for each item received during sync
 function MarketSync.AddToGuildIncoming(dbKey)
     if not GuildIndexReady then return end  -- Index hasn't been built yet
-    local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
+    local liveStore = MarketSync.GetRealmDB().GuildData
         or (Auctionator and Auctionator.Database and Auctionator.Database.db)
     if not liveStore then return end
 

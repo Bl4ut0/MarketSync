@@ -111,7 +111,8 @@ local function ComputeFreshness(advBucket, advItemCount, advScanTime)
         ourItemCount = MarketSync.CountRecentItemsBucket(ourBucket)
     end
     local ourScanTime = (MarketSync.GetRealmDB() and MarketSync.GetRealmDB().SwarmTSF) or 0
-    local ourTotalCount = (MarketSync.GetTotalPersonalItemCount and MarketSync.GetTotalPersonalItemCount()) or 0
+    local ourTotalCount = (MarketSync.GetTotalGuildItemCount and MarketSync.GetTotalGuildItemCount())
+        or (MarketSync.GetTotalPersonalItemCount and MarketSync.GetTotalPersonalItemCount()) or 0
 
     local isFresher = false
     if advBucket > ourBucket then
@@ -614,19 +615,13 @@ local function BuildApplyTransaction(session, operations)
             end
         end
     else
-        local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
-            or (Auctionator and Auctionator.Database and Auctionator.Database.db)
-        if not liveStore and MarketSync.Provider and MarketSync.Provider.GetActiveName() == "auctionator" then
-            return nil, "Auctionator database unavailable during apply"
-        end
-        local personalData = workingRealmTable("PersonalData")
+        local guildData = workingRealmTable("GuildData")
         local itemMetadata = workingRealmTable("ItemMetadata")
         replaceRealmTable("HistoryLog")
         for _, operation in ipairs(operations) do
             if not touched[operation.key] then
                 touched[operation.key] = true
-                if liveStore then journalEntry(liveStore, operation.key) end
-                journalEntry(personalData, operation.key)
+                journalEntry(guildData, operation.key)
                 journalEntry(itemMetadata, operation.key)
             end
         end

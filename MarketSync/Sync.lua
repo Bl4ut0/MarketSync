@@ -83,6 +83,24 @@ local pullContentionCandidates = {}
 local lastAdvertisementAt = 0
 local lastNeutralAdvertisementAt = 0
 local MIN_ADV_INTERVAL_SECONDS = 15
+local pendingAdvertisements = {}
+local advertisementRetries = {}
+
+local function RetryAdvertisement(scope, delay)
+    pendingAdvertisements[scope] = true
+    if advertisementRetries[scope] then return end
+    advertisementRetries[scope] = true
+    C_Timer.After(delay, function()
+        advertisementRetries[scope] = nil
+        if not pendingAdvertisements[scope] then return end
+        if scope == "N" then MarketSync.SendNeutralAdvertisement()
+        else MarketSync.SendAdvertisement() end
+    end)
+end
+
+function MarketSync.ResumePendingAdvertisements()
+    for scope in pairs(pendingAdvertisements) do RetryAdvertisement(scope, 0.1) end
+end
 local PULL_REQUEST_TIMEOUT_SECONDS = 25
 local ScheduleDeferredADVProcessing
 
@@ -843,6 +861,7 @@ local function MergeTimeseriesPoint(histStr, bucketOffset, price, quantity, reje
     for point in string.gmatch(histStr, "([^,]+)") do
         local oldOffset, oldPriceB36, oldQtyB36 = point:match("^(%d+):([%w%-]+):([%w%-]+)$")
         if tonumber(oldOffset) == offset then
+            local firstMatch = not found
             found = true
             local oldPrice = MarketSync.FromBase36(oldPriceB36)
             local oldQuantity = MarketSync.FromBase36(oldQtyB36)
@@ -850,9 +869,9 @@ local function MergeTimeseriesPoint(histStr, bucketOffset, price, quantity, reje
                 and (price > (oldPrice * 3) or price < (oldPrice * 0.5))
             if isPollution then
                 accepted = false
-                table.insert(points, point)
+                if firstMatch then table.insert(points, point) end
             else
-                table.insert(points, replacement)
+                if firstMatch then table.insert(points, replacement) end
                 changed = changed or oldPrice ~= price or oldQuantity ~= quantity
             end
         else
@@ -868,6 +887,39 @@ local function MergeTimeseriesPoint(histStr, bucketOffset, price, quantity, reje
 end
 
 -- Auctionator's legacy full-scan event supplies the original auction links.
+function MarketSync.MergePersonalIntoGuild(key)
+    local db = MarketSync.GetRealmDB()
+    local source = db.PersonalData and db.PersonalData[key]
+    if not source then return end
+    db.GuildData = db.GuildData or {}
+    local target = db.GuildData[key] or { h = {}, vh = {} }
+    db.GuildData[key] = target
+    local sourceBucket, targetBucket = tonumber(source.latestBucket) or 0, tonumber(target.latestBucket) or 0
+    local sourceNewer = sourceBucket > targetBucket or (sourceBucket == targetBucket
+        and (tonumber(source.observedAt) or 0) >= (tonumber(target.observedAt) or 0))
+    for _, field in ipairs({"h", "vh"}) do
+        target[field] = target[field] or {}
+        for day, history in pairs(source[field] or {}) do
+            if type(history) == "string" then
+                for offset, price, qty in history:gmatch("(%d+):([%w%-]+):([%w%-]+)") do
+                    local existing = target[field][day] or ""
+                    local hasPoint = ("," .. existing):find("," .. offset .. ":", 1, true)
+                    local isLatest = tonumber(source.latestBucket) == tonumber(day) * 48 + tonumber(offset)
+                    if not hasPoint or (sourceNewer and isLatest) then
+                        target[field][day] = select(1, MergeTimeseriesPoint(existing,
+                            tonumber(offset), MarketSync.FromBase36(price), MarketSync.FromBase36(qty), false))
+                    end
+                end
+            end
+        end
+    end
+    if sourceNewer then
+        for _, field in ipairs({"m", "d", "observedAt", "available"}) do target[field] = source[field] end
+        target.source = "Personal"
+    end
+    target.latestBucket = math.max(tonumber(target.latestBucket) or 0, tonumber(source.latestBucket) or 0)
+end
+
 -- Its database groups random enchants by suffix name, which cannot recover the
 -- numeric suffix later. Capture exact variants here without rescanning the AH.
 function MarketSync.CaptureAuctionatorRawSuffixScan(rawScan, onComplete, exactKeys)
@@ -938,8 +990,10 @@ function MarketSync.CaptureAuctionatorRawSuffixScan(rawScan, onComplete, exactKe
                     entry.m = group.price
                     entry.d = scanDay
                     entry.observedAt = scanTime
+                    entry.available = group.quantity
                     entry.latestBucket = math.max(tonumber(entry.latestBucket) or 0, bucketID)
                     realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
+                    MarketSync.MergePersonalIntoGuild(key)
                     if exactKeys then exactKeys[key] = true end
                     recorded = recorded + 1
                 end
@@ -990,6 +1044,8 @@ function MarketSync.SnapshotPersonalScan(options)
     local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore()
         or (Auctionator and Auctionator.Database and Auctionator.Database.db)
     if not liveStore then return 0, 0 end
+    local currentDB = MarketSync.GetRealmDB()
+    if liveStore == currentDB.PersonalData or liveStore == currentDB.GuildData then return 0, 0, 0 end
     if not MarketSync.GetRealmDB().PersonalData then MarketSync.GetRealmDB().PersonalData = {} end
 
     -- Optional notification integration. Generic Auctionator DB updates are
@@ -1003,6 +1059,8 @@ function MarketSync.SnapshotPersonalScan(options)
         or (type(options) == "table" and options.onPriceChanged)
     local exactKeys = type(options) == "table" and options.exactKeys == true
         and type(options.keys) == "table"
+    -- A database/cache refresh is not a new auction observation.
+    if not authoritative and not exactKeys then return 0, 0, 0 end
     local observationScanID = type(options) == "table" and options.observationScanID
     local source = exactKeys and options.keys or liveStore
     
@@ -1053,6 +1111,7 @@ function MarketSync.SnapshotPersonalScan(options)
                 if lastSeenDay == today then
                     local qty = 0
                     if data.a and data.a[todayStr] then qty = tonumber(data.a[todayStr]) or 0 end
+                    entry.available = qty > 0 and qty or nil
                     if observationScanID and MarketSync.ObservationAPI then
                         local itemID, itemSuffix = MarketSync.ParseItemIDFromDBKey(tostring(dbKey))
                         local seenAt = data.latest and tonumber(data.latest.seenAt) or nil
@@ -1099,6 +1158,7 @@ function MarketSync.SnapshotPersonalScan(options)
                     todayCount = todayCount + 1
                 end
                 count = count + 1
+                MarketSync.MergePersonalIntoGuild(dbKey)
             else
                 skipped = skipped + 1
             end
@@ -1120,7 +1180,7 @@ function MarketSync.GetMyLatestBucket()
         return MarketSync.GetRealmDB().LatestBucket
     end
     
-    local pData = MarketSync.GetRealmDB().PersonalData
+    local pData = MarketSync.GetRealmDB().GuildData
     if not pData then return 0 end
     
     local best = 0
@@ -1137,7 +1197,7 @@ function MarketSync.GetMyLatestBucket()
 end
 
 function MarketSync.CountRecentItemsBucket(sinceBucket)
-    local pData = MarketSync.GetRealmDB().PersonalData
+    local pData = MarketSync.GetRealmDB().GuildData
     if not pData then return 0 end
     
     local count = 0
@@ -1156,6 +1216,12 @@ function MarketSync.GetTotalPersonalItemCount()
     for _ in pairs(realmDB.PersonalData) do
         count = count + 1
     end
+    return count
+end
+
+function MarketSync.GetTotalGuildItemCount()
+    local count = 0
+    for _ in pairs(MarketSync.GetRealmDB().GuildData or {}) do count = count + 1 end
     return count
 end
 
@@ -1867,8 +1933,9 @@ end
 function MarketSync.SendAdvertisement()
     if not MarketSync.CanSync() then return end
     local now = time()
-    if (now - (lastAdvertisementAt or 0)) < MIN_ADV_INTERVAL_SECONDS then return end
-    if MarketSync.IsAuctionHouseOpen then return end
+    if MarketSync.IsAuctionHouseOpen then pendingAdvertisements.M = true; return end
+    local remaining = MIN_ADV_INTERVAL_SECONDS - (now - (lastAdvertisementAt or 0))
+    if remaining > 0 then RetryAdvertisement("M", remaining + 0.1); return end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
 
     myLatestScanDay = MarketSync.GetMyLatestBucket()
@@ -1881,6 +1948,7 @@ function MarketSync.SendAdvertisement()
         status == "READY" and myRecentItemCount or 0, GetLocalAddonVersion(),
         status == "READY" and scanTime or 0, SYNC_PROTOCOL_REVISION, status), "ADV")
     lastAdvertisementAt = now
+    pendingAdvertisements.M = nil
 
     if MarketSync.UpdateSwarmUI and status ~= "READY" then
         MarketSync.UpdateSwarmUI(UnitName("player"), status == "OUTDATED" and "Update Required" or "Disabled")
@@ -1895,8 +1963,9 @@ end
 function MarketSync.SendNeutralAdvertisement()
     if not MarketSync.CanSync() then return end
     local now = time()
-    if (now - (lastNeutralAdvertisementAt or 0)) < MIN_ADV_INTERVAL_SECONDS then return end
-    if MarketSync.IsAuctionHouseOpen then return end
+    if MarketSync.IsAuctionHouseOpen then pendingAdvertisements.N = true; return end
+    local remaining = MIN_ADV_INTERVAL_SECONDS - (now - (lastNeutralAdvertisementAt or 0))
+    if remaining > 0 then RetryAdvertisement("N", remaining + 0.1); return end
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
 
     myLatestNeutralScanDay = MarketSync.GetMyLatestNeutralScanDay()
@@ -1909,6 +1978,7 @@ function MarketSync.SendNeutralAdvertisement()
         status == "READY" and myRecentNeutralItemCount or 0, GetLocalAddonVersion(),
         status == "READY" and scanTime or 0, SYNC_PROTOCOL_REVISION, status), "NADV")
     lastNeutralAdvertisementAt = now
+    pendingAdvertisements.N = nil
 
     if MarketSync.LogNetworkEvent then
         MarketSync.LogNetworkEvent(string.format(
@@ -2024,7 +2094,8 @@ local function FreezeTransferSource(scope, realmDB, baseRevision, revision)
         local upperDay = BucketToScanDay(upperRevision)
         local currentScanDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or math.floor(time() / 86400)
         local hotCutoff = currentScanDay - (MarketSync.RETENTION_HOT_DAYS or 7)
-        for dbKey, data in pairs((realmDB and realmDB.PersonalData) or {}) do
+        for key in pairs((realmDB and realmDB.PersonalData) or {}) do MarketSync.MergePersonalIntoGuild(key) end
+        for dbKey, data in pairs((realmDB and realmDB.GuildData) or {}) do
             local latestBucket = tonumber(data and data.latestBucket) or 0
             local verifiedHistory = data and data.vh
             if latestBucket > 0 and latestBucket >= since and type(verifiedHistory) == "table" then
@@ -2257,21 +2328,8 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
         and string.format("item:%d:0:0:0:0:0:%d:0", itemID, itemSuffix)
         or (itemID and ("item:" .. tostring(itemID)) or ("item:" .. tostring(key)))
 
-    -- DIRECT INSERTION to ensure persistence (when Auctionator is loaded)
-    local priceData = nil
-    if Auctionator and Auctionator.Database and Auctionator.Database.db then
-        priceData = Auctionator.Database.db[key]
-        if not priceData then
-            priceData = { l={}, h={}, m=0, a={} }
-            Auctionator.Database.db[key] = priceData
-            Debug("Creating new DB entry for " .. key)
-        end
-        if not priceData.l then priceData.l = {} end
-        if not priceData.h then priceData.h = {} end
-        if not priceData.a then priceData.a = {} end
-    else
-        priceData = { l={}, h={}, m=0, a={} }
-    end
+    -- Compatibility aggregation is temporary; received prices belong only to GuildData.
+    local priceData = { l = {}, h = {}, m = 0, a = {} }
 
     if isGranular then
         -- ==========================================
@@ -2280,8 +2338,8 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
         local incomingDay = tonumber(price_or_day) or 0
         local histStr = day_or_histStr
         
-        if not realmDB.PersonalData then realmDB.PersonalData = {} end
-        local pData = realmDB.PersonalData
+        if not realmDB.GuildData then realmDB.GuildData = {} end
+        local pData = realmDB.GuildData
         if not pData[key] then pData[key] = { m=0, d=0, h={} } end
         if not pData[key].h then pData[key].h = {} end
         local verifiedCommit = MarketSync._Protocol2CommitInProgress == true
@@ -2293,6 +2351,7 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
         local historyUpdated = false
         
         local latestIncomingPrice = nil
+        local latestIncomingQuantity = nil
         local maxIncomingBucketOffset = -1
         local latestNotificationPrice = nil
         local maxNotificationBucketOffset = -1
@@ -2320,6 +2379,7 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
                 if acceptedLivePoint and b_num > maxIncomingBucketOffset then
                     maxIncomingBucketOffset = b_num
                     latestIncomingPrice = newPrice
+                    latestIncomingQuantity = newQty
                 end
                 if acceptedLivePoint and pointChanged and b_num > maxNotificationBucketOffset then
                     maxNotificationBucketOffset = b_num
@@ -2337,8 +2397,11 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
         -- so their per-item revision is safe to advertise in a later broadcast.
         if verifiedCommit and maxIncomingBucketOffset >= 0 then
             local incomingBucket = ScanDayOffsetToBucket(incomingDay, maxIncomingBucketOffset)
-            if incomingDay >= (tonumber(pData[key].d) or 0) and latestIncomingPrice then
+            if incomingBucket >= (tonumber(pData[key].latestBucket) or 0) and latestIncomingPrice then
                 pData[key].m = latestIncomingPrice
+                pData[key].observedAt = MarketSync.ScanDayToTimestamp(incomingDay) + maxIncomingBucketOffset * 1800
+                pData[key].available = latestIncomingQuantity
+                pData[key].source = sender or "Guild"
             end
             pData[key].d = math.max(tonumber(pData[key].d) or 0, incomingDay)
             pData[key].latestBucket = math.max(tonumber(pData[key].latestBucket) or 0, incomingBucket)

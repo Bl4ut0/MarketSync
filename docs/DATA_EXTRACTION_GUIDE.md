@@ -2,6 +2,12 @@
 
 This guide explains how external web services, websites, and browser extensions can extract Auction House data directly from MarketSync **without requiring users to download or run any external desktop applications**.
 
+### Personal and cumulative guild records
+
+Within each faction-qualified `RealmData` partition, `PersonalData` contains the player's local auction observations. `GuildData` contains the cumulative market: local observations plus validated guild transfers, merged by item/variant and observation bucket. Export `GuildData` for cumulative prices and `PersonalData` for local-only prices; do not add their item counts together because local observations occur in both stores. `observedAt` is the per-item observation time (bucket-derived for received data), and `available` is the observed quantity when known. A cache rebuild or message receipt is not a new auction observation.
+
+Earlier builds used one combined table. Migration preserves the cumulative history and separates records identifiable as received from the Personal view; historical local observations already overwritten by an older build cannot be reconstructed exactly.
+
 ---
 
 ## 1. Why Avoid In-Game Clipboard Copying?

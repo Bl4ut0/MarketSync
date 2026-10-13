@@ -539,6 +539,34 @@ function MarketSync.GetRealmDB()
         end
     end
     local realmDB = MarketSyncDB.RealmData[realm]
+    if not realmDB.GuildData then
+        realmDB.GuildData = {}
+        -- Earlier versions mixed received records into PersonalData. Preserve
+        -- that cumulative history, separating records known to be received.
+        for key, entry in pairs(realmDB.PersonalData or {}) do
+            local copy = {}
+            for field, value in pairs(entry) do
+                if type(value) == "table" then
+                    local history = {}
+                    for day, point in pairs(value) do history[day] = point end
+                    copy[field] = history
+                else copy[field] = value end
+            end
+            realmDB.GuildData[key] = copy
+            local meta = realmDB.ItemMetadata and realmDB.ItemMetadata[key]
+            local receivedLatest = meta and meta.lastSource and meta.lastSource ~= "Self"
+                and (not entry.observedAt or (tonumber(meta.lastTime) or 0) >= (tonumber(entry.observedAt) or 0))
+            if receivedLatest then
+                copy.source = meta.lastSource
+                if tonumber(copy.latestBucket) and copy.latestBucket > 0 then
+                    copy.observedAt = MarketSync.ScanDayToTimestamp(math.floor(copy.latestBucket / 48))
+                        + copy.latestBucket % 48 * 1800
+                else copy.observedAt = nil end
+                realmDB.PersonalData[key] = nil
+            else copy.source = "Personal"
+            end
+        end
+    end
     if not realmDB.NeutralData then realmDB.NeutralData = {} end
     if not realmDB.NeutralMeta then realmDB.NeutralMeta = {} end
     if not realmDB.NeutralSync then realmDB.NeutralSync = {} end
@@ -1207,7 +1235,7 @@ function MarketSync.GetAuctionPrice(itemLink)
             or (id and (type(itemLink) == "number" or tostring(itemLink):match("^%d+$")
                 or tostring(itemLink):match("item:%d+")) and tostring(id))
             or tostring(itemLink)
-        local entry = realmDB.PersonalData[dbKey]
+        local entry = (realmDB.GuildData and realmDB.GuildData[dbKey]) or realmDB.PersonalData[dbKey]
         if entry then
             if entry.m and entry.m > 0 then
                 return entry.m
@@ -1266,10 +1294,10 @@ function MarketSync.GetAuctionAge(itemLink)
             or (id and (type(itemLink) == "number" or tostring(itemLink):match("^%d+$")
                 or tostring(itemLink):match("item:%d+")) and tostring(id))
             or tostring(itemLink)
-        local entry = realmDB.PersonalData[dbKey]
+        local entry = (realmDB.GuildData and realmDB.GuildData[dbKey]) or realmDB.PersonalData[dbKey]
         if entry then
-            local scanTime = realmDB.PersonalScanTime or time()
-            return math.max(0, time() - scanTime) / 86400
+            local scanTime = tonumber(entry.observedAt) or (entry.d and MarketSync.ScanDayToTimestamp(entry.d))
+            return scanTime and math.max(0, time() - scanTime) / 86400 or nil
         end
     end
     return nil
@@ -1561,18 +1589,19 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
     local source = nil
     local currentDay = MarketSync.GetCurrentScanDay()
 
-    -- 1. Check PersonalData
-    local pData = realmDB.PersonalData
+    -- 1. Check the cumulative market quote.
+    local pData = realmDB.GuildData or realmDB.PersonalData
     local priceKey = suffixKey or itemKey
     local pEntry = pData and pData[priceKey]
+        or (realmDB.PersonalData and realmDB.PersonalData[priceKey])
     if pEntry and pEntry.m and pEntry.m > 0 then
         price = pEntry.m
         local entryDay = tonumber(pEntry.d) or currentDay
         ageDays = math.max(0, currentDay - entryDay)
-        if ageDays == 0 and realmDB.PersonalScanTime then
-            scanTime = realmDB.PersonalScanTime
-        end
-        source = "Personal Scan"
+        scanTime = tonumber(pEntry.observedAt)
+            or (tonumber(pEntry.d) and tonumber(pEntry.d) > 0 and MarketSync.ScanDayToTimestamp(pEntry.d))
+        if scanTime then ageDays = math.max(0, time() - scanTime) / 86400 end
+        source = pEntry.source or "Personal Scan"
     end
 
     -- 2. Check Provider / LiveStore / Synced Guild Data
@@ -1597,14 +1626,12 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
 
     -- Check ItemMetadata for more accurate guild contributor and timestamp
     local meta = realmDB.ItemMetadata and realmDB.ItemMetadata[priceKey]
-    if meta then
+    if meta and not (pEntry and pEntry.source) then
         local dayStr = tostring(pEntry and pEntry.d or currentDay)
         if meta.days and meta.days[dayStr] then
             source = meta.days[dayStr].source or source or "Guild Sync"
-            scanTime = meta.days[dayStr].time or scanTime
         elseif meta.lastSource then
             source = meta.lastSource or source
-            scanTime = meta.lastTime or scanTime
         end
     end
 

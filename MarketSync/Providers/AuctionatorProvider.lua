@@ -23,7 +23,18 @@ local function ExtractDBKey(keyOrLink)
     return nil
 end
 
+local function GetGuildRecord(keyOrLink)
+    if not MarketSync.GetRealmDB then return nil end
+    local db = MarketSync.GetRealmDB()
+    local id, suffix
+    if MarketSync.ParseItemIDFromDBKey then id, suffix = MarketSync.ParseItemIDFromDBKey(keyOrLink) end
+    local key = id and (suffix and suffix ~= 0 and string.format("p:%d:%d", id, suffix) or tostring(id))
+    return db.GuildData and ((key and db.GuildData[key]) or db.GuildData[ExtractDBKey(keyOrLink)])
+end
+
 function AuctionatorProvider.GetPrice(keyOrLink)
+    local record = GetGuildRecord(keyOrLink)
+    if record and record.m and record.m > 0 then return record.m end
     if not (Auctionator and Auctionator.API and Auctionator.API.v1) then
         if Auctionator and Auctionator.Database and Auctionator.Database.db then
             local dbKey = ExtractDBKey(keyOrLink)
@@ -43,6 +54,12 @@ function AuctionatorProvider.GetPrice(keyOrLink)
 end
 
 function AuctionatorProvider.GetPriceAge(keyOrLink)
+    local record = GetGuildRecord(keyOrLink)
+    if record then
+        local observed = tonumber(record.observedAt)
+            or (tonumber(record.d) and tonumber(record.d) > 0 and MarketSync.ScanDayToTimestamp(record.d))
+        return observed and math.max(0, time() - observed) / 86400 or nil
+    end
     if not (Auctionator and Auctionator.API and Auctionator.API.v1) then
         if Auctionator and Auctionator.Database and type(Auctionator.Database.GetPriceAge) == "function" then
             local dbKey = ExtractDBKey(keyOrLink)
@@ -61,6 +78,13 @@ function AuctionatorProvider.GetPriceAge(keyOrLink)
 end
 
 function AuctionatorProvider.GetSnapshot(keyOrLink)
+    local record = GetGuildRecord(keyOrLink)
+    if record and record.m and record.m > 0 then
+        local age = AuctionatorProvider.GetPriceAge(keyOrLink)
+        return { minUnitPrice = record.m, available = record.available,
+            seenAt = age and (time() - age * 86400) or nil, complete = true,
+            source = record.source or "guild-market", coverage = "full" }
+    end
     local price = AuctionatorProvider.GetPrice(keyOrLink)
     if not price then return nil end
     local ageDays = AuctionatorProvider.GetPriceAge(keyOrLink)

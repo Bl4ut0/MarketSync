@@ -1,8 +1,8 @@
-# MarketSync 0.9.7-rc2 — Forever Release Candidate
+# MarketSync 0.9.7-rc3 — Forever Release Candidate
 
 **Scan once. Share prices with your guild. Browse the market away from the Auction House.**
 
-MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, shopping lists, and analytics. Release candidate 0.9.7-rc2 targets Forever 1.60.1 (Interface 16001), Classic Era / SoD 1.15.9, and TBC 2.5.6. Legacy-client behavior remains in testing.
+MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, shopping lists, and analytics. Release candidate 0.9.7-rc3 targets Forever 1.60.1 (Interface 16001), Classic Era / SoD 1.15.9, and TBC 2.5.6. Legacy-client behavior remains in testing.
 
 Auctionator is optional: MarketSync includes its own native, frame-sliced auction scanner, or can seamlessly capture Auctionator full scans when both addons are installed.
 

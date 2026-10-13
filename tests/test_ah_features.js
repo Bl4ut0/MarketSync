@@ -1018,7 +1018,13 @@ test('Tiered retention downsampler, compact records, and analytics clarity', () 
       },
     }
 
+    realmDB.GuildData = {
+      ['guild-old'] = {m=100, d=20500, h={['20500']='5:2s:5'}, vh={['20500']='5:2s:5'}},
+      ['guild-hot'] = {m=200, d=20714, h={['20714']='5:5k:5'}, vh={['20714']='5:5k:5'}}
+    }
     MarketSync.DownsampleRetention()
+    assert(realmDB.GuildData['guild-old'] == nil, "cumulative history must obey retention too")
+    assert(realmDB.GuildData['guild-hot'].m == 200, "current guild observations must survive retention")
 
     local entry = realmDB.PersonalData["4471"]
     -- Hot tier preserved

@@ -118,5 +118,20 @@ run(`
   interface = 20506
   receive("ADV;ClassicBetaPvP2@Horde;1;1;0.9.7-rc2;123;2;READY")
   assert(peer == nil, "legacy clients must retain exact realm checks")
+  interface = 16001
+  C_Timer = { After = function(_, fn) deferred = fn end }
+  MarketSync.CanSync = function() return true end
+  MarketSync.GetMyLatestBucket = function() return 0 end
+  MarketSync.CountRecentItemsBucket = function() return 0 end
+  MarketSync.ScheduleDirectedPull = function(...) download = {...}; return true end
+  receive("ADV;ClassicBetaPvP2@Horde;0;0;0.9.7-rc2;0;2;READY")
+  assert(not MarketSync.ProcessDeferredADV() and not download,
+    "an empty announcement cannot trigger a download")
+  receive("ADV;ClassicBetaPvP2@Horde;995451;3145;0.9.7-rc2;1791813202;2;READY")
+  assert(deferred, "nonzero fresh advertisement must schedule deferred processing")
+  deferred()
+  assert(download and download[1] == "M" and download[2] == 0
+    and download[3] == "Guild Person-ClassicBetaPvP2" and download[4] == 995451,
+    "fresh same-faction data must request the exact peer across numbered partitions")
 `);
 console.log('PASS Forever playset comparison, peer discovery, PULL and BEGIN routing, and other-client isolation');

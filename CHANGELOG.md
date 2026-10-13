@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7-rc3] - 2026-10-13
+
+### Fixed
+- Retain scan advertisements deferred while the auction house is open and retry them on close, independently of browse-cache state. Rate-limited advertisements now retry after the remaining throttle interval instead of waiting for the next periodic heartbeat.
+- Personal scan records are now independent of the cumulative Guild market. Local observations contribute to both; received records update Guild only, without overwriting the player's price or observation time. Existing cumulative history is retained and records identifiable as received are removed from the Personal view.
+- Incomplete native search results request remaining pages and never become saved or verified scan records. Search timeouts allow for continued paging activity.
+- Native prices use per-item observation times and actual available quantities. Reading or rebuilding caches no longer imports the cumulative database into itself or fabricates current observation buckets.
+- Replayed sync points do not duplicate history or activity entries, and re-merging older personal observations cannot replace a newer guild quote. Outbound snapshots use the cumulative verified market and retain the existing revision-based delta selection.
+
 ## [0.9.7-rc2] - 2026-10-13
 
 ### Fixed

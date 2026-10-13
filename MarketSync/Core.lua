@@ -33,6 +33,7 @@ StaticPopupDialogs["MARKETSYNC_CONFIRM_MARKET_DATA_RESET"] = {
         local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
         if not realmDB then return end
         realmDB.PersonalData = {}
+        realmDB.GuildData = {}
         realmDB.ItemMetadata = {}
         realmDB.HistoryLog = {}
         realmDB.NeutralData = {}
@@ -1141,108 +1142,110 @@ function MarketSync.DownsampleRetention(onComplete)
 
     local co = coroutine.create(function()
         local i = 0
-        for dbKey, data in pairs(realmDB.PersonalData) do
-            if type(data) == "table" and data.h then
-                local weeklyBuckets = {}
+        for _, marketStore in ipairs({realmDB.PersonalData, realmDB.GuildData or {}}) do
+            for dbKey, data in pairs(marketStore) do
+                if type(data) == "table" and data.h then
+                    local weeklyBuckets = {}
 
-                for dayKey, histStr in pairs(data.h) do
-                    if type(dayKey) == "string" and dayKey:sub(1, 2) == "W_" then
-                        -- Cold weekly record
-                        local weekNum = tonumber(dayKey:sub(3))
-                        if weekNum then
-                            local weekAnchorDay = weekNum * 7
-                            if weekAnchorDay < coldCutoff then
-                                data.h[dayKey] = nil
-                                purgedCount = purgedCount + 1
+                    for dayKey, histStr in pairs(data.h) do
+                        if type(dayKey) == "string" and dayKey:sub(1, 2) == "W_" then
+                            -- Cold weekly record
+                            local weekNum = tonumber(dayKey:sub(3))
+                            if weekNum then
+                                local weekAnchorDay = weekNum * 7
+                                if weekAnchorDay < coldCutoff then
+                                    data.h[dayKey] = nil
+                                    purgedCount = purgedCount + 1
+                                end
+                            end
+                        else
+                            local dayNum = tonumber(dayKey)
+                            if dayNum then
+                                if dayNum < coldCutoff then
+                                    -- Beyond cold tier: hard purge
+                                    data.h[dayKey] = nil
+                                    purgedCount = purgedCount + 1
+                                elseif dayNum < warmCutoff then
+                                    -- Warm -> Cold: accumulate into weekly summary
+                                    local weekNum = math.floor(dayNum / 7)
+                                    local weekKey = "W_" .. tostring(weekNum)
+                                    local rec = MarketSync.ParseCompactRecord(histStr)
+                                    if not rec and not MarketSync.IsCompactRecord(histStr) then
+                                        local compacted = MarketSync.CompactDayString(histStr)
+                                        if compacted then
+                                            rec = MarketSync.ParseCompactRecord(compacted)
+                                        end
+                                    end
+                                    if rec then
+                                        weeklyBuckets[weekKey] = MarketSync.MergeCompactRecords(
+                                            weeklyBuckets[weekKey], rec)
+                                    end
+                                    data.h[dayKey] = nil
+                                    compactedWeeklyCount = compactedWeeklyCount + 1
+                                elseif dayNum < hotCutoff then
+                                    -- Hot -> Warm: convert raw buckets to daily summary
+                                    if not MarketSync.IsCompactRecord(histStr) then
+                                        local compacted = MarketSync.CompactDayString(histStr)
+                                        if compacted then
+                                            data.h[dayKey] = compacted
+                                            compactedDailyCount = compactedDailyCount + 1
+                                        end
+                                    end
+                                elseif MarketSync.DeduplicateScanBuckets then
+                                    data.h[dayKey] = MarketSync.DeduplicateScanBuckets(histStr)
+                                end
                             end
                         end
-                    else
-                        local dayNum = tonumber(dayKey)
-                        if dayNum then
-                            if dayNum < coldCutoff then
-                                -- Beyond cold tier: hard purge
-                                data.h[dayKey] = nil
-                                purgedCount = purgedCount + 1
-                            elseif dayNum < warmCutoff then
-                                -- Warm -> Cold: accumulate into weekly summary
-                                local weekNum = math.floor(dayNum / 7)
-                                local weekKey = "W_" .. tostring(weekNum)
-                                local rec = MarketSync.ParseCompactRecord(histStr)
-                                if not rec and not MarketSync.IsCompactRecord(histStr) then
-                                    local compacted = MarketSync.CompactDayString(histStr)
-                                    if compacted then
-                                        rec = MarketSync.ParseCompactRecord(compacted)
-                                    end
-                                end
-                                if rec then
-                                    weeklyBuckets[weekKey] = MarketSync.MergeCompactRecords(
-                                        weeklyBuckets[weekKey], rec)
-                                end
-                                data.h[dayKey] = nil
-                                compactedWeeklyCount = compactedWeeklyCount + 1
-                            elseif dayNum < hotCutoff then
-                                -- Hot -> Warm: convert raw buckets to daily summary
-                                if not MarketSync.IsCompactRecord(histStr) then
-                                    local compacted = MarketSync.CompactDayString(histStr)
-                                    if compacted then
-                                        data.h[dayKey] = compacted
-                                        compactedDailyCount = compactedDailyCount + 1
-                                    end
-                                end
+                    end
+
+                    -- Flush accumulated weekly records
+                    for weekKey, wRec in pairs(weeklyBuckets) do
+                        local existingStr = data.h[weekKey]
+                        if existingStr then
+                            local existingRec = MarketSync.ParseCompactRecord(existingStr)
+                            if existingRec then
+                                wRec = MarketSync.MergeCompactRecords(existingRec, wRec)
+                            end
+                        end
+                        data.h[weekKey] = string.format("W:%s:%s:%s:%s",
+                            MarketSync.ToBase36(wRec.min),
+                            MarketSync.ToBase36(wRec.max),
+                            MarketSync.ToBase36(wRec.avg),
+                            MarketSync.ToBase36(wRec.volume))
+                    end
+
+                    -- Prune vh (verified history) leak: only keep hot tier for outbound sync
+                    if type(data.vh) == "table" then
+                        for vhDayKey, vhHistory in pairs(data.vh) do
+                            local vhDayNum = tonumber(vhDayKey)
+                            if not vhDayNum or vhDayNum < hotCutoff or (type(vhDayKey) == "string" and vhDayKey:sub(1, 2) == "W_") then
+                                data.vh[vhDayKey] = nil
+                                vhPrunedCount = vhPrunedCount + 1
                             elseif MarketSync.DeduplicateScanBuckets then
-                                data.h[dayKey] = MarketSync.DeduplicateScanBuckets(histStr)
+                                data.vh[vhDayKey] = MarketSync.DeduplicateScanBuckets(vhHistory)
                             end
                         end
-                    end
-                end
-
-                -- Flush accumulated weekly records
-                for weekKey, wRec in pairs(weeklyBuckets) do
-                    local existingStr = data.h[weekKey]
-                    if existingStr then
-                        local existingRec = MarketSync.ParseCompactRecord(existingStr)
-                        if existingRec then
-                            wRec = MarketSync.MergeCompactRecords(existingRec, wRec)
+                        if not next(data.vh) then
+                            data.vh = nil
                         end
                     end
-                    data.h[weekKey] = string.format("W:%s:%s:%s:%s",
-                        MarketSync.ToBase36(wRec.min),
-                        MarketSync.ToBase36(wRec.max),
-                        MarketSync.ToBase36(wRec.avg),
-                        MarketSync.ToBase36(wRec.volume))
                 end
 
-                -- Prune vh (verified history) leak: only keep hot tier for outbound sync
-                if type(data.vh) == "table" then
-                    for vhDayKey, vhHistory in pairs(data.vh) do
-                        local vhDayNum = tonumber(vhDayKey)
-                        if not vhDayNum or vhDayNum < hotCutoff or (type(vhDayKey) == "string" and vhDayKey:sub(1, 2) == "W_") then
-                            data.vh[vhDayKey] = nil
-                            vhPrunedCount = vhPrunedCount + 1
-                        elseif MarketSync.DeduplicateScanBuckets then
-                            data.vh[vhDayKey] = MarketSync.DeduplicateScanBuckets(vhHistory)
-                        end
-                    end
-                    if not next(data.vh) then
-                        data.vh = nil
-                    end
+                -- Retention applies to the complete price key. Once all three
+                -- history tiers expire, remove only that exact item variant.
+                if type(data) == "table"
+                    and (not data.h or (type(data.h) == "table" and not next(data.h)))
+                    and (not data.vh or (type(data.vh) == "table" and not next(data.vh)))
+                    and (tonumber(data.d) or 0) < coldCutoff then
+                    marketStore[dbKey] = nil
+                    purgedVariantCount = purgedVariantCount + 1
                 end
+
+                i = i + 1
+                if i % 500 == 0 then coroutine.yield() end
             end
 
-            -- Retention applies to the complete price key. Once all three
-            -- history tiers expire, remove only that exact item variant.
-            if type(data) == "table"
-                and (not data.h or (type(data.h) == "table" and not next(data.h)))
-                and (not data.vh or (type(data.vh) == "table" and not next(data.vh)))
-                and (tonumber(data.d) or 0) < coldCutoff then
-                realmDB.PersonalData[dbKey] = nil
-                purgedVariantCount = purgedVariantCount + 1
-            end
-
-            i = i + 1
-            if i % 500 == 0 then coroutine.yield() end
         end
-
         if purgedVariantCount > 0 and MarketSync.InvalidateIndexCache then
             MarketSync.InvalidateIndexCache()
         end
@@ -1463,6 +1466,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             return
         end
         MarketSync.IsAuctionHouseOpen = false
+        -- Scan completion requests an ADV while the auctioneer is still open.
+        -- Retry it independently of cache/stat invalidation and item-count changes.
+        if MarketSync.ResumePendingAdvertisements then MarketSync.ResumePendingAdvertisements() end
         local wasNeutralSession = MarketSync.IsNeutralAHOpen
         MarketSync.IsNeutralAHOpen = false
 

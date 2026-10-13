@@ -440,7 +440,7 @@ local function GetMainTrackedPrice(realmDB, req, itemID, now, requireFresh)
     local dbKey = req.matchType == "dbKey" and NormalizeVariantMode(req.variantMode) == "exact_key"
         and req.matchValue or (itemID and tostring(itemID))
     if not dbKey or (requireFresh and not IsFreshLocalObservation(
-        GetEntryByKey(realmDB.PersonalData, dbKey), now)) then
+        GetEntryByKey(realmDB.GuildData or realmDB.PersonalData, dbKey), now)) then
         return nil
     end
     if req.matchType == "dbKey" and NormalizeVariantMode(req.variantMode) == "exact_key" then

@@ -260,4 +260,69 @@ test('MarketSync runs without Auctionator present and leaves original MarketSync
   `);
 });
 
+test('Native cumulative quotes retain per-item timestamps and quantities', () => {
+  const L = createLuaState('MarketSyncForeverScanner = {}; Auctionator = nil');
+  execLua(L, `
+    MarketSync.InitializeDB()
+    MarketSync.Provider.Select("forever")
+    local db = MarketSync.GetRealmDB()
+    db.PersonalScanTime = time()
+    db.PersonalData["100"] = {m=100, observedAt=time()-7200, available=5}
+    db.GuildData["100"] = {m=300, observedAt=time()-3600, available=42, source="Peer"}
+    local quote = MarketSync.Provider.GetSnapshot(100)
+    assert(quote.minUnitPrice == 300 and quote.available == 42)
+    assert(quote.seenAt == time()-3600 and MarketSync.Provider.GetPriceAge(100) == 3600/86400,
+      "a recent scan of another item must not refresh this quote")
+    assert(MarketSync.Provider.GetLiveStore() == db.GuildData)
+    assert(db.PersonalData["100"].m == 100)
+    local info = MarketSync.GetItemPriceAndScanInfo(100)
+    assert(info.price == 300 and info.source == "Peer" and info.scanTime == time()-3600)
+    db.GuildData["101"] = {m=400, d=0}
+    assert(MarketSync.Provider.GetSnapshot(101).seenAt == nil,
+      "unknown observation time must never become the current time")
+  `);
+});
+
+test('Existing combined records migrate without aliasing local and guild histories', () => {
+  const L = createLuaState('MarketSyncForeverScanner = {}; Auctionator = nil');
+  execLua(L, `
+    MarketSyncDB = {RealmData = {['Faerlina@Alliance'] = {
+      PersonalData = {
+        ['100'] = {m=100, h={['20500']='1:2s:5'}, observedAt=100},
+        ['200'] = {m=200, h={['20500']='2:5k:5'}, latestBucket=20500*48+2}
+      },
+      ItemMetadata = {['200']={lastSource='Peer', lastTime=200}}
+    }}}
+    local db = MarketSync.GetRealmDB()
+    assert(db.PersonalData['100'].m == 100 and not db.PersonalData['200'])
+    assert(db.GuildData['100'].m == 100 and db.GuildData['200'].m == 200)
+    assert(db.PersonalData['100'].h ~= db.GuildData['100'].h)
+    db.GuildData['100'].h['20500'] = 'changed'
+    assert(db.PersonalData['100'].h['20500'] == '1:2s:5')
+    assert(db.GuildData['200'].observedAt == 20500*86400+2*1800,
+      "migration must use observation buckets rather than receive time")
+    assert(MarketSync.GetRealmDB() == db, "migration must only run once")
+  `);
+});
+
+test('Auctionator integration reads cumulative prices without rewriting its scan database', () => {
+  const L = createLuaState(`
+    Auctionator = { Database = { db = {} }, API = {v1={
+      GetAuctionPriceByItemID=function() return 50 end,
+      GetAuctionAgeByItemID=function() return 0 end
+    }} }
+  `);
+  execLua(L, `
+    MarketSync.InitializeDB()
+    MarketSync.Provider.Select("auctionator")
+    local db = MarketSync.GetRealmDB()
+    db.GuildData['100'] = {m=300, observedAt=time()-3600, available=12}
+    db.GuildData['p:100:12'] = {m=900, observedAt=time()-7200, available=2}
+    assert(MarketSync.Provider.GetPrice(100) == 300)
+    local quote = MarketSync.Provider.GetSnapshot('p:100:12')
+    assert(quote.minUnitPrice == 900 and quote.available == 2 and quote.seenAt == time()-7200)
+    assert(next(Auctionator.Database.db) == nil, "guild quotes must not become Auctionator personal scan records")
+  `);
+});
+
 console.log(`\nAll ${passed} provider decoupling tests passed successfully!`);

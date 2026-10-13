@@ -329,13 +329,15 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     entry.m = unitPrice
     entry.d = currentDay
     entry.observedAt = now
+    entry.available = available
     entry.latestBucket = bucketID
     if not entry.h then entry.h = {} end
     if not entry.vh then entry.vh = {} end
 
     entry.h[dayStr] = MarketSync.UpsertScanBucket(entry.h[dayStr], bucketOffset,
         unitPrice, math.max(1, available or 1))
-    entry.vh[dayStr] = entry.h[dayStr]
+    entry.vh[dayStr] = MarketSync.UpsertScanBucket(entry.vh[dayStr], bucketOffset,
+        unitPrice, math.max(1, available or 1))
 
     realmDB.PersonalScanTime = now
     realmDB.SwarmTSF = now
@@ -345,6 +347,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
         realmDB.PartialScanTime = now
     end
     realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, bucketID)
+    if MarketSync.MergePersonalIntoGuild then MarketSync.MergePersonalIntoGuild(dbKey) end
     if observationAPI then
         observationAPI.Emit({ event = "observation",
             scanId = S.ObservationScanID or standaloneScanID,
@@ -550,6 +553,7 @@ local function SummarizeSearchResults(key, isCommodityHint)
         local completeName = isCommodity and "HasFullCommoditySearchResults" or "HasFullItemSearchResults"
 
         local count = SafeCall(countName, argument) or 0
+        if count == 0 and SafeCall(completeName, argument) == true then return nil, 0, true, isCommodity end
         if count > 0 then
             local isComplete = SafeCall(completeName, argument)
             local minUnitPrice = nil
@@ -560,12 +564,12 @@ local function SummarizeSearchResults(key, isCommodityHint)
                 if row then
                     local quantity = tonumber(row.quantity) or 0
                     if quantity > 0 then
-                        totalAvailable = totalAvailable + quantity
                         local unitPrice = isCommodity and row.unitPrice or nil
                         if not isCommodity and row.buyoutAmount and row.buyoutAmount > 0 then
                             unitPrice = row.buyoutAmount / quantity
                         end
                         if type(unitPrice) == "number" and unitPrice > 0 then
+                            totalAvailable = totalAvailable + quantity
                             if not minUnitPrice or unitPrice < minUnitPrice then
                                 minUnitPrice = unitPrice
                             end
@@ -581,6 +585,12 @@ local function SummarizeSearchResults(key, isCommodityHint)
     end
 
     return nil, 0, false, isCommodityHint
+end
+
+local function RequestRemainingResults(key, isCommodity)
+    local api = GetAHAPI()
+    local request = api and (isCommodity and api.RequestMoreCommoditySearchResults or api.RequestMoreItemSearchResults)
+    if request then pcall(request, isCommodity and key.itemID or key) end
 end
 
 function S.ScheduleNext()
@@ -617,6 +627,7 @@ function S.ScheduleNext()
 
         local itemKey = table.remove(S.Queue, 1)
         S.Pending = itemKey
+        S.PendingUpdatedAt = GetTime()
         S.Progress.current = S.Progress.total - #S.Queue
         S.Status = string.format("Scanning %d / %d...", S.Progress.current, S.Progress.total)
         S.NextRequestAt = GetTime() + 1.1
@@ -635,13 +646,16 @@ function S.ScheduleNext()
             -- Watchdog: advance queue if server drops event or throttles longer than 6 seconds
             local currentPending = itemKey
             local currentGen = S.Generation
-            C_Timer.After(6, function()
+            local function CheckTimeout()
                 if S.Active and S.Generation == currentGen and S.Pending == currentPending then
+                    local remaining = 6 - (GetTime() - (S.PendingUpdatedAt or 0))
+                    if remaining > 0 then C_Timer.After(remaining, CheckTimeout); return end
                     MarketSync.Debug("Search timeout for item " .. tostring(currentPending.itemID) .. "; advancing queue")
                     S.Pending = nil
                     S.ScheduleNext()
                 end
-            end)
+            end
+            C_Timer.After(6, CheckTimeout)
         end
         S.Notify()
     end)
@@ -1099,6 +1113,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 -- Automated queue scan: process pending item and advance queue
                 if not updatedItemID or (S.Pending.itemID and updatedItemID == S.Pending.itemID) then
                     local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(S.Pending, isCommodity)
+                    if not isComplete then
+                        S.PendingUpdatedAt = GetTime()
+                        RequestRemainingResults(S.Pending, resolvedCommodity)
+                        return
+                    end
                     if minPrice and minPrice > 0 then
                         RecordScanObservation(S.Pending, minPrice, available, resolvedCommodity, false)
                     end
@@ -1113,6 +1132,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if updatedItemKey or updatedItemID then
             local searchKey = updatedItemKey or { itemID = updatedItemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 }
             local minPrice, available, isComplete, resolvedCommodity = SummarizeSearchResults(searchKey, isCommodity)
+            if not isComplete then RequestRemainingResults(searchKey, resolvedCommodity); return end
             if minPrice and minPrice > 0 then
                 RecordScanObservation(searchKey, minPrice, available, resolvedCommodity, false)
             end

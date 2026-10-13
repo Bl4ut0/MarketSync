@@ -130,14 +130,15 @@ function ForeverProvider.GetSnapshot(keyOrLink)
         end
     end
 
-    -- 2. Check native PersonalData
+    -- The provider supplies the cumulative market; Personal browsing reads
+    -- PersonalData directly and must never be overwritten by a guild quote.
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
     if realmDB and realmDB.PersonalData then
         local dbKey = tostring(key.itemID)
         if key.itemSuffix and key.itemSuffix ~= 0 then
             dbKey = "p:" .. key.itemID .. ":" .. key.itemSuffix
         end
-        local entry = realmDB.PersonalData[dbKey]
+        local entry = (realmDB.GuildData and realmDB.GuildData[dbKey]) or realmDB.PersonalData[dbKey]
         if entry then
             local price = entry.m
             if (not price or price <= 0) and entry.h and type(entry.h) == "table" then
@@ -158,19 +159,22 @@ function ForeverProvider.GetSnapshot(keyOrLink)
                             local p = MarketSync.FromBase36(p_b36)
                             if p and p > 0 then
                                 price = p
-                                entry.m = p
                             end
                         end
                     end
                 end
             end
             if price and price > 0 then
-                local seenAt = realmDB.PersonalScanTime or time()
+                local seenAt = tonumber(entry.observedAt)
+                    or (entry.latestBucket and MarketSync.ScanDayToTimestamp
+                        and (MarketSync.ScanDayToTimestamp(math.floor(entry.latestBucket / 48)) + (entry.latestBucket % 48) * 1800))
+                    or (tonumber(entry.d) and tonumber(entry.d) > 0 and MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(entry.d))
+                    or nil
                 return {
                     seenAt = seenAt,
                     complete = true,
                     minUnitPrice = price,
-                    available = 1,
+                    available = entry.available,
                     source = "native-personal",
                 }
             end
@@ -226,7 +230,7 @@ end
 function ForeverProvider.GetLiveStore()
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
     if realmDB and realmDB.PersonalData then
-        return realmDB.PersonalData
+        return realmDB.GuildData or realmDB.PersonalData
     end
     local scanner = MarketSyncForeverScanner
     if scanner and scanner.Store then

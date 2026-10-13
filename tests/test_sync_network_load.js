@@ -591,8 +591,9 @@ test('Sync Protocol: Wire ceiling <=248 bytes, lossless serialization, and neutr
     MarketSync._Protocol2CommitInProgress = true
     MarketSync.UpdateLocalDBByKey("p:4471:14", scanDay, "20:2s:1", "PeerPlayer")
     MarketSync._Protocol2CommitInProgress = false
-    assert(realmDB.PersonalData["p:4471:14"] and realmDB.PersonalData["p:4471:14"].m == 100,
+    assert(realmDB.GuildData["p:4471:14"] and realmDB.GuildData["p:4471:14"].m == 100,
       "Received variant must be stored under its exact suffix key")
+    assert(realmDB.PersonalData["p:4471:14"] == nil, "received records must not enter Personal")
     assert(realmDB.PersonalData["4471"] == nil and realmDB.PersonalData["p:4471:12"].m == 1000,
       "Receiving one suffix must not change the base item or another suffix")
   `;
@@ -804,6 +805,123 @@ test('Token Bucket Ceiling: Enforces <=640 B/s budget, control slot reservation,
     `Overall byte rate (${overallByteRate.toFixed(1)} B/s) must not exceed budget (${TX_DATA_BUDGET_BYTES_PER_SECOND} B/s)`);
   assert(controlFramesSent === 10, `Slot 10 must be reserved for control frames, got ${controlFramesSent}`);
   assert(throttledTicks >= 9, `Transmitter must pause when external addon traffic exceeds 36 msgs/s, throttled ${throttledTicks} ticks`);
+});
+
+test('Native full scan announces nonzero faction data after AH close and retries throttled announcements', () => {
+  const L = createLuaEnv(`
+    clockNow = 1773780000
+    time = function() return clockNow end
+    GetTime = time
+    GetBuildInfo = function() return "1.60.1", "70291", "", 16001 end
+    MarketSync.Provider = { GetCurrentBucket = function() return math.floor(clockNow / 1800) end }
+    scheduled, sent = {}, {}
+    C_Timer.After = function(delay, fn) scheduled[#scheduled + 1] = { at = clockNow + delay, fn = fn } end
+    C_Timer.NewTicker = function(_, fn) if not txTick then txTick = fn end; return { Cancel = function() end } end
+    function Until(target)
+      while true do
+        table.sort(scheduled, function(a,b) return a.at < b.at end)
+        if not scheduled[1] or scheduled[1].at > target then break end
+        local timer = table.remove(scheduled, 1)
+        clockNow = timer.at
+        timer.fn()
+      end
+      clockNow = target
+    end
+    C_ChatInfo.SendAddonMessage = function(_, payload) sent[#sent + 1] = payload end
+    C_AuctionHouse = {
+      SendSearchQuery = function() end,
+      ReplicateItems = function() return true end,
+      GetNumReplicateItems = function() return 1 end,
+      GetReplicateItemInfo = function() return "Ore", 134400, 5, 1, true, 1, nil, 0, 0, 1000, 0, nil, nil, nil, nil, nil, 100 end,
+      GetReplicateItemLink = function() return "item:100" end,
+    }
+    local originalCreateFrame = CreateFrame
+    CreateFrame = function(...)
+      local f = originalCreateFrame(...)
+      scannerFrame = f
+      return f
+    end
+  `);
+  for (const file of ['Config.lua', 'Sync.lua', 'Scanner.lua']) {
+    const source = fs.readFileSync(path.join(marketSyncDir, file), 'utf8');
+    if (lauxlib.luaL_dostring(L, to_luastring(source)) !== 0) throw new Error(to_jsstring(lua.lua_tostring(L, -1)));
+  }
+  const script = `
+    MarketSync.myRealm = "Faerlina"
+    MarketSync.IsAuctionHouseOpen = true
+    assert(MarketSync.Scanner.StartFullScan())
+    scannerFrame.scripts.OnEvent(scannerFrame, "REPLICATE_ITEM_LIST_UPDATE")
+    assert(not MarketSync.Scanner.Active and MarketSync.Scanner.Status:find("Full Scan Complete"))
+    assert(MarketSync.GetMyLatestBucket() > 0 and MarketSync.CountRecentItemsBucket(0) == 1)
+    assert(MarketSync.GetRealmDB().SwarmTSF > 0)
+    Until(clockNow + 2)
+    txTick()
+    assert(#sent == 0, "scan completion must defer while auctioneer is open")
+    MarketSync.IsAuctionHouseOpen = false
+    MarketSync.ResumePendingAdvertisements()
+    Until(clockNow + 1)
+    txTick()
+    assert(#sent == 1 and sent[1]:find("ADV;Faerlina@Horde;", 1, true) == 1)
+    assert(not sent[1]:find(";0;0;", 1, true), "completed native scan must announce nonzero records")
+    MarketSync.SendAdvertisement()
+    MarketSync.SendAdvertisement()
+    local retryCount = #scheduled
+    MarketSync.SendAdvertisement()
+    assert(#scheduled == retryCount, "retries must coalesce")
+    Until(clockNow + 16)
+    txTick()
+    assert(#sent == 2, "throttled advertisement must retry without waiting for periodic heartbeat")
+    local db = MarketSync.GetRealmDB()
+    local localRecord = db.PersonalData["100"]
+    local localPrice, localObserved = localRecord.m, localRecord.observedAt
+    assert(db.GuildData["100"] ~= localRecord and db.GuildData["100"].h ~= localRecord.h)
+    local incomingBucket = localRecord.latestBucket + 1
+    local day, offset = math.floor(incomingBucket / 48), incomingBucket % 48
+    local remoteHistory = offset .. ":" .. MarketSync.ToBase36(300) .. ":a"
+    MarketSync._Protocol2CommitInProgress = true
+    MarketSync.UpdateLocalDBByKey("100", day, remoteHistory, "PeerPlayer")
+    assert(db.PersonalData["100"].m == localPrice and db.PersonalData["100"].observedAt == localObserved,
+      "guild reception must never alter personal scan price or time")
+    assert(db.GuildData["100"].m == 300 and db.GuildData["100"].available == 10)
+    local combinedHistory = db.GuildData["100"].h[tostring(day)]
+    local logCount = #db.HistoryLog
+    MarketSync.UpdateLocalDBByKey("100", day, remoteHistory, "PeerPlayer")
+    assert(db.GuildData["100"].h[tostring(day)] == combinedHistory and #db.HistoryLog == logCount,
+      "replayed data must not duplicate history or activity")
+    MarketSync._Protocol2CommitInProgress = false
+    MarketSync.MergePersonalIntoGuild("100")
+    assert(db.GuildData["100"].m == 300 and db.GuildData["100"].h[tostring(day)] == combinedHistory,
+      "an older personal record must not overwrite a fresher guild quote")
+    local oldRevision = db.LatestBucket
+    MarketSync.Provider.GetLiveStore = function() return db.GuildData end
+    local imported, _, changed = MarketSync.SnapshotPersonalScan()
+    assert(imported == 0 and changed == 0 and db.LatestBucket == oldRevision
+      and db.PersonalData["100"].observedAt == localObserved,
+      "self-import must not manufacture a new observation or revision")
+    completeResults = false
+    requests = 0
+    C_AuctionHouse.GetNumItemSearchResults = function() return 1 end
+    C_AuctionHouse.GetItemSearchResultInfo = function() return {quantity=10, buyoutAmount=1000} end
+    C_AuctionHouse.HasFullItemSearchResults = function() return completeResults end
+    C_AuctionHouse.RequestMoreItemSearchResults = function() requests = requests + 1 end
+    local s = MarketSync.Scanner
+    MarketSync.IsAuctionHouseOpen = true
+    assert(s.StartScan({200}))
+    Until(clockNow + 0.1)
+    local key = s.Pending
+    assert(key and key.itemID == 200)
+    scannerFrame.scripts.OnEvent(scannerFrame, "ITEM_SEARCH_RESULTS_UPDATED", key)
+    assert(requests == 1 and s.Pending == key and not db.PersonalData["200"] and not db.GuildData["200"],
+      "incomplete results must request more and remain ineligible for sync")
+    Until(clockNow + 5)
+    scannerFrame.scripts.OnEvent(scannerFrame, "ITEM_SEARCH_RESULTS_UPDATED", key)
+    Until(clockNow + 2)
+    assert(s.Pending == key, "ongoing paging activity must extend the inactivity watchdog")
+    completeResults = true
+    scannerFrame.scripts.OnEvent(scannerFrame, "ITEM_SEARCH_RESULTS_UPDATED", key)
+    assert(s.Pending == nil and db.PersonalData["200"].m == 100 and db.GuildData["200"].m == 100)
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(script)) !== 0) throw new Error(to_jsstring(lua.lua_tostring(L, -1)));
 });
 
 // Helper assertion function
