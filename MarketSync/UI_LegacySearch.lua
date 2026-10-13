@@ -7,6 +7,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
     panel:SetAllPoints(parent)
     local scanner = MarketSync.Scanner
     local selected
+    local listQuery
     local panelWidth = parent.GetWidth and parent:GetWidth() or 0
     -- Leave the right-hand gutter for the native scroll bar; result cells
     -- must fit inside the ScrollFrame viewport, not just its outer border.
@@ -129,6 +130,9 @@ function MarketSync.CreateLegacySearchPanel(parent)
             elseif scanner and scanner.Active then
                 emptyTitle:SetText("Searching auctions...")
                 emptyHint:SetText("Matching price and stack-size groups will appear here.")
+            elseif listQuery and query == "" then
+                emptyTitle:SetText("No matching auctions")
+                emptyHint:SetText("No auctions were found for this shopping list. Search again later.")
             elseif query ~= "" then
                 emptyTitle:SetText("No matching auctions")
                 emptyHint:SetText("Nothing is listed for " .. query .. ". Try a shorter name or search again later.")
@@ -230,7 +234,9 @@ function MarketSync.CreateLegacySearchPanel(parent)
     local function Submit()
         selected = nil
         search:ClearFocus()
-        if scanner and scanner.StartLiveSearch then scanner.StartLiveSearch(search:GetText()) end
+        if scanner and scanner.StartLiveSearch then
+            scanner.StartLiveSearch(search:GetText() == "" and listQuery or search:GetText())
+        end
         Refresh()
     end
     searchButton:SetScript("OnClick", Submit)
@@ -260,8 +266,13 @@ function MarketSync.CreateLegacySearchPanel(parent)
     panel.ResultRows = rows
     panel.BuyButton = buyButton
     panel.SetQuery = function(_, query)
-        if type(query) == "string" then
+        if type(query) == "table" then
             selected = nil
+            listQuery = query
+            search:SetText("")
+        elseif type(query) == "string" then
+            selected = nil
+            listQuery = nil
             search:SetText(query)
         end
     end

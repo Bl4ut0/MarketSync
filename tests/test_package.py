@@ -17,7 +17,9 @@ class PackageTests(unittest.TestCase):
             output = Path(folder) / "MarketSync.zip"
             manifest = module.build(output)
             self.assertEqual(manifest["addon"], "MarketSync")
-            self.assertEqual(manifest["version"], "0.9.6")
+            source_toc = (module.ROOT / "MarketSync" / "MarketSync.toc").read_text()
+            expected_version = re.search(r"^## Version: (.+)$", source_toc, re.MULTILINE).group(1)
+            self.assertEqual(manifest["version"], expected_version)
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
                 self.assertTrue(all(n.startswith("MarketSync/") for n in names))
@@ -33,7 +35,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("## AllowLoadGameType: camelot, classic, tbc", toc)
                 self.assertIn("LegacyScanner.lua", toc)
                 self.assertIn("MarketSync/LegacyScanner.lua", names)
-                self.assertIn("## Version: 0.9.6", toc)
+                self.assertIn("## Version: " + expected_version, toc)
             self.assertEqual(manifest["auctionHouseEntry"], "embedded-tab")
             self.assertTrue(manifest["embeddedAuctionHousePanel"])
             self.assertTrue(manifest["nativeScanner"])

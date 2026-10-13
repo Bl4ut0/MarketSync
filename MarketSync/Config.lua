@@ -36,6 +36,24 @@ MarketSync.ADDON_NAME = ADDON_NAME
 MarketSync.PREFIX = PREFIX
 MarketSync.ICON_COIN = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
 
+-- Forever distributes one playset across numbered backend realms. Only the
+-- sync market comparison folds that suffix; character/routing identities and
+-- existing saved realm partitions keep the original realm unchanged.
+function MarketSync.NormalizeSyncRealm(realm)
+    if type(realm) ~= "string" or realm == "" then return nil end
+    local interface = GetBuildInfo and select(4, GetBuildInfo())
+    if tonumber(interface) == 16001 then
+        return realm:gsub("%d+$", "")
+    end
+    return realm
+end
+
+function MarketSync.IsSameSyncRealm(left, right)
+    local normalized = MarketSync.NormalizeSyncRealm(left)
+    return normalized ~= nil and normalized ~= ""
+        and normalized == MarketSync.NormalizeSyncRealm(right)
+end
+
 -- Robust helper to get addon metadata across different WoW versions
 function MarketSync.GetAddOnMetadata(addon, field)
     -- Modern WoW (10.0+)

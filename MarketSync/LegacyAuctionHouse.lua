@@ -169,6 +169,13 @@ end
 
 MarketSync.OpenLegacySearch = function(query)
     if not AH.AttachLegacy() then return false end
+    if type(query) == "table" then
+        if not AH.ShowLegacyPanel("search") then return false end
+        if AH.LegacySearchHost.Content and AH.LegacySearchHost.Content.SetQuery then
+            AH.LegacySearchHost.Content:SetQuery(query)
+        end
+        return MarketSync.Scanner.StartLiveSearch(query)
+    end
     if type(query) == "number" and MarketSync.GetItemInfo then query = MarketSync.GetItemInfo(query) end
     if type(query) ~= "string" or query == "" then return false end
     query = query:match("%[(.-)%]") or query

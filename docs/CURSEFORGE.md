@@ -2,7 +2,7 @@
 
 **Scan once. Share prices with your guild. Browse the market away from the Auction House.**
 
-MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, and shopping lists. Version 0.9.2 targets Forever 1.60.1 (build 69893). Auctionator is optional: MarketSync can scan on its own, or use Auctionator's scans when both addons are installed.
+MarketSync is a Forever-first Auction House companion for saved prices, guild synchronization, item history, and shopping lists. Release candidate 0.9.7-rc1 targets Forever 1.60.1 (Interface 16001), Classic Era / SoD 1.15.9, and TBC 2.5.6. Auctionator is optional: MarketSync can scan on its own, or use Auctionator's scans when both addons are installed.
 
 ## What you can do
 
@@ -16,6 +16,10 @@ MarketSync is a Forever-first Auction House companion for saved prices, guild sy
 ## Scanning with or without Auctionator
 
 MarketSync works without Auctionator. When Auctionator is detected, MarketSync uses Auctionator scanning by default and hides its duplicate Scanner tab. You can switch back to MarketSync's native scanner under **Settings → Use Auctionator scanning**. Both modes feed MarketSync's saved prices and history; a scan's results are observations, not a guarantee that an auction is still available later.
+
+Numbered Forever backend realms within one playset share guild-sync data; PvP, PvE, RP, and HC stay separate. Other clients retain exact realm matching.
+
+On Classic clients, **Scan Entire List** and **Scan Buy Materials** collect live price/stack groups on the enhanced Search page, with source-page verification before buying.
 
 ## Getting started
 

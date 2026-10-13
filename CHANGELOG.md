@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7-rc1] - 2026-10-13
+
+### Fixed
+- Forever guild discovery and price syncing now recognize numbered backend realms within the same playset, such as `ClassicBetaPvP` and `ClassicBetaPvP2`. Matching applies to advertisements, requests, and incoming transfers, with PvP, PvE, RP, and HC kept separate.
+- Full character and sender identities retain their original realms; other WoW clients continue to require exact realm matches. Existing saved realm partitions are preserved.
+
+### Added
+- The enhanced Classic Search page now supports shopping-list and craft-material searches, collecting all matching live price/stack groups into one table while querying each item and its pages in sequence.
+- Added regression coverage for Forever playset discovery and transfer routing, cross-playset rejection, and multi-item live search purchase verification.
+
+### Changed
+- Classic sidecar actions for Scan Entire List and Scan Buy Materials now open the enhanced Search page. The bulk Scanner page is unchanged.
+- Local deployment now supports the installed `_classic_beta_` client alongside the existing targets.
+
 ## [0.9.6] - 2026-10-11
 
 ### Added

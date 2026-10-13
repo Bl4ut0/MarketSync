@@ -196,4 +196,41 @@ run(`
   LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
   assert(MarketSync.Scanner.PurchaseReady == nil, "changed price must reject purchase")
 `);
-console.log('PASS legacy full, targeted, and neutral scan transport');
+run(`
+  recorded = {}
+  local scanner = MarketSync.Scanner
+  assert(scanner.StartLiveSearch({ {itemID = 100, name = "Test Ore"},
+    {itemID = 200, name = "Test Herb"}, {itemID = 100, name = "Test Ore"} }))
+  assert(queries[#queries].name == "Test Ore" and queries[#queries].exact == true)
+  results = {{id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"}}
+  resultTotal = 51
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(queries[#queries].page == 1)
+  resultTotal = 51
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(scanner.Active and queries[#queries].name == "Test Herb" and queries[#queries].page == 0)
+  assert(#scanner.LiveSearchResults == 1 and scanner.LiveSearchResults[1].auctions == 2)
+  results = {{id = 200, name = "Test Herb", count = 5, buyout = 100, link = "item:200"}}
+  resultTotal = 1
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(not scanner.Active and #scanner.LiveSearchResults == 2)
+  assert(#recorded == 0, "list searches must not write bulk scanner observations")
+  local ore
+  for _, row in ipairs(scanner.LiveSearchResults) do if row.itemID == 100 then ore = row end end
+  assert(ore and ore.query == "Test Ore" and ore.queryExact == true)
+  assert(scanner.PrepareLivePurchase(ore))
+  assert(queries[#queries].name == "Test Ore" and queries[#queries].exact == true,
+    "purchase verification must preserve the source query's exact-match setting")
+  results = {{id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"}}
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(scanner.PurchaseReady and scanner.PurchaseReady.row == ore)
+  assert(scanner.StartLiveSearch({ {name = "Missing Item"}, {name = "Test Herb"} }))
+  results = {}
+  resultTotal = 0
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(scanner.Active and queries[#queries].name == "Test Herb")
+  scanner.Cancel("Stopped by user")
+  LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
+  assert(not scanner.Active)
+`);
+console.log('PASS legacy full, targeted, neutral, and multi-item live search transport');

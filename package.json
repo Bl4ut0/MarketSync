@@ -1,10 +1,10 @@
 {
   "name": "marketsync",
-  "version": "0.9.6",
+  "version": "0.9.7-rc1",
   "description": "MarketSync development and test tooling",
   "private": true,
   "scripts": {
-    "test": "node tests/test_observation_api.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_provider.js && node tests/test_legacy_scanner.js && node tests/test_legacy_ah_tabs.js && node tests/test_legacy_search_ui.js && node tests/test_legacy_sidecar.js && node tests/test_scanner_ui_selection.js && node tests/test_legacy_posting.js && node tests/test_item_context_menu.js"
+    "test": "node tests/test_observation_api.js && node tests/test_forever_playsets.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_provider.js && node tests/test_legacy_scanner.js && node tests/test_legacy_ah_tabs.js && node tests/test_legacy_search_ui.js && node tests/test_legacy_sidecar.js && node tests/test_scanner_ui_selection.js && node tests/test_legacy_posting.js && node tests/test_item_context_menu.js"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

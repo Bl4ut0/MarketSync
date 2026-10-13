@@ -332,7 +332,7 @@ function MarketSync.ProcessDeferredADV()
         local adv = pendingFreshADV
         pendingFreshADV = nil
 
-        if adv.realm == MarketSync.myRealm then
+        if MarketSync.IsSameSyncRealm(adv.realm, MarketSync.myRealm) then
             local cmp = CompareVersions(adv.version or "0.4.0-beta", localVersion)
             if cmp > 0 then
                 if MarketSyncDB and MarketSyncDB.PassiveSync then
@@ -363,7 +363,7 @@ function MarketSync.ProcessDeferredADV()
     if pendingFreshNeutralADV then
         local adv = pendingFreshNeutralADV
         pendingFreshNeutralADV = nil
-        if adv.realm ~= MarketSync.myRealm then return false end
+        if not MarketSync.IsSameSyncRealm(adv.realm, MarketSync.myRealm) then return false end
 
         local cmp = CompareVersions(adv.version or "0.4.0-beta", localVersion)
         if cmp ~= 0 then return false end
@@ -401,7 +401,7 @@ function MarketSync.ProcessDeferredADV()
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
 
     local function tryAdvertisement(scope, adv)
-        if not adv or adv.realm ~= MarketSync.myRealm then return false end
+        if not adv or not MarketSync.IsSameSyncRealm(adv.realm, MarketSync.myRealm) then return false end
         if not MarketSync.IsPeerDataCompatible(adv.version, adv.protocol) then return false end
         if not MarketSync.CanParticipateInData(scope) then return false end
         local rejected = rejectedSessions[scope]
@@ -850,7 +850,7 @@ end
 local function HandleAdvertisementV2(scope, realm, revisionText, countText, addonVersion,
                                       scanTimeText, protocolText, status, senderName, senderIdentity)
     if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-    if realm ~= MarketSync.myRealm then return true end
+    if not MarketSync.IsSameSyncRealm(realm, MarketSync.myRealm) then return true end
 
     local protocol = tonumber(protocolText) or 0
     local compatible, versionCmp = MarketSync.NotePeerSyncVersion(addonVersion, protocol, senderName)
@@ -946,7 +946,7 @@ local function HandleProtocol2Message(msgType, p1, p2, p3, p4, p5, p6, p7, p8,
         local addonVersion = p7
         if prefix ~= PREFIX or channel ~= "GUILD" then return true end
         if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-        if realm ~= MarketSync.myRealm then return true end
+        if not MarketSync.IsSameSyncRealm(realm, MarketSync.myRealm) then return true end
         if not MarketSync.IsPeerDataCompatible(addonVersion, protocol) then
             MarketSync.NotePeerSyncVersion(addonVersion, protocol, senderName)
             return true
@@ -983,7 +983,7 @@ local function HandleProtocol2Message(msgType, p1, p2, p3, p4, p5, p6, p7, p8,
         if scope ~= "M" and scope ~= "N" then return true end
         if not baseRevision or not revision or not scanTime or baseRevision > revision then return true end
         if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-        if realm ~= MarketSync.myRealm then return true end
+        if not MarketSync.IsSameSyncRealm(realm, MarketSync.myRealm) then return true end
         if not MarketSync.IsPeerDataCompatible(addonVersion, protocol) then
             MarketSync.NotePeerSyncVersion(addonVersion, protocol, senderName)
             return true
@@ -1271,7 +1271,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local advScanTime = isDisabled and 0 or (tonumber(rawP5) or 0)
             
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-            if advRealm ~= MarketSync.myRealm then
+            if not MarketSync.IsSameSyncRealm(advRealm, MarketSync.myRealm) then
                 Debug("Ignoring ADV from " .. senderName .. " (realm " .. tostring(advRealm) .. " != " .. MarketSync.myRealm .. ")")
                 return
             end
@@ -1357,7 +1357,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local advScanTime = isDisabled and 0 or (tonumber(rawP5) or 0)
 
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-            if advRealm ~= MarketSync.myRealm then return end
+            if not MarketSync.IsSameSyncRealm(advRealm, MarketSync.myRealm) then return end
 
             local localVersion = MarketSync.GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
             local cmp = CompareVersions(advVersion, localVersion)
@@ -1421,7 +1421,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local pullRealm = p1
             local sinceBucket = tonumber(p2) or 0
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-            if pullRealm ~= MarketSync.myRealm then return end
+            if not MarketSync.IsSameSyncRealm(pullRealm, MarketSync.myRealm) then return end
             if not MarketSyncDB or not MarketSyncDB.PassiveSync then return end
             
             if MarketSync.LogNetworkEvent then
@@ -1438,7 +1438,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local pullRealm = p1
             local sinceDay = tonumber(p2) or 0
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-            if pullRealm ~= MarketSync.myRealm then return end
+            if not MarketSync.IsSameSyncRealm(pullRealm, MarketSync.myRealm) then return end
             if not MarketSyncDB or not MarketSyncDB.PassiveSync then return end
 
             if MarketSync.LogNetworkEvent then
@@ -1455,7 +1455,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local acceptRealm = p1
             local sinceDay = tonumber(p2) or 0
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-            if acceptRealm ~= MarketSync.myRealm then return end
+            if not MarketSync.IsSameSyncRealm(acceptRealm, MarketSync.myRealm) then return end
             
             if MarketSync.RegisterPullAccept then
                 MarketSync.RegisterPullAccept(sinceDay, senderName)
@@ -1465,7 +1465,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local acceptRealm = p1
             local sinceDay = tonumber(p2) or 0
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-            if acceptRealm ~= MarketSync.myRealm then return end
+            if not MarketSync.IsSameSyncRealm(acceptRealm, MarketSync.myRealm) then return end
             if MarketSync.RegisterNeutralPullAccept then
                 MarketSync.RegisterNeutralPullAccept(sinceDay, senderName)
             end
@@ -1473,7 +1473,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         elseif msgType == "REQ" then
             local link = p1
             if not link then return end
-            if senderRealm and MarketSync.myRealm and senderRealm ~= MarketSync.myRealm then return end
+            if senderRealm and MarketSync.myRealm and not MarketSync.IsSameSyncRealm(senderRealm, MarketSync.myRealm) then return end
             local price = MarketSync.GetAuctionPrice(link)
             local age = MarketSync.GetAuctionAge(link)
             if price and age then
@@ -1486,7 +1486,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local legacyDay = tonumber(p2) -- v1 format had day as second semicolon field
             local isNeutralPayload = (msgType == "NBRES")
             if not payloadStr or payloadStr == "" then return end
-            if senderRealm and MarketSync.myRealm and senderRealm ~= MarketSync.myRealm then
+            if senderRealm and MarketSync.myRealm and not MarketSync.IsSameSyncRealm(senderRealm, MarketSync.myRealm) then
                 Debug("Ignoring BRES from cross-realm sender: " .. tostring(sender))
                 return
             end
@@ -1713,7 +1713,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local price = tonumber(p2)
             local day = tonumber(p3)
             local quantity = tonumber(p4) or 0
-            if senderRealm and MarketSync.myRealm and senderRealm ~= MarketSync.myRealm then
+            if senderRealm and MarketSync.myRealm and not MarketSync.IsSameSyncRealm(senderRealm, MarketSync.myRealm) then
                 Debug("Ignoring RES from cross-realm sender: " .. tostring(sender))
                 return
             end

@@ -43,6 +43,7 @@ local function Start(label, mode)
     S.ScanScope = (MarketSync.IsNeutralAHOpen == true
         or (MarketSync.IsNeutralAHSession and MarketSync.IsNeutralAHSession())) and "neutral" or "main"
     legacy.mode, legacy.page, legacy.waiting = mode, 0, false
+    legacy.terms, legacy.termIndex, legacy.exactSearch = nil, nil, false
     legacy.requestID = legacy.requestID + 1
     legacy.data, legacy.keys = {}, {}
     if mode == "search" then
@@ -109,7 +110,8 @@ local function ReadSearchRow(index)
         row = { itemID = itemID, itemSuffix = suffix, link = link, name = name,
             icon = texture, quality = quality, level = level, stackSize = count,
             buyout = buyout, unitPrice = math.ceil(buyout / count),
-            auctions = 1, available = count, page = legacy.page, query = legacy.query }
+            auctions = 1, available = count, page = legacy.page, query = legacy.query,
+            queryExact = legacy.exactSearch }
         legacy.data[identity] = row
         S.LiveSearchResults[#S.LiveSearchResults + 1] = row
     end
@@ -159,7 +161,7 @@ local function Query(name, page, getAll)
         legacy.requestID = legacy.requestID + 1
         local requestID = legacy.requestID
         local ok = pcall(QueryAuctionItems, name or "", nil, nil, page or 0,
-            nil, nil, getAll == true, false, nil)
+            nil, nil, getAll == true, legacy.exactSearch == true, nil)
         if not ok then
             S.Cancel("Auction House query failed")
             return
@@ -322,6 +324,25 @@ function S.StartLiveSearch(query)
         Notify()
         return false
     end
+    local terms
+    if type(query) == "table" then
+        terms = {}
+        local seen = {}
+        for _, item in ipairs(query) do
+            local name = type(item) == "table" and item.name or nil
+            local id = type(item) == "table" and item.itemID or tonumber(item)
+            if not name and id and MarketSync.GetItemInfo then name = MarketSync.GetItemInfo(id) end
+            if not name and id and GetItemInfo then name = GetItemInfo(id) end
+            name = type(name) == "string" and name:match("^%s*(.-)%s*$") or nil
+            if not name or name == "" then
+                S.Status = "Item name unavailable; try again after item data loads"
+                Notify()
+                return false
+            end
+            if not seen[name] then terms[#terms + 1], seen[name] = name, true end
+        end
+        query = terms[1]
+    end
     query = type(query) == "string" and query:match("^%s*(.-)%s*$") or nil
     if not query or query == "" then
         S.Status = "Enter an item name to search"
@@ -329,6 +350,7 @@ function S.StartLiveSearch(query)
         return false
     end
     Start("Searching auctions for " .. query .. "...", "search")
+    legacy.terms, legacy.termIndex, legacy.exactSearch = terms, terms and 1, terms ~= nil
     legacy.query = query
     Query(query, 0, false)
     return true
@@ -355,6 +377,7 @@ function S.PrepareLivePurchase(row)
     if not S.IsAvailable() then return false end
     Start("Checking selected auction...", "purchase")
     legacy.purchaseTarget = row
+    legacy.exactSearch = row.queryExact == true
     legacy.page = row.page
     Query(row.query, row.page, false)
     return true
@@ -438,7 +461,17 @@ frame:SetScript("OnEvent", function(_, event)
             Query(name, legacy.page, false)
             return
         end
-        if legacy.mode == "search" then Finish() return end
+        if legacy.mode == "search" then
+            if legacy.terms and legacy.termIndex < #legacy.terms then
+                legacy.termIndex = legacy.termIndex + 1
+                legacy.query = legacy.terms[legacy.termIndex]
+                legacy.page = 0
+                S.Status = string.format("Searching list (%d / %d): %s", legacy.termIndex, #legacy.terms, legacy.query)
+                Notify()
+                Query(legacy.query, 0, false)
+            else Finish() end
+            return
+        end
         SaveRows(function()
             if legacy.mode == "full" then
                 local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()

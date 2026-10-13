@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("_anniversary_", "_classic_", "_classic_era_", "_classic_era_ptr_", "_retail_")]
+    [ValidateSet("_anniversary_", "_classic_", "_classic_beta_", "_classic_era_", "_classic_era_ptr_", "_retail_")]
     [string]$Product = "_anniversary_",
 
     [string]$WowRoot = "C:\Program Files (x86)\World of Warcraft"

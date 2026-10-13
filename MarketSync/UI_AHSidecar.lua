@@ -626,6 +626,8 @@ function MarketSync.CreateAHSidecar(parent)
         table.sort(ids)
         if #ids == 0 then
             print("|cffffaa00[MarketSync]|r No Auction House materials marked Buy in this Craft list.")
+        elseif legacyAH and MarketSync.OpenLegacySearch then
+            MarketSync.OpenLegacySearch(ids)
         elseif MarketSync.Scanner and MarketSync.Scanner.StartScan then
             MarketSync.Scanner.StartScan(ids, "Craft list: " .. currentCraftList)
         end
@@ -1016,7 +1018,11 @@ function MarketSync.CreateAHSidecar(parent)
                     print(string.format("|cFFFF4444[MarketSync]|r List '%s' has no items to scan. Drag an item or type its name to add items.", currentListName))
                     return
                 end
-                MarketSync.Scanner.ScanList(currentListName)
+                if legacyAH and MarketSync.OpenLegacySearch then
+                    MarketSync.OpenLegacySearch(items)
+                else
+                    MarketSync.Scanner.ScanList(currentListName)
+                end
             end
         end
     end)
