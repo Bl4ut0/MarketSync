@@ -1568,6 +1568,9 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(mainFrame.tabs[5]:GetText() == "Processing", "Tab 5 must be Processing")
     assert(mainFrame.tabs[6]:GetText() == "Alerts", "Tab 6 must be Alerts")
     assert(mainFrame.tabs[7]:GetText() == "Debugging", "Tab 7 must be Debugging")
+    for i = 1, 7 do
+      assert(mainFrame.tabs[i].tabIcon == nil, "MainFrame tabs must not have icon overlays")
+    end
 
     -- Test SelectMainFrameTab
     assert(type(MarketSync.SelectMainFrameTab) == "function", "SelectMainFrameTab should be exposed")
@@ -2511,6 +2514,172 @@ test('Alerts scope and Craft popout controls are wired without old presets', () 
     'Auction House collapsed breakout should use the same compact edge tab');
   assert(crafting.match(/OpenCraftListForRecipe\(recipe\)/g)?.length === 2,
     'Classic and modern profession overlays must both expose Craft Lists');
+});
+
+test('RefreshActiveTooltip safely handles anonymous buttons, character slots, and bag slots', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const mockEnv = `
+    MarketSync = MarketSync or {}
+    hyperlinkCalled = nil
+    bagItemCalled = nil
+    invItemCalled = nil
+    refreshDataCalled = nil
+
+    -- Anonymous button reproducing Blizzard_ProfessionsRecipeSchematicForm button (GetName returns nil)
+    local anonButton = {
+      buttonContext = "ButtonContext_ProfessionsRecipeButton",
+      marketSyncRecipeJump = true,
+      GetID = function(self) return 0 end,
+      GetName = function(self) return nil end,
+    }
+
+    GameTooltip = {
+      IsShown = function(self) return true end,
+      GetItem = function(self) return "Linen Bag", "|cnIQ1:|Hitem:4238::::::::6:1487:::1:3524::::::|h[Linen Bag]|h|r" end,
+      GetOwner = function(self) return anonButton end,
+      SetHyperlink = function(self, link) hyperlinkCalled = link end,
+      SetBagItem = function(self, b, s) bagItemCalled = { bag = b, slot = s } end,
+      SetInventoryItem = function(self, unit, slot) invItemCalled = { unit = unit, slot = slot } end,
+    }
+    ItemRefTooltip = {
+      IsShown = function(self) return false end,
+    }
+  `;
+  lauxlib.luaL_dostring(L, to_luastring(mockEnv));
+
+  const configLua = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configLua)) !== lua.LUA_OK) {
+    throw new Error('Failed to load Config.lua: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 1. Test anonymous button owner: should not crash with nil index and should call SetHyperlink
+  const testAnon = `
+    hyperlinkCalled = nil
+    MarketSync.RefreshActiveTooltip()
+    assert(hyperlinkCalled ~= nil, "SetHyperlink must be called for anonymous button owner")
+    assert(GameTooltip.MarketSyncOwnershipItem == nil, "Ownership cache cleared")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testAnon)) !== lua.LUA_OK) {
+    throw new Error('Anonymous button test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 2. Test retail RefreshData support
+  const testRefreshData = `
+    local refreshed = false
+    GameTooltip.supportsDataRefresh = true
+    GameTooltip.RefreshData = function(self) refreshed = true end
+    MarketSync.RefreshActiveTooltip()
+    assert(refreshed == true, "RefreshData must be invoked when supported")
+    GameTooltip.supportsDataRefresh = nil
+    GameTooltip.RefreshData = nil
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testRefreshData)) !== lua.LUA_OK) {
+    throw new Error('RefreshData test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 3. Test character slot button owner
+  const testCharSlot = `
+    local charButton = {
+      GetName = function(self) return "CharacterChestSlot" end,
+      GetID = function(self) return 5 end,
+    }
+    GameTooltip.GetOwner = function(self) return charButton end
+    invItemCalled = nil
+    MarketSync.RefreshActiveTooltip()
+    assert(invItemCalled and invItemCalled.unit == "player" and invItemCalled.slot == 5, "SetInventoryItem must be called for character slot")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testCharSlot)) !== lua.LUA_OK) {
+    throw new Error('Character slot test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 4. Test bag item button owner
+  const testBagSlot = `
+    local bagButton = {
+      GetBagID = function(self) return 2 end,
+      GetID = function(self) return 8 end,
+    }
+    GameTooltip.GetOwner = function(self) return bagButton end
+    bagItemCalled = nil
+    MarketSync.RefreshActiveTooltip()
+    assert(bagItemCalled and bagItemCalled.bag == 2 and bagItemCalled.slot == 8, "SetBagItem must be called for bag button")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testBagSlot)) !== lua.LUA_OK) {
+    throw new Error('Bag slot test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+});
+
+test('Secret string and restricted value protection in tainted contexts', () => {
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+
+  const initCode = `
+    MarketSync = {}
+    UnitName = function(unit) return "Tester" end
+    UnitFullName = function(unit) return "Tester", "Realm" end
+    IsInGuild = function() return true end
+    ERR_TRADE_COMPLETE = "Trade complete."
+    ERR_AUCTION_BID_PLACED = "Bid accepted."
+    time = function() return 1000 end
+    GetTime = function() return 1000 end
+    pcall = pcall
+    type = type
+    tostring = tostring
+    string = string
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(initCode)) !== lua.LUA_OK) {
+    throw new Error('Init failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // Load Config.lua
+  const configCode = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  if (lauxlib.luaL_dostring(L, to_luastring(configCode)) !== lua.LUA_OK) {
+    throw new Error('Config.lua load failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 1. Verify IsSecretValue and IsSafeString on standard values
+  const testBasics = `
+    assert(MarketSync.IsSecretValue(nil) == false, "nil is not secret")
+    assert(MarketSync.IsSecretValue(123) == false, "number is not secret")
+    assert(MarketSync.IsSecretValue("hello") == false, "string is not secret")
+    assert(MarketSync.IsSafeString("hello") == true, "regular string is safe")
+    assert(MarketSync.IsSafeString(nil) == false, "nil is not safe string")
+    assert(MarketSync.IsSafeString(123) == false, "number is not safe string")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testBasics)) !== lua.LUA_OK) {
+    throw new Error('Basics failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 2. Test with Blizzard issecretvalue API simulated
+  const testSecretApi = `
+    local secretObj = "secret_payload"
+    issecretvalue = function(v) return v == secretObj end
+
+    assert(MarketSync.IsSecretValue(secretObj) == true, "issecretvalue detected secret")
+    assert(MarketSync.IsSafeString(secretObj) == false, "secret string is not safe")
+    assert(MarketSync.IsSecretValue("normal") == false, "normal string is not secret")
+    assert(MarketSync.IsSafeString("normal") == true, "normal string is safe")
+
+    issecretvalue = nil
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testSecretApi)) !== lua.LUA_OK) {
+    throw new Error('Secret API test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 3. Test with secret string throwing on indexing or comparison (fallback mechanism)
+  const testSecretThrowing = `
+    local secretTainted = setmetatable({}, {
+      __index = function(t, k) error("attempt to index local (a secret string value, while execution tainted by 'MarketSync')") end,
+      __eq = function(a, b) error("attempt to compare local (a secret string value, while execution tainted by 'MarketSync')") end,
+      __tostring = function(t) error("attempt to use secret value in non-secret context") end,
+    })
+
+    assert(MarketSync.IsSafeString(secretTainted) == false, "tainted secret table/userdata is not safe string")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testSecretThrowing)) !== lua.LUA_OK) {
+    throw new Error('Secret throwing test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
 });
 
 test('AST syntax check on all MarketSync Lua files', () => {

@@ -48,6 +48,7 @@ local function Start(label, mode)
     legacy.data, legacy.keys = {}, {}
     if mode == "search" then
         S.LiveSearchResults = {}
+        S.LiveSearchProgress = { completed = 0, total = 1, state = "scanning" }
         S.LiveSearchRevision = (S.LiveSearchRevision or 0) + 1
     end
     if mode ~= "search" and mode ~= "purchase" and MarketSync.ObservationAPI and MarketSync.ObservationAPI.v1
@@ -62,6 +63,8 @@ local function Finish()
     local mode = legacy.mode
     local scope = S.ScanScope
     if mode == "search" then
+        if S.LiveSearchProgress then S.LiveSearchProgress.state = "complete" end
+        S.LiveSearchAt = GetTime()
         table.sort(S.LiveSearchResults, function(a, b)
             if a.unitPrice ~= b.unitPrice then return a.unitPrice < b.unitPrice end
             if a.itemID ~= b.itemID then return a.itemID < b.itemID end
@@ -94,11 +97,12 @@ end
 
 local function ReadSearchRow(index)
     local name, texture, count, quality, _, level, _, _, _, buyout,
-        _, _, _, _, _, _, itemID = GetAuctionItemInfo("list", index)
+        bidAmount, _, _, owner, _, _, itemID = GetAuctionItemInfo("list", index)
     local link = GetAuctionItemLink and GetAuctionItemLink("list", index) or nil
     itemID = tonumber(itemID) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
     count, buyout = tonumber(count), tonumber(buyout)
     if not itemID or not count or count < 1 or not buyout or buyout < 1 then return end
+    if (UnitName and owner==UnitName("player")) or tonumber(bidAmount)==buyout then return end
     local suffix = Suffix(link)
     -- Group only identical variants, stack sizes and exact buyout amounts.
     local identity = table.concat({itemID, suffix, count, buyout}, ":")
@@ -118,6 +122,9 @@ local function ReadSearchRow(index)
 end
 
 function S.Cancel(reason)
+    if legacy.mode == "search" and S.LiveSearchProgress then
+        S.LiveSearchProgress.state = "stopped"
+    end
     if legacy.mode == "full" and S.ScanScope == "neutral" and MarketSync.FailNeutralFullScan then
         MarketSync.FailNeutralFullScan()
     end
@@ -352,6 +359,9 @@ function S.StartLiveSearch(query)
     Start("Searching auctions for " .. query .. "...", "search")
     legacy.terms, legacy.termIndex, legacy.exactSearch = terms, terms and 1, terms ~= nil
     legacy.query = query
+    S.LiveSearchProgress.total = terms and #terms or 1
+    S.LiveSearchProgress.query = query
+    Notify()
     Query(query, 0, false)
     return true
 end
@@ -372,6 +382,7 @@ end
 -- enabling purchase; the final click checks the live row again.
 function S.PrepareLivePurchase(row)
     if type(row) ~= "table" or not row.query or row.page == nil then return false end
+    if MarketSync.PurchaseList and MarketSync.PurchaseList.state=="awaiting" then return false end
     if S.IsDisabledByAuctionator and S.IsDisabledByAuctionator() then return false end
     if S.Active then S.Cancel("replaced by purchase check") end
     if not S.IsAvailable() then return false end
@@ -384,6 +395,8 @@ function S.PrepareLivePurchase(row)
 end
 
 function S.BuyPreparedLivePurchase(row)
+    if MarketSync.PurchaseList and MarketSync.PurchaseList.state=="awaiting"
+        and MarketSync.PurchaseList.pending~=row then return false end
     local ready = S.PurchaseReady
     if not ready or ready.row ~= row or S.Active or not S.IsAvailable() then return false end
     if type(PlaceAuctionBid) ~= "function" or not MatchesPurchase(row, ready.index) then
@@ -394,6 +407,9 @@ function S.BuyPreparedLivePurchase(row)
     end
     if type(GetMoney) == "function" and GetMoney() < row.buyout then return false end
     S.PurchaseReady = nil
+    if MarketSync.CraftLedger then
+        MarketSync.CraftLedger.ExpectPurchase(row.itemID, row.stackSize or 1, row.buyout)
+    end
     PlaceAuctionBid("list", ready.index, row.buyout)
     S.Status = "Purchase submitted; confirm delivery in your mailbox."
     Notify()
@@ -462,9 +478,11 @@ frame:SetScript("OnEvent", function(_, event)
             return
         end
         if legacy.mode == "search" then
+            S.LiveSearchProgress.completed = legacy.termIndex or 1
             if legacy.terms and legacy.termIndex < #legacy.terms then
                 legacy.termIndex = legacy.termIndex + 1
                 legacy.query = legacy.terms[legacy.termIndex]
+                S.LiveSearchProgress.query = legacy.query
                 legacy.page = 0
                 S.Status = string.format("Searching list (%d / %d): %s", legacy.termIndex, #legacy.terms, legacy.query)
                 Notify()

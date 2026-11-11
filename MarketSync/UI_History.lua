@@ -822,6 +822,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     tabHistBtn:SetScript("OnClick", function() panel:ShowHistoryTab() end)
     tabSalesBtn:SetScript("OnClick", function() panel:ShowSalesTab() end)
 
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end
 

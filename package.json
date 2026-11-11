@@ -1,10 +1,10 @@
 {
   "name": "marketsync",
-  "version": "0.9.7-rc3",
+  "version": "0.9.7-rc4-local21",
   "description": "MarketSync development and test tooling",
   "private": true,
   "scripts": {
-    "test": "node tests/test_observation_api.js && node tests/test_forever_playsets.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_provider.js && node tests/test_legacy_scanner.js && node tests/test_legacy_ah_tabs.js && node tests/test_legacy_search_ui.js && node tests/test_legacy_sidecar.js && node tests/test_scanner_ui_selection.js && node tests/test_legacy_posting.js && node tests/test_item_context_menu.js && node tests/test_sync_network_load.js"
+    "test": "node tests/test_observation_api.js && node tests/test_forever_playsets.js && node tests/test_ah_features.js && node tests/test_professions.js && node tests/test_craft_ledger.js && node tests/test_craft_manager_layout.js && node tests/test_purchase_list.js && node tests/test_item_ledger_ui.js && node tests/test_provider.js && node tests/test_legacy_scanner.js && node tests/test_legacy_ah_tabs.js && node tests/test_legacy_search_ui.js && node tests/test_legacy_sidecar.js && node tests/test_scanner_ui_selection.js && node tests/test_legacy_posting.js && node tests/test_item_context_menu.js && node tests/test_sync_network_load.js && node tests/test_window_theme.js && node tests/test_wow_ui_sim_integration.js"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

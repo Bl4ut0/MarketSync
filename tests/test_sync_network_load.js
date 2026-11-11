@@ -88,6 +88,26 @@ test('Swarm monitor refresh does not invent a duplicate local-name peer', () => 
     MarketSync.UpdateSwarmUI("John", "Receiving")
     table.remove(scheduled, 1)()
     assert(clears == 0, "unchanged status must not rebuild the display")
+    -- Verify Forever surname / hyphen / first-name aliases coalesce into one entry and clear transient states
+    MarketSync.GetLocalPlayerDisplayName = function() return "Blauto Theblind" end
+    MarketSync.IsLocalSyncIdentity = function(name)
+      return name == "Blauto" or name == "Blauto-Theblind" or name == "Blauto Theblind"
+    end
+    MarketSync.SwarmPeers = {}
+    MarketSync.UpdateSwarmUI("Blauto Theblind", "Electing Sync Source")
+    MarketSync.UpdateSwarmUI("Blauto-Theblind", "Awaiting Data")
+    MarketSync.UpdateSwarmUI("Blauto", nil)
+    local count = 0
+    local foundStatus = nil
+    for k, v in pairs(MarketSync.SwarmPeers) do
+      count = count + 1
+      foundStatus = v.status
+    end
+    assert(count == 1, "expected all 3 local name variants (Blauto, Blauto-Theblind, Blauto Theblind) to coalesce into 1 entry, got " .. tostring(count))
+    assert(foundStatus == "Idle", "expected status to update to Idle when cleared via short name, got " .. tostring(foundStatus))
+    MarketSync.UpdateSwarmUI("OtherPeer", "Electing Sync Source")
+    MarketSync.ClearTransientSwarmStates()
+    assert(MarketSync.SwarmPeers["OtherPeer"].status == "Idle", "ClearTransientSwarmStates must reset stuck Electing Sync Source")
     for i = 1, 60 do QueueMonitorLog(earlyNetworkLogs, tostring(i)) end
     assert(#scheduled == 1, "log updates should coalesce")
     table.remove(scheduled, 1)()

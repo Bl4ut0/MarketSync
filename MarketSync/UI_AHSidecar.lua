@@ -287,6 +287,7 @@ function MarketSync.CreateAHSidecar(parent)
 
     -- 2. Breakout Sidecar Frame -- aligned neatly with AH frame inset
     local frame = CreateFrame("Frame", "MarketSyncAHSidecarFrame", ahFrame, "BackdropTemplate")
+    if MarketSync.Theme then MarketSync.Theme.Register(frame) end
     frame:SetWidth(SIDECAR_WIDTH)
     frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -28)
     frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", -2, 28)
@@ -362,8 +363,15 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
+    tabLists.icon = tabLists:CreateTexture(nil, "ARTWORK")
+    if tabLists.icon then
+        if tabLists.icon.SetSize then tabLists.icon:SetSize(12, 12) end
+        if tabLists.icon.SetPoint then tabLists.icon:SetPoint("LEFT", 10, 0) end
+        if tabLists.icon.SetTexture then tabLists.icon:SetTexture("Interface\\Icons\\INV_Misc_Note_01") end
+        if tabLists.icon.SetTexCoord then tabLists.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    end
     tabLists.label = tabLists:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tabLists.label:SetPoint("CENTER")
+    tabLists.label:SetPoint("CENTER", 6, 0)
     tabLists.label:SetText("Shopping")
 
     local tabCraft = CreateFrame("Button", nil, frame, "BackdropTemplate")
@@ -375,8 +383,15 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
+    tabCraft.icon = tabCraft:CreateTexture(nil, "ARTWORK")
+    if tabCraft.icon then
+        if tabCraft.icon.SetSize then tabCraft.icon:SetSize(12, 12) end
+        if tabCraft.icon.SetPoint then tabCraft.icon:SetPoint("LEFT", 14, 0) end
+        if tabCraft.icon.SetTexture then tabCraft.icon:SetTexture("Interface\\Icons\\Trade_BlackSmithing") end
+        if tabCraft.icon.SetTexCoord then tabCraft.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    end
     tabCraft.label = tabCraft:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tabCraft.label:SetPoint("CENTER")
+    tabCraft.label:SetPoint("CENTER", 6, 0)
     tabCraft.label:SetText("Craft")
 
     local tabBags = CreateFrame("Button", nil, frame, "BackdropTemplate")
@@ -388,8 +403,15 @@ function MarketSync.CreateAHSidecar(parent)
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
+    tabBags.icon = tabBags:CreateTexture(nil, "ARTWORK")
+    if tabBags.icon then
+        if tabBags.icon.SetSize then tabBags.icon:SetSize(12, 12) end
+        if tabBags.icon.SetPoint then tabBags.icon:SetPoint("LEFT", 16, 0) end
+        if tabBags.icon.SetTexture then tabBags.icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_08") end
+        if tabBags.icon.SetTexCoord then tabBags.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    end
     tabBags.label = tabBags:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    tabBags.label:SetPoint("CENTER")
+    tabBags.label:SetPoint("CENTER", 6, 0)
     tabBags.label:SetText("Bags")
 
     if MarketSync.SetAccessibility then
@@ -699,6 +721,45 @@ function MarketSync.CreateAHSidecar(parent)
         return rows
     end
     function Sidecar.UpdateCraftView()
+        if MarketSync.CraftLedger then
+            craftLabel:SetText("Pending crafts")
+            craftDropdown:Hide(); craftNew:Hide(); craftDelete:Hide(); craftAdd:Hide()
+            craftSearch:SetText("Materials & Crafting...")
+            craftSearch:SetSize(290, 23)
+            craftSearch:SetScript("OnClick", function() MarketSync.OpenCraftingTree() end)
+            craftExport:Hide()
+            craftHint:SetText("Select a craft to manage materials and recorded costs.")
+            craftInset:ClearAllPoints()
+            craftInset:SetPoint("TOPLEFT", craftContainer, "TOPLEFT", 2, -100)
+            craftInset:SetPoint("BOTTOMRIGHT", craftContainer, "BOTTOMRIGHT", 0, 0)
+            for _, row in ipairs(craftRows) do row:Hide() end
+            Sidecar.ledgerRows = Sidecar.ledgerRows or {}
+            for _, row in ipairs(Sidecar.ledgerRows) do row:Hide() end
+            local index = 0
+            local function AddLine(text, click)
+                index = index + 1
+                local row = Sidecar.ledgerRows[index]
+                if not row then
+                    row = CreateFrame("Button", nil, craftRowsFrame)
+                    row:SetSize(270, 28)
+                    row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                    row.label:SetPoint("LEFT", 4, 0); row.label:SetWidth(260); row.label:SetJustifyH("LEFT")
+                    Sidecar.ledgerRows[index] = row
+                end
+                row:SetPoint("TOPLEFT", 0, -(index-1)*28); row.label:SetText(text)
+                row:SetScript("OnClick", click); row:Show()
+            end
+            for _, job in ipairs(MarketSync.CraftLedger.List()) do
+                local remaining, count = MarketSync.CraftLedger.Remaining(job), 0
+                for _ in pairs(remaining) do count = count + 1 end
+                local function Open() MarketSync.OpenCraftingTree(job.recipe, nil, { ledgerID = job.id }) end
+                AddLine("|cffffd700" .. job.name .. " x" .. job.quantity .. "|r · " .. (count > 0 and count .. " to buy" or job.status), Open)
+                for id, buy in pairs(remaining) do AddLine("  " .. CraftItemName(id) .. " x" .. buy.qty, Open) end
+            end
+            if index == 0 then AddLine("No pending crafts. Open Materials & Crafting.") end
+            craftRowsFrame:SetHeight(math.max(1,index*28))
+            return
+        end
         RefreshCraftDropdown()
         local list = GetCraftList()
         local entries = BuildCraftRows(list)
@@ -823,6 +884,13 @@ function MarketSync.CreateAHSidecar(parent)
         craftRowsFrame:SetHeight(math.max(1, #entries * 24))
     end
     function Sidecar.AddCraftRecipe(itemOrLink, listName, options)
+        if MarketSync.CraftLedger then
+            local recipe = type(itemOrLink) == "table" and itemOrLink
+                or MarketSync.GetRecipeForOutput(tonumber(itemOrLink) or (type(itemOrLink)=="string" and tonumber(itemOrLink:match("item:(%d+)"))))
+            if not recipe then return false, "No known recipe. Open its profession first." end
+            MarketSync.OpenCraftingTree(recipe)
+            return true
+        end
         local suppliedRecipe = type(itemOrLink) == "table" and itemOrLink.mats and itemOrLink or nil
         local id = suppliedRecipe and tonumber(suppliedRecipe.outputItemID)
             or tonumber(itemOrLink) or (type(itemOrLink) == "string"
@@ -895,6 +963,7 @@ function MarketSync.CreateAHSidecar(parent)
     -- 1. SHOPPING LISTS VIEW
     -- ================================================================
     local currentListName = "Favorites"
+    function Sidecar.GetSelectedShoppingListName() return currentListName end
 
     local listControlBar = CreateFrame("Frame", nil, listsContainer)
     listControlBar:SetPoint("TOPLEFT", 0, 0)
@@ -910,6 +979,11 @@ function MarketSync.CreateAHSidecar(parent)
     dropdownBtn:SetSize(160, 22)
     dropdownBtn:SetPoint("TOPLEFT", 4, -18)
     dropdownBtn:SetText(currentListName .. "  |cFFFFD100v|r")
+    function Sidecar.SelectShoppingList(name)
+        currentListName = name
+        dropdownBtn:SetText(name .. "  |cFFFFD100v|r")
+        if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
+    end
 
     local hiddenDropdown = CreateFrame("Frame", "MarketSyncSidecarListHiddenDropdown", listControlBar, "UIDropDownMenuTemplate")
     hiddenDropdown:Hide()
@@ -984,6 +1058,12 @@ function MarketSync.CreateAHSidecar(parent)
     delListBtn:SetPoint("LEFT", newListBtn, "RIGHT", 4, 0)
     delListBtn:SetText("Delete")
     delListBtn:SetScript("OnClick", function()
+        local job = MarketSync.CraftLedger and MarketSync.CraftLedger.FindShoppingList(currentListName)
+        if job then
+            MarketSync.OpenCraftingTree(job.recipe, nil, { ledgerID = job.id })
+            print("|cffffcc00[MarketSync]|r This shopping list belongs to a tracked craft. Update or remove the craft to change it.")
+            return
+        end
         if currentListName == "Favorites" then
             print("|cFFFF4444[MarketSync]|r Cannot delete the default Favorites list.")
             return
@@ -1226,11 +1306,18 @@ function MarketSync.CreateAHSidecar(parent)
                 end)
 
                 row.delBtn:SetScript("OnClick", function()
+                    local job = MarketSync.CraftLedger and MarketSync.CraftLedger.FindShoppingList(currentListName)
+                    if job and MarketSync.PromptCraftPurchase then
+                        MarketSync.PromptCraftPurchase(job.id, item.itemID)
+                        return
+                    end
                     if MarketSync.Favorites then
                         MarketSync.Favorites.RemoveFromList(currentListName, item.itemID)
                         UpdateListsView()
                     end
                 end)
+                local tracked = MarketSync.CraftLedger and MarketSync.CraftLedger.FindShoppingList(currentListName)
+                row.delBtn.text:SetText(tracked and "|cff00ff00+|r" or "|cffff4444x|r")
 
                 if MarketSync.SetAccessibility then
                     MarketSync.SetAccessibility(row, {

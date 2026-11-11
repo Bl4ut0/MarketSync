@@ -2672,5 +2672,6 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.displayRows = {}
     UpdateResultRows()
 
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end

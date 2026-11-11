@@ -200,6 +200,7 @@ local function GetLocalPriceCheckIdentity()
 end
 
 local function NormalizePriceCheckSender(sender)
+    if MarketSync.IsSafeString and not MarketSync.IsSafeString(sender) then return nil end
     local raw = tostring(sender or "")
     if raw == "" then return nil end
     return string.lower(raw)
@@ -212,6 +213,7 @@ local function BuildPriceCheckQueryKey(senderKey, itemID)
 end
 
 local function ExtractPriceCheckItemID(queryKey)
+    if MarketSync.IsSafeString and not MarketSync.IsSafeString(queryKey) then return nil end
     local raw = tostring(queryKey or "")
     if raw == "" then return nil end
     return tonumber(raw:match(":(%d+)$")) or tonumber(raw)
@@ -1192,6 +1194,13 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_ADDON" then
         local prefix, msg, channel, sender = ...
         
+        -- Guard against secret/restricted values in tainted contexts (WoW 11.0+ / 12.0+)
+        if MarketSync.IsSafeString then
+            if not MarketSync.IsSafeString(prefix) or not MarketSync.IsSafeString(msg) or not MarketSync.IsSafeString(sender) then
+                return
+            end
+        end
+        
         -- Build a lookup table for data prefixes (fast check)
         local isDataPrefix = false
         for _, dp in ipairs(MarketSync.DATA_PREFIXES or {}) do
@@ -1204,6 +1213,14 @@ frame:SetScript("OnEvent", function(self, event, ...)
         -- Keep the full sender identity for self detection. A short-name match
         -- alone can incorrectly discard another guild member on a different realm.
         local senderName = sender and sender:match("^([^%-]+)") or sender
+        local senderRealm = sender and sender:match("%-(.+)$")
+        if MarketSync.StripKnownRealmSuffix then
+            local cleanName, cleanRealm = MarketSync.StripKnownRealmSuffix(sender)
+            if cleanName then
+                senderName = cleanName
+                if cleanRealm then senderRealm = cleanRealm end
+            end
+        end
         if MarketSync.IsLocalSyncIdentity then
             if MarketSync.IsLocalSyncIdentity(sender) then return end
         elseif senderName == UnitName("player") and not (sender and sender:find("-", 1, true)) then
@@ -1828,7 +1845,20 @@ frame:SetScript("OnEvent", function(self, event, ...)
     -- ========================================
     -- CHAT QUERIES ("? [Item Link]")
     -- ========================================
+    -- Respect the user's setting to disable auto-replies before touching parameters
+    if MarketSyncDB and not MarketSyncDB.EnableChatPriceCheck then return end
+
     local msg, sender, _, _, _, _, _, channelID = ...
+
+    -- Guard against secret/restricted values in tainted contexts (WoW 11.0+ / 12.0+)
+    if MarketSync.IsSafeString then
+        if not MarketSync.IsSafeString(msg) or not MarketSync.IsSafeString(sender) then
+            return
+        end
+    end
+    if type(msg) ~= "string" or type(sender) ~= "string" or msg == "" or sender == "" then
+        return
+    end
 
     -- Strip sender name for comparison (sender may include realm suffix)
     local querySender = sender and sender:match("^([^%-]+)") or sender

@@ -33,6 +33,10 @@ run(`
     function frame:SetMaxLetters() end
     function frame:ClearFocus() end
     function frame:SetTexture() end
+    function frame:SetStatusBarTexture() end
+    function frame:SetStatusBarColor() end
+    function frame:SetMinMaxValues(low, high) self.minimum, self.maximum = low, high end
+    function frame:SetValue(value) self.value = value end
     function frame:SetScrollChild() end
     function frame:GetVerticalScroll() return 0 end
     function frame:EnableMouse() end
@@ -59,7 +63,13 @@ run(`
       IsAvailable = function() return true end,
       IsDisabledByAuctionator = function() return false end,
       PrepareLivePurchase = function(row)
+        if MarketSync.Scanner.Active then MarketSync.Scanner.Cancel("replaced by purchase check") end
         MarketSync.Scanner.PurchaseReady = { row = row }
+      end,
+      Cancel = function(reason)
+        MarketSync.Scanner.Active = false
+        MarketSync.Scanner.LiveSearchProgress.state = "stopped"
+        MarketSync.Scanner.Status = reason
       end,
       StartLiveSearch = function(query) MarketSync.Scanner.lastQuery = query end,
     },
@@ -86,9 +96,42 @@ run(`
   panel:Refresh()
   assert(not panel.EmptyTitle:IsShown(), "The empty state should hide when results exist")
   assert(panel.ResultRows[1]:IsShown())
-  assert(panel.ResultRows[1].name:GetText() == "Test Ore")
+  assert(panel.ResultRows[1].name:GetText() == "[+] Test Ore")
+  assert(not panel.ResultRows[2]:IsShown(), "Items start collapsed")
   panel.ResultRows[1].scripts.OnClick(panel.ResultRows[1])
+  assert(panel.ResultRows[2].data == result, "Expanding reveals exact stack rows")
   assert(panel.BuyButton.enabled == true, "Buying should enable after exact-stack validation")
+  local cheaper = { name = "Test Ore", itemID = 100, unitPrice = 50,
+    stackSize = 5, auctions = 2, available = 10, buyout = 250 }
+  MarketSync.Scanner.LiveSearchResults = { result, cheaper }
+  panel:Refresh()
+  assert(panel.ResultRows[1].price:GetText() == "50c", "Header shows minimum unit price")
+  assert(panel.ResultRows[1].available:GetText() == "16", "Header sums availability")
+  panel.ResultRows[1].scripts.OnClick(panel.ResultRows[1])
+  assert(not panel.ResultRows[2]:IsShown(), "Group collapses again")
+  assert(MarketSync.Scanner.PurchaseReady.row == cheaper, "Group selects cheapest actual stack")
+
+  MarketSync.Scanner.Active = true
+  MarketSync.Scanner.LiveSearchProgress = { completed = 1, total = 3, query = "Test Herb", state = "scanning" }
+  panel:Refresh()
+  assert(panel.ScanProgressBar.value == 1 and panel.ScanProgressBar.maximum == 3)
+  assert(panel.ScanProgressText:GetText() == "Scanning - 1 / 3 searched")
+  assert(panel.StopScanButton.enabled)
+  panel.ResultRows[1].scripts.OnClick(panel.ResultRows[1])
+  assert(panel.ScanProgressText:GetText() == "Scan stopped - 1 / 3 searched",
+    "Result interactions must retain the stopped scan progress during purchase checks")
+  assert(not panel.StopScanButton.enabled and #MarketSync.Scanner.LiveSearchResults == 2)
+  MarketSync.Scanner.Active = true
+  MarketSync.Scanner.LiveSearchProgress.state = "scanning"
+  panel:Refresh()
+  panel.StopScanButton.scripts.OnClick()
+  assert(not MarketSync.Scanner.Active and panel.ScanProgressBar.value == 1)
+  assert(panel.ScanProgressText:GetText() == "Scan stopped - 1 / 3 searched")
+  MarketSync.Scanner.LiveSearchProgress.completed = 3
+  MarketSync.Scanner.LiveSearchProgress.state = "complete"
+  panel:Refresh()
+  assert(panel.ScanProgressBar.value == 3 and not panel.StopScanButton.enabled)
+  assert(panel.ScanProgressText:GetText() == "Scan complete - 3 / 3 searched")
 
   panel.SearchField:SetText("Other Ore")
   panel.SearchButton.scripts.OnClick()

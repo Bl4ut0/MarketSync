@@ -3079,11 +3079,14 @@ local function OnTooltipSetItem(tooltip, data)
                     tooltip:AddDoubleLine(string.format("|cffffd700Stack (%d):|r", stackCount), stackStr)
                 end
                 
-                tooltip:AddDoubleLine("|cff888888Scanned:|r", string.format("|cffaaaaaa%s (%s)|r", ageStr, sourceStr))
-                
-                if priceInfo.neutralPrice and priceInfo.neutralPrice > 0 and priceInfo.neutralPrice ~= priceInfo.price then
-                    local nPriceStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(priceInfo.neutralPrice) or MarketSync.FormatMoney(priceInfo.neutralPrice)
-                    tooltip:AddDoubleLine("|cff00ccffNeutral AH:|r", nPriceStr)
+                local isShift = MarketSync.IsDetailsKeyDown and MarketSync.IsDetailsKeyDown()
+                if isShift then
+                    tooltip:AddDoubleLine("|cff888888Scanned:|r", string.format("|cffaaaaaa%s (%s)|r", ageStr, sourceStr))
+                    
+                    if priceInfo.neutralPrice and priceInfo.neutralPrice > 0 and priceInfo.neutralPrice ~= priceInfo.price then
+                        local nPriceStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(priceInfo.neutralPrice) or MarketSync.FormatMoney(priceInfo.neutralPrice)
+                        tooltip:AddDoubleLine("|cff00ccffNeutral AH:|r", nPriceStr)
+                    end
                 end
             end
         end
@@ -3096,26 +3099,38 @@ local function OnTooltipSetItem(tooltip, data)
             local profitData = MarketSync.CalculateRecipeProfit and MarketSync.CalculateRecipeProfit(craftRecipe)
             if profitData and profitData.costData then
                 local cost = profitData.costData
-                tooltip:AddLine(" ")
-                local yieldStr = (cost.outputQty and cost.outputQty > 1) and string.format(" (x%d)", cost.outputQty) or ""
-                tooltip:AddLine("|cffffd700MarketSync Crafting" .. yieldStr .. "|r")
-
-                local costStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(cost.effectiveCost) or MarketSync.FormatMoney(cost.effectiveCost)
-                if cost.savings and cost.savings > 0 then
-                    local saveStr = MarketSync.FormatMoney(cost.savings)
-                    tooltip:AddDoubleLine("Ground-Up Cost:", string.format("%s |cff00ff00(Save %s)|r", costStr, saveStr))
-                    local dirStr = MarketSync.FormatMoney(cost.directCraftCost)
-                    tooltip:AddDoubleLine("|cff888888Direct AH Mats:|r", "|cffaaaaaa" .. dirStr .. "|r")
+                local isShift = MarketSync.IsDetailsKeyDown and MarketSync.IsDetailsKeyDown()
+                if not isShift then
+                    local costStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(cost.effectiveCost) or MarketSync.FormatMoney(cost.effectiveCost)
+                    local pStr = ""
+                    if profitData.outputPrice and profitData.outputPrice > 0 then
+                        local pVal = profitData.effectiveProfit
+                        local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                        pStr = string.format(" (%s%s|r)", pCol, MarketSync.FormatMoney(math.abs(pVal)))
+                    end
+                    tooltip:AddDoubleLine("|cffffd700To Craft:|r", costStr .. pStr)
                 else
-                    tooltip:AddDoubleLine("To Craft:", costStr)
-                end
+                    tooltip:AddLine(" ")
+                    local yieldStr = (cost.outputQty and cost.outputQty > 1) and string.format(" (x%d)", cost.outputQty) or ""
+                    tooltip:AddLine("|cffffd700MarketSync Crafting" .. yieldStr .. "|r")
 
-                if profitData.outputPrice and profitData.outputPrice > 0 then
-                    local pVal = profitData.effectiveProfit
-                    local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                    local pStr = MarketSync.FormatMoney(math.abs(pVal))
-                    local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                    tooltip:AddDoubleLine("Craft Profit:", string.format("%s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.effectiveMarginPct))
+                    local costStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(cost.effectiveCost) or MarketSync.FormatMoney(cost.effectiveCost)
+                    if cost.savings and cost.savings > 0 then
+                        local saveStr = MarketSync.FormatMoney(cost.savings)
+                        tooltip:AddDoubleLine("Ground-Up Cost:", string.format("%s |cff00ff00(Save %s)|r", costStr, saveStr))
+                        local dirStr = MarketSync.FormatMoney(cost.directCraftCost)
+                        tooltip:AddDoubleLine("|cff888888Direct AH Mats:|r", "|cffaaaaaa" .. dirStr .. "|r")
+                    else
+                        tooltip:AddDoubleLine("To Craft:", costStr)
+                    end
+
+                    if profitData.outputPrice and profitData.outputPrice > 0 then
+                        local pVal = profitData.effectiveProfit
+                        local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                        local pStr = MarketSync.FormatMoney(math.abs(pVal))
+                        local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                        tooltip:AddDoubleLine("Craft Profit:", string.format("%s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.effectiveMarginPct))
+                    end
                 end
             end
         end
@@ -3126,41 +3141,56 @@ local function OnTooltipSetItem(tooltip, data)
     -- 1. Check ProcessingData (Milling/Prospecting)
     if MarketSync.ProcessingData and MarketSync.ProcessingData[itemID] then
         local def = MarketSync.ProcessingData[itemID]
-        tooltip:AddLine(" ")
-        tooltip:AddLine("|cffffd700MarketSync " .. (def.type or "Processing") .. "|r")
+        local isShift = MarketSync.IsDetailsKeyDown and MarketSync.IsDetailsKeyDown()
         local evTotal = 0
         local hasStale = false
         local missingOutputs = 0
         for _, y in ipairs(def.yields or {}) do
-            local yName = GetItemName(y.itemID) or ("Item " .. y.itemID)
             local expected = ExpectedYield(y)
-            local priceInfo = ""
             local price, _, outStale = GetPriceInfoByItemID(y.itemID)
             if price and price > 0 then
                 evTotal = evTotal + (price * expected)
-                priceInfo = " (" .. MarketSync.FormatMoney(price) .. ")"
                 if outStale then hasStale = true end
             else
                 missingOutputs = missingOutputs + 1
             end
-            
-            local probStr = ""
-            if y.prob and y.prob < 1.0 then
-                probStr = string.format(" %.0f%%", y.prob * 100)
-            end
-            
-            tooltip:AddLine(string.format("- %sx %s%s%s", FormatExpectedQuantity(expected), yName, probStr, priceInfo), 0.85, 0.85, 0.85)
         end
-        if evTotal > 0 then
-            tooltip:AddLine(string.format("Net AH Value (-%d%%): %s", MAIN_AH_CUT_PERCENT,
-                MarketSync.FormatMoney(NetMainAuctionValue(evTotal))), 0, 1, 0)
-            if hasStale then
-                tooltip:AddLine("(Based on stale data)", 1, 0.5, 0.5)
+
+        if not isShift then
+            if evTotal > 0 then
+                tooltip:AddDoubleLine("|cffffd700" .. (def.type or "Processing") .. " Value:|r",
+                    string.format("|cff00ff00%s|r", MarketSync.FormatMoney(NetMainAuctionValue(evTotal))))
             end
-        end
-        if missingOutputs > 0 then
-            tooltip:AddLine(string.format("(Partial value: %d output price%s missing)", missingOutputs,
-                missingOutputs == 1 and "" or "s"), 1, 0.5, 0.5)
+        else
+            tooltip:AddLine(" ")
+            tooltip:AddLine("|cffffd700MarketSync " .. (def.type or "Processing") .. "|r")
+            for _, y in ipairs(def.yields or {}) do
+                local yName = GetItemName(y.itemID) or ("Item " .. y.itemID)
+                local expected = ExpectedYield(y)
+                local priceInfo = ""
+                local price = GetPriceInfoByItemID(y.itemID)
+                if price and price > 0 then
+                    priceInfo = " (" .. MarketSync.FormatMoney(price) .. ")"
+                end
+                
+                local probStr = ""
+                if y.prob and y.prob < 1.0 then
+                    probStr = string.format(" %.0f%%", y.prob * 100)
+                end
+                
+                tooltip:AddLine(string.format("- %sx %s%s%s", FormatExpectedQuantity(expected), yName, probStr, priceInfo), 0.85, 0.85, 0.85)
+            end
+            if evTotal > 0 then
+                tooltip:AddLine(string.format("Net AH Value (-%d%%): %s", MAIN_AH_CUT_PERCENT,
+                    MarketSync.FormatMoney(NetMainAuctionValue(evTotal))), 0, 1, 0)
+                if hasStale then
+                    tooltip:AddLine("(Based on stale data)", 1, 0.5, 0.5)
+                end
+            end
+            if missingOutputs > 0 then
+                tooltip:AddLine(string.format("(Partial value: %d output price%s missing)", missingOutputs,
+                    missingOutputs == 1 and "" or "s"), 1, 0.5, 0.5)
+            end
         end
     end
 
@@ -3203,70 +3233,96 @@ local function OnTooltipSetItem(tooltip, data)
             local ev, stale, missing, _, partial, drops =
                 MarketSync.EstimateDisenchantEV(quality, ilvl, classID, itemID)
             
-            local addedHeader = false
+            local isShift = MarketSync.IsDetailsKeyDown and MarketSync.IsDetailsKeyDown()
             
-            -- Only print full breakdown if Auctionator/TSM hasn't already done it
-            if not HasExternalBreakdown(tooltip, "Disenchant") then
-                if type(drops) == "table" and #drops > 0 then
-                    tooltip:AddLine(" ")
-                    tooltip:AddLine("|cffffd700MarketSync Disenchanting|r")
-                    addedHeader = true
-                    local sortedDrops = {}
-                    for _, drop in ipairs(drops) do
-                        sortedDrops[#sortedDrops + 1] = drop
-                    end
-                    table.sort(sortedDrops, function(a, b)
-                        local chanceA = tonumber(a.chance) or 0
-                        local chanceB = tonumber(b.chance) or 0
-                        if chanceA == chanceB then
-                            return (tonumber(a.itemID) or 0) < (tonumber(b.itemID) or 0)
+            if not isShift then
+                if ev and ev > 0 then
+                    tooltip:AddDoubleLine("|cffffd700Disenchant Value:|r",
+                        string.format("|cff00ff00%s|r", MarketSync.FormatMoney(ev)))
+                end
+            else
+                local addedHeader = false
+                
+                -- Only print full breakdown if Auctionator/TSM hasn't already done it
+                if not HasExternalBreakdown(tooltip, "Disenchant") then
+                    if type(drops) == "table" and #drops > 0 then
+                        tooltip:AddLine(" ")
+                        tooltip:AddLine("|cffffd700MarketSync Disenchanting|r")
+                        addedHeader = true
+                        local sortedDrops = {}
+                        for _, drop in ipairs(drops) do
+                            sortedDrops[#sortedDrops + 1] = drop
                         end
-                        return chanceA > chanceB
-                    end)
-
-                    tooltip:AddLine("|cffaaaaaaChance · possible quantity|r", 0.67, 0.67, 0.67)
-                    for _, drop in ipairs(sortedDrops) do
-                        local yName = GetItemName(drop.itemID) or ("Item " .. tostring(drop.itemID))
-                        local _, _, outputQuality = SafeGetItemInfo(drop.itemID)
-                        if MarketSync.FormatColoredItemName then
-                            yName = MarketSync.FormatColoredItemName(yName, outputQuality)
-                        end
-                        local minQty, maxQty
-                        for _, outcome in ipairs(drop.outcomes or {}) do
-                            local qty = tonumber(outcome.quantity)
-                            if qty then
-                                minQty = minQty and math.min(minQty, qty) or qty
-                                maxQty = maxQty and math.max(maxQty, qty) or qty
+                        table.sort(sortedDrops, function(a, b)
+                            local chanceA = tonumber(a.chance) or 0
+                            local chanceB = tonumber(b.chance) or 0
+                            if chanceA == chanceB then
+                                return (tonumber(a.itemID) or 0) < (tonumber(b.itemID) or 0)
                             end
-                        end
-                        local quantity = tostring(minQty or "?")
-                        if maxQty and maxQty ~= minQty then quantity = quantity .. "-" .. tostring(maxQty) end
-                        tooltip:AddLine(string.format("%.1f%%  ·  %sx %s",
-                            (tonumber(drop.chance) or 0) * 100, quantity, yName), 0.85, 0.85, 0.85)
-                    end
-                elseif MarketSync.Provider and MarketSync.Provider.GetActiveName
-                    and MarketSync.Provider.GetActiveName() == "forever" then
-                    tooltip:AddLine("|cffffaa00MarketSync: disenchant odds not verified for this item level.|r")
-                end
-            end
+                            return chanceA > chanceB
+                        end)
 
-            if ev and ev > 0 then
-                if not addedHeader then
-                    tooltip:AddLine(" ")
-                    tooltip:AddLine("|cffffd700MarketSync Disenchanting|r")
+                        tooltip:AddLine("|cffaaaaaaChance · possible quantity|r", 0.67, 0.67, 0.67)
+                        for _, drop in ipairs(sortedDrops) do
+                            local yName = GetItemName(drop.itemID) or ("Item " .. tostring(drop.itemID))
+                            local _, _, outputQuality = SafeGetItemInfo(drop.itemID)
+                            if MarketSync.FormatColoredItemName then
+                                yName = MarketSync.FormatColoredItemName(yName, outputQuality)
+                            end
+                            local minQty, maxQty
+                            for _, outcome in ipairs(drop.outcomes or {}) do
+                                local qty = tonumber(outcome.quantity)
+                                if qty then
+                                    minQty = minQty and math.min(minQty, qty) or qty
+                                    maxQty = maxQty and math.max(maxQty, qty) or qty
+                                end
+                            end
+                            local quantity = tostring(minQty or "?")
+                            if maxQty and maxQty ~= minQty then quantity = quantity .. "-" .. tostring(maxQty) end
+                            tooltip:AddLine(string.format("%.1f%%  ·  %sx %s",
+                                (tonumber(drop.chance) or 0) * 100, quantity, yName), 0.85, 0.85, 0.85)
+                        end
+                    elseif MarketSync.Provider and MarketSync.Provider.GetActiveName
+                        and MarketSync.Provider.GetActiveName() == "forever" then
+                        tooltip:AddLine("|cffffaa00MarketSync: disenchant odds not verified for this item level.|r")
+                    end
                 end
-                tooltip:AddLine(string.format("Net AH Value (-%d%%): %s", MAIN_AH_CUT_PERCENT,
-                    MarketSync.FormatMoney(ev)), 0, 1, 0)
-                if stale then
-                    tooltip:AddLine("(Based on stale data)", 1, 0.5, 0.5)
-                end
-                if partial or missing > 0 then
-                    tooltip:AddLine(string.format("(Partial value: %d output price%s missing)", missing,
-                        missing == 1 and "" or "s"), 1, 0.5, 0.5)
+
+                if ev and ev > 0 then
+                    if not addedHeader then
+                        tooltip:AddLine(" ")
+                        tooltip:AddLine("|cffffd700MarketSync Disenchanting|r")
+                    end
+                    tooltip:AddLine(string.format("Net AH Value (-%d%%): %s", MAIN_AH_CUT_PERCENT,
+                        MarketSync.FormatMoney(ev)), 0, 1, 0)
+                    if stale then
+                        tooltip:AddLine("(Based on stale data)", 1, 0.5, 0.5)
+                    end
+                    if partial or missing > 0 then
+                        tooltip:AddLine(string.format("(Partial value: %d output price%s missing)", missing,
+                            missing == 1 and "" or "s"), 1, 0.5, 0.5)
+                    end
                 end
             end
         end
     end
+end
+
+function MarketSync.HasExtraTooltipDetails(itemID, link)
+    if not itemID then return false end
+    if MarketSync.EstimateDisenchantEV then
+        local quality, classID
+        if link then _, _, quality, _, _, _, _, _, _, _, _, classID = SafeGetItemInfo(link)
+        else _, _, quality, _, _, _, _, _, _, _, _, classID = SafeGetItemInfo(itemID) end
+        local ilvl = (link and SafeGetDetailedItemLevelInfo(link)) or (itemID and SafeGetDetailedItemLevelInfo(itemID)) or 0
+        if quality and quality >= 2 and quality <= 4 and (classID == 2 or classID == 4) and ilvl > 0 then
+            local ev, _, _, _, _, drops = MarketSync.EstimateDisenchantEV(quality, ilvl, classID, itemID)
+            if ev and ev > 0 and drops and #drops > 0 then return true end
+        end
+    end
+    if MarketSync.ProcessingData and MarketSync.ProcessingData[itemID] then return true end
+    if MarketSync.GetRecipeForOutput and MarketSync.GetRecipeForOutput(itemID) then return true end
+    return false
 end
 
 if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then

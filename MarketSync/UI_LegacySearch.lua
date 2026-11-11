@@ -8,6 +8,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
     local scanner = MarketSync.Scanner
     local selected
     local listQuery
+    local expanded = {}
     local panelWidth = parent.GetWidth and parent:GetWidth() or 0
     -- Leave the right-hand gutter for the native scroll bar; result cells
     -- must fit inside the ScrollFrame viewport, not just its outer border.
@@ -27,6 +28,18 @@ function MarketSync.CreateLegacySearchPanel(parent)
     local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("LEFT", title, "RIGHT", 10, 0)
     hint:SetText("Live prices - select a row to check a stack")
+    local purchaseList = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    purchaseList:SetSize(130, 22)
+    purchaseList:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -3)
+    purchaseList:SetText("Purchase List")
+    purchaseList:SetScript("OnClick", function()
+        if MarketSync.PurchaseList and MarketSync.PurchaseList.Show then MarketSync.PurchaseList.Show() end
+    end)
+    purchaseList:SetScript("OnEnter", function(self)
+        if MarketSync.PurchaseList and MarketSync.PurchaseList.ShowTooltip then MarketSync.PurchaseList.ShowTooltip(self) end
+    end)
+    purchaseList:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    panel.PurchaseListButton = purchaseList
 
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     search:SetHeight(24)
@@ -45,9 +58,26 @@ function MarketSync.CreateLegacySearchPanel(parent)
     status:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -64)
     status:SetJustifyH("LEFT")
 
+    local progress = CreateFrame("StatusBar", nil, panel)
+    progress:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -88)
+    progress:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -116, -88)
+    progress:SetHeight(18)
+    progress:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    progress:SetStatusBarColor(0.75, 0.55, 0.12)
+    progress:SetMinMaxValues(0, 1)
+    local progressBackground = progress:CreateTexture(nil, "BACKGROUND")
+    progressBackground:SetAllPoints(progress)
+    progressBackground:SetColorTexture(0.12, 0.12, 0.12, 1)
+    local progressText = progress:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    progressText:SetPoint("CENTER", progress, "CENTER", 0, 0)
+    local stopButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    stopButton:SetSize(76, 20)
+    stopButton:SetPoint("LEFT", progress, "RIGHT", 6, 0)
+    stopButton:SetText("Stop")
+
     local header = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    header:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -89)
-    header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -34, -89)
+    header:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -113)
+    header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -34, -113)
     header:SetHeight(24)
     header:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
@@ -122,6 +152,22 @@ function MarketSync.CreateLegacySearchPanel(parent)
         searchButton:SetEnabled(not disabled and scanner and scanner.IsAvailable and scanner.IsAvailable())
         status:SetText(disabled and "Auctionator scanning is enabled. Disable it in MarketSync Settings to use Search."
             or (scanner and scanner.Status or "Open the auctioneer and search for an item."))
+        local scan = scanner and scanner.LiveSearchProgress
+        local scanning = scan and scan.state == "scanning" and scanner.Active
+        progress:SetMinMaxValues(0, math.max(1, scan and scan.total or 1))
+        progress:SetValue(scan and scan.completed or 0)
+        stopButton:SetEnabled(scanning and not disabled or false)
+        if scan then
+            local label = scanning and "Scanning" or (scan.state == "stopped" and "Scan stopped" or "Scan complete")
+            progressText:SetText(string.format("%s - %d / %d searched", label, scan.completed, scan.total))
+            progress:SetStatusBarColor(scan.state == "stopped" and 0.5 or 0.75, 0.55, 0.12)
+            if scanning then
+                status:SetText((scan.query or "Searching auctions...")
+                    .. " | Interacting with auction results stops the scan.")
+            end
+        else
+            progressText:SetText("Search progress - idle")
+        end
         if #results == 0 then
             local query = search:GetText() or ""
             if disabled then
@@ -146,11 +192,34 @@ function MarketSync.CreateLegacySearchPanel(parent)
             emptyTitle:Hide()
             emptyHint:Hide()
         end
-        content:SetHeight(math.max(1, #results * rowHeight))
+        local groups, order, display = {}, {}, {}
+        for _, result in ipairs(results) do
+            local key = tostring(result.itemID) .. ":" .. tostring(result.itemSuffix or 0)
+            local group = groups[key]
+            if not group then
+                group = { key = key, children = {}, cheapest = result, auctions = 0, available = 0 }
+                groups[key] = group
+                order[#order + 1] = group
+            end
+            group.children[#group.children + 1] = result
+            group.auctions = group.auctions + (result.auctions or 0)
+            group.available = group.available + (result.available or 0)
+            if result.unitPrice < group.cheapest.unitPrice then group.cheapest = result end
+        end
+        for _, group in ipairs(order) do
+            local cheapest = group.cheapest
+            display[#display + 1] = { group = group, name = cheapest.name, itemID = cheapest.itemID,
+                link = cheapest.link, icon = cheapest.icon, unitPrice = cheapest.unitPrice,
+                stackSize = "-", auctions = group.auctions, available = group.available }
+            if expanded[group.key] then
+                for _, child in ipairs(group.children) do display[#display + 1] = child end
+            end
+        end
+        content:SetHeight(math.max(1, #display * rowHeight))
         local first = math.floor((scroll:GetVerticalScroll() or 0) / rowHeight)
         for i, row in ipairs(rows) do
             local index = first + i
-            local data = results[index]
+            local data = display[index]
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -(index - 1) * rowHeight)
             row.data = data
@@ -159,7 +228,8 @@ function MarketSync.CreateLegacySearchPanel(parent)
                     data == selected and 0.17 or (index % 2 == 0 and 0.072 or 0.043),
                     data == selected and 0.09 or (index % 2 == 0 and 0.066 or 0.04), 0.98)
                 row.icon:SetTexture(data.icon or 134400)
-                row.name:SetText(data.name or ("Item #" .. data.itemID))
+                row.name:SetText((data.group and (expanded[data.group.key] and "[-] " or "[+] ") or "    ")
+                    .. (data.name or ("Item #" .. data.itemID)))
                 row.price:SetText(MarketSync.FormatMoney and MarketSync.FormatMoney(data.unitPrice) or tostring(data.unitPrice))
                 row.stack:SetText(tostring(data.stackSize))
                 row.auctions:SetText(tostring(data.auctions))
@@ -215,6 +285,14 @@ function MarketSync.CreateLegacySearchPanel(parent)
         end
         row:SetScript("OnClick", function(self)
             if not self.data then return end
+            if self.data.group then
+                local group = self.data.group
+                expanded[group.key] = not expanded[group.key]
+                selected = group.cheapest
+                if scanner and scanner.PrepareLivePurchase then scanner.PrepareLivePurchase(selected) end
+                Refresh()
+                return
+            end
             selected = self.data
             if scanner and scanner.PrepareLivePurchase then scanner.PrepareLivePurchase(selected) end
             Refresh()
@@ -224,7 +302,8 @@ function MarketSync.CreateLegacySearchPanel(parent)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             if self.data.link and GameTooltip.SetHyperlink then GameTooltip:SetHyperlink(self.data.link)
             else GameTooltip:SetText(self.data.name or "Auction") end
-            GameTooltip:AddLine("Click to check this exact stack for purchase.")
+            GameTooltip:AddLine(self.data.group and "Click to expand/collapse and check the lowest unit-price stack."
+                or "Click to check this exact stack for purchase.")
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -233,6 +312,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
 
     local function Submit()
         selected = nil
+        expanded = {}
         search:ClearFocus()
         if scanner and scanner.StartLiveSearch then
             scanner.StartLiveSearch(search:GetText() == "" and listQuery or search:GetText())
@@ -240,6 +320,13 @@ function MarketSync.CreateLegacySearchPanel(parent)
         Refresh()
     end
     searchButton:SetScript("OnClick", Submit)
+    stopButton:SetScript("OnClick", function()
+        if scanner and scanner.Active and scanner.LiveSearchProgress
+            and scanner.LiveSearchProgress.state == "scanning" and scanner.Cancel then
+            scanner.Cancel("Scan stopped by user. Completed results retained.")
+        end
+        Refresh()
+    end)
     search:SetScript("OnEnterPressed", Submit)
     search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     buyButton:SetScript("OnClick", function()
@@ -265,7 +352,11 @@ function MarketSync.CreateLegacySearchPanel(parent)
     panel.EmptyHint = emptyHint
     panel.ResultRows = rows
     panel.BuyButton = buyButton
+    panel.ScanProgressBar = progress
+    panel.ScanProgressText = progressText
+    panel.StopScanButton = stopButton
     panel.SetQuery = function(_, query)
+        expanded = {}
         if type(query) == "table" then
             selected = nil
             listQuery = query
@@ -279,5 +370,6 @@ function MarketSync.CreateLegacySearchPanel(parent)
     panel:SetScript("OnShow", Refresh)
     scroll:HookScript("OnVerticalScroll", Refresh)
     if scanner and scanner.RegisterCallback then scanner.RegisterCallback(Refresh) end
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end

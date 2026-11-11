@@ -5,6 +5,7 @@ local modernShowPanel = AH.ShowAuctionHousePanel
 
 local function HidePanels()
     for _, host in pairs(AH.LegacyHosts or {}) do host:Hide() end
+    if AH.LegacyFooter then AH.LegacyFooter:Hide() end
 end
 
 local function SidecarFor(kind)
@@ -36,13 +37,60 @@ function AH.AttachLegacy()
 
     local hosts, tabs = {}, {}
     AH.LegacyHosts, AH.LegacyTabs = hosts, tabs
+    local interface = GetBuildInfo and select(4, GetBuildInfo())
+    local compactChrome = tonumber(interface) ~= 16001
+    if compactChrome then
+        -- Cover the unused native action-button wells, leaving the money display
+        -- and outer window border intact. Native tabs retain their original art.
+        local footer = CreateFrame("Frame", nil, auctionFrame, "BackdropTemplate")
+        footer:SetPoint("BOTTOMLEFT", auctionFrame, "BOTTOMLEFT", 190, 8)
+        footer:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -12, 8)
+        footer:SetHeight(24)
+        footer:SetFrameLevel(auctionFrame:GetFrameLevel() + 9)
+        footer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+        footer:SetBackdropColor(0.055, 0.055, 0.06, 1)
+        footer:SetBackdropBorderColor(0.24, 0.24, 0.24, 1)
+        footer:Hide()
+        AH.LegacyFooter = footer
+
+        local portraitContainer = auctionFrame.PortraitContainer
+        if portraitContainer and portraitContainer.SetFrameLevel then
+            portraitContainer:SetFrameLevel(auctionFrame:GetFrameLevel() + 30)
+        else
+            local portrait = auctionFrame.portrait or _G.AuctionFramePortrait
+            if portrait and portrait.SetParent then
+                local overlay = CreateFrame("Frame", nil, auctionFrame)
+                overlay:SetAllPoints(auctionFrame)
+                overlay:SetFrameLevel(auctionFrame:GetFrameLevel() + 30)
+                overlay:EnableMouse(false)
+                -- A circular rim keeps the lower portrait edge complete above
+                -- the opaque custom panels, without raising native panel art.
+                if overlay.CreateMaskTexture then
+                    local rim = overlay:CreateTexture(nil, "BACKGROUND")
+                    rim:SetSize(portrait:GetWidth() + 6, portrait:GetHeight() + 6)
+                    rim:SetPoint("CENTER", portrait, "CENTER", 0, 0)
+                    rim:SetColorTexture(0.65, 0.52, 0.23, 1)
+                    local mask = overlay:CreateMaskTexture()
+                    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+                    mask:SetAllPoints(rim)
+                    rim:AddMaskTexture(mask)
+                end
+                portrait:SetParent(overlay)
+                portrait:SetDrawLayer("OVERLAY")
+                AH.LegacyPortraitOverlay = overlay
+            end
+        end
+    end
     local function MakeHost(factory)
         local host = CreateFrame("Frame", nil, auctionFrame)
         host:SetPoint("TOPLEFT", auctionFrame, "TOPLEFT", 12, -38)
         host:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -12, 32)
         host:SetFrameLevel(auctionFrame:GetFrameLevel() + 10)
+        host.MarketSyncCompactLegacyLayout = compactChrome
         host.Content = factory(host)
         host:SetScript("OnShow", function()
+            if AH.LegacyFooter then AH.LegacyFooter:Show() end
             if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then MarketSync.MainFrame:Hide() end
             local content = host.Content
             if content then

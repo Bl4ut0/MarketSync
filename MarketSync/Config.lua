@@ -10,6 +10,7 @@ MarketSync = MarketSync or {}
 -- closes the window reliably without tainting protected game paths.
 function MarketSync.RegisterEscapeFrame(frame)
     if not frame then return end
+    if MarketSync.Theme then MarketSync.Theme.Register(frame) end
     local name = frame.GetName and frame:GetName()
 
     -- Register with Blizzard UISpecialFrames (standard engine Esc-to-close)
@@ -36,22 +37,66 @@ MarketSync.ADDON_NAME = ADDON_NAME
 MarketSync.PREFIX = PREFIX
 MarketSync.ICON_COIN = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
 
--- Forever distributes one playset across numbered backend realms. Only the
--- sync market comparison folds that suffix; character/routing identities and
+-- ================================================================
+-- RESTRICTED / SECRET STRING DETECTION (WoW 11.0+ / 12.0+)
+-- Prevents access violations and crashes when execution is tainted
+-- and Blizzard passes protected / secret string values to chat handlers.
+-- ================================================================
+function MarketSync.IsSecretValue(val)
+    if val == nil then return false end
+    if type(issecretvalue) == "function" then
+        local ok, isSecret = pcall(issecretvalue, val)
+        if ok and isSecret then return true end
+    end
+    if type(val) == "string" then
+        local okFind = pcall(function() local _ = string.find(val, "") end)
+        if not okFind then return true end
+        local okEq = pcall(function() local _ = (val == "") end)
+        if not okEq then return true end
+    end
+    return false
+end
+
+function MarketSync.IsSafeString(val)
+    if type(val) ~= "string" then return false end
+    if MarketSync.IsSecretValue(val) then return false end
+    return true
+end
+
+-- Forever distributes one playset across numbered backend realms (e.g. 0 through 100,
+-- such as "English 52", "English52", "English-52", "English 0", "English 100", "ClassicBetaPvP2").
+-- Only the sync market comparison folds that suffix; character/routing identities and
 -- existing saved realm partitions keep the original realm unchanged.
 function MarketSync.NormalizeSyncRealm(realm)
     if type(realm) ~= "string" or realm == "" then return nil end
     local interface = GetBuildInfo and select(4, GetBuildInfo())
-    if tonumber(interface) == 16001 then
-        return realm:gsub("%d+$", "")
+    local isForever = (tonumber(interface) == 16001)
+        or (interface == nil and MarketSyncForeverScanner ~= nil)
+    if isForever then
+        -- Only strip trailing realm shard numbers (0-100+) if there is an alphabetical prefix
+        if realm:match("%a") then
+            -- Strip trailing number (0-100+) along with any preceding delimiter:
+            -- spaces, hyphens, underscores, or hash symbols (e.g. "English 52", "English52", "English-52", "English_52", "English#52", "English 0", "English 100")
+            local base = realm:gsub("[%s%-_#]*%d+$", "")
+            -- Fold out spaces/hyphens/underscores and lowercase so "English 52", "English52", and "English" match identically
+            local folded = string.lower(base):gsub("[%s%-_#]+", "")
+            if folded ~= "" then
+                return folded
+            end
+        end
     end
     return realm
 end
 
 function MarketSync.IsSameSyncRealm(left, right)
-    local normalized = MarketSync.NormalizeSyncRealm(left)
-    return normalized ~= nil and normalized ~= ""
-        and normalized == MarketSync.NormalizeSyncRealm(right)
+    local normLeft = MarketSync.NormalizeSyncRealm(left)
+    local normRight = MarketSync.NormalizeSyncRealm(right)
+    if not normLeft or normLeft == "" or not normRight or normRight == "" then
+        return false
+    end
+    if normLeft == normRight then return true end
+    -- Fallback for case-insensitive and whitespace-stripped equality
+    return string.lower(tostring(normLeft)):gsub("[%s%-_]+", "") == string.lower(tostring(normRight)):gsub("[%s%-_]+", "")
 end
 
 function MarketSync.GetPlayerMarketFaction()
@@ -73,7 +118,7 @@ function MarketSync.GetSyncMarketRealm()
 end
 
 function MarketSync.IsSameSyncMarketRealm(remote, localRealm)
-    if type(remote) ~= "string" then return false end
+    if type(remote) ~= "string" or remote == "" then return false end
     local realm, faction = remote:match("^(.+)@([^@]+)$")
     local localFaction = MarketSync.GetPlayerMarketFaction()
     return localFaction ~= "Unknown" and faction == localFaction
@@ -394,6 +439,9 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.EnableTooltipAuctionPrice == nil then MarketSyncDB.EnableTooltipAuctionPrice = true end
     if MarketSyncDB.EnableProfessionCraftInfo == nil then MarketSyncDB.EnableProfessionCraftInfo = true end
     if MarketSyncDB.EnableTooltipCraftCost == nil then MarketSyncDB.EnableTooltipCraftCost = true end
+    if MarketSyncDB.EnableTooltipCraftDemand == nil then MarketSyncDB.EnableTooltipCraftDemand = true end
+    if MarketSyncDB.ShowItemsOnOtherCharacters == nil then MarketSyncDB.ShowItemsOnOtherCharacters = true end
+    if MarketSyncDB.TooltipModifier == nil then MarketSyncDB.TooltipModifier = "SHIFT" end
     if MarketSyncDB.EnableProcessingTab == nil then MarketSyncDB.EnableProcessingTab = false end
     if MarketSyncDB.EnableAlertsTab == nil then MarketSyncDB.EnableAlertsTab = false end
     if MarketSyncDB.EnableAnalyticsTab == nil then MarketSyncDB.EnableAnalyticsTab = true end
@@ -412,6 +460,12 @@ function MarketSync.InitializeDB()
         MarketSyncDB.MinimapIcon.lock = MarketSyncDB.MinimapIcon.locked == true
     end
     MarketSyncDB.MinimapIcon.locked = nil
+    if MarketSyncDB.EnableLedgerBeta == nil then MarketSyncDB.EnableLedgerBeta = false end
+    if MarketSyncDB.EnableLedgerMinimapIcon == nil then MarketSyncDB.EnableLedgerMinimapIcon = false end
+    if not MarketSyncDB.LedgerMinimapIcon then
+        MarketSyncDB.LedgerMinimapIcon = { hide = not MarketSyncDB.EnableLedgerMinimapIcon, angle = 3.25, minimapPos = 195 }
+    end
+    if MarketSyncDB.LedgerRetentionDays == nil then MarketSyncDB.LedgerRetentionDays = 30 end
     if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
@@ -1506,6 +1560,93 @@ function MarketSync.FormatRelativeTime(epochTime, fallbackDays)
     return "Unknown"
 end
 
+function MarketSync.IsDetailsKeyDown()
+    local mod = MarketSyncDB and MarketSyncDB.TooltipModifier or "SHIFT"
+    if mod == "CTRL" then
+        return (IsControlKeyDown and IsControlKeyDown()) and true or false
+    elseif mod == "ALT" then
+        return (IsAltKeyDown and IsAltKeyDown()) and true or false
+    else
+        return (IsShiftKeyDown and IsShiftKeyDown()) and true or false
+    end
+end
+
+function MarketSync.IsLedgerEnabled()
+    return (MarketSyncDB and MarketSyncDB.EnableLedgerBeta == true) or false
+end
+
+function MarketSync.UpdateLedgerUIState()
+    if MarketSyncMainFrame and MarketSyncMainFrame.UpdateLedgerButtonState then
+        MarketSyncMainFrame.UpdateLedgerButtonState()
+    end
+    if MarketSyncCraftManager and MarketSyncCraftManager.UpdateLedgerButtonState then
+        MarketSyncCraftManager.UpdateLedgerButtonState()
+    end
+end
+
+function MarketSync.SetLedgerEnabled(enabled)
+    if not MarketSyncDB then return end
+    MarketSyncDB.EnableLedgerBeta = enabled and true or false
+    if enabled then
+        local t = MarketSync.InventoryTracking
+        if t and t.CaptureBags then t.CaptureBags() end
+        if MarketSync.ItemLedger and MarketSync.ItemLedger.SeedObservedStock then
+            MarketSync.ItemLedger.SeedObservedStock()
+        end
+    else
+        local w = MarketSyncItemLedger
+        if w and w.Hide and w:IsShown() then w:Hide() end
+    end
+    if MarketSync.ItemLedger and MarketSync.ItemLedger.Refresh then
+        MarketSync.ItemLedger.Refresh()
+    end
+    local w = MarketSyncItemLedger
+    if w and w.Refresh and w:IsShown() then w:Refresh() end
+    if MarketSync.UpdateLedgerUIState then
+        MarketSync.UpdateLedgerUIState()
+    end
+end
+
+function MarketSync.RefreshActiveTooltip()
+    for _, tip in ipairs({ GameTooltip, ItemRefTooltip }) do
+        if tip and tip.IsShown and tip:IsShown() and tip.GetItem then
+            local _, link = tip:GetItem()
+            if link then
+                tip.MarketSyncOwnershipItem = nil
+                tip.MarketSyncOwnershipShift = nil
+                tip.MarketSyncProcessingItem = nil
+                tip.MarketSyncProcessingShift = nil
+                local owner = tip.GetOwner and tip:GetOwner()
+                local ownerName = owner and owner.GetName and owner:GetName()
+                local isCharacterSlot = (type(ownerName) == "string" and ownerName:find("Character.*Slot"))
+                if owner and owner.GetBagID and owner.GetID and tip.SetBagItem then
+                    local bag = owner:GetBagID()
+                    local slot = owner:GetID()
+                    if bag and slot then
+                        pcall(tip.SetBagItem, tip, bag, slot)
+                    elseif tip.SetHyperlink then
+                        pcall(tip.SetHyperlink, tip, link)
+                    end
+                elseif owner and tip.SetInventoryItem and (owner.slot or owner.slotID or isCharacterSlot) then
+                    local slot = tonumber(owner.slot or owner.slotID or (owner.GetID and owner:GetID()))
+                    if slot and slot >= 1 and slot <= 19 then
+                        pcall(tip.SetInventoryItem, tip, "player", slot)
+                    elseif tip.SetHyperlink then
+                        pcall(tip.SetHyperlink, tip, link)
+                    end
+                elseif tip.RefreshData and tip.supportsDataRefresh then
+                    local ok = pcall(tip.RefreshData, tip)
+                    if not ok and tip.SetHyperlink then
+                        pcall(tip.SetHyperlink, tip, link)
+                    end
+                elseif tip.SetHyperlink then
+                    pcall(tip.SetHyperlink, tip, link)
+                end
+            end
+        end
+    end
+end
+
 function MarketSync.FormatAuctionAge(ageDays, exactTime, isDetailed)
     local diff = nil
     if exactTime and tonumber(exactTime) and tonumber(exactTime) > 0 then
@@ -1750,7 +1891,7 @@ MarketSync.StandardSounds = {
 -- UI HELPER: CreateModernDialog
 -- Clean dark-slate dialog matching Blizzard Auction House styling
 -- ================================================================
-function MarketSync.CreateModernDialog(name, width, height, titleText)
+function MarketSync.CreateModernDialog(name, width, height, titleText, iconTexture)
     local frame = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
     frame:SetSize(width or 400, height or 400)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -1761,45 +1902,72 @@ function MarketSync.CreateModernDialog(name, width, height, titleText)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
+
+    local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+
     frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 14,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
-    frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    if isLegacy then
+        frame:SetBackdropColor(0.045, 0.048, 0.055, 0.96)
+        frame:SetBackdropBorderColor(0.65, 0.65, 0.70, 0.95)
+    else
+        frame:SetBackdropColor(0.065, 0.055, 0.045, 0.96)
+        frame:SetBackdropBorderColor(0.85, 0.72, 0.45, 0.98)
+    end
 
     if name then MarketSync.RegisterEscapeFrame(frame) end
 
-    -- Header bar
-    local header = CreateFrame("Frame", nil, frame)
-    header:SetPoint("TOPLEFT", 8, -6)
-    header:SetPoint("TOPRIGHT", -8, -6)
-    header:SetHeight(28)
-    frame.Header = header
-    frame.TitleContainer = header
-    frame.TitleBg = header
+    -- Centered Blizzard header banner plate
+    local headerBg = frame:CreateTexture(nil, "ARTWORK")
+    headerBg:SetSize(280, 52)
+    headerBg:SetPoint("TOP", frame, "TOP", 0, 12)
+    headerBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
+    frame.warcraftTitleBg = headerBg
+    frame.Header = frame
+    frame.TitleContainer = frame
 
-    local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("LEFT", 6, 0)
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", frame, "TOP", 0, -2)
     title:SetText(titleText or "|cFFFFD100MarketSync|r")
     frame.TitleText = title
 
-    local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
-    closeBtn:SetSize(24, 24)
-    closeBtn:SetPoint("TOPRIGHT", 2, 2)
+    -- Circular portrait ring hanging off the top-left corner
+    local ring = CreateFrame("Frame", nil, frame)
+    ring:SetSize(54, 54)
+    ring:SetPoint("TOPLEFT", frame, "TOPLEFT", -9, 9)
+    local ringLvl = (frame.GetFrameLevel and frame:GetFrameLevel() or 1) + 5
+    if ring.SetFrameLevel then ring:SetFrameLevel(ringLvl) end
+    frame.warcraftRing = ring
+
+    local ringTex = ring:CreateTexture(nil, "OVERLAY")
+    ringTex:SetAllPoints(ring)
+    ringTex:SetTexture("Interface\\Minimap\\UI-Minimap-Border")
+    frame.warcraftRingTex = ringTex
+
+    local headerIcon = ring:CreateTexture(nil, "ARTWORK")
+    headerIcon:SetSize(38, 38)
+    headerIcon:SetPoint("CENTER", ring, "CENTER", 0, 0)
+    headerIcon:SetTexture(iconTexture or "Interface\\AddOns\\MarketSync\\Media\\MarketSyncIcon")
+    headerIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    frame.HeaderIcon = headerIcon
+    frame.warcraftEmblem = headerIcon
+
+    -- Standard Blizzard close button on top-right
+    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 2, 2)
     closeBtn:SetScript("OnClick", function()
         frame:Hide()
     end)
     frame.CloseButton = closeBtn
 
-    local headerSep = frame:CreateTexture(nil, "ARTWORK")
-    headerSep:SetHeight(1)
-    headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 2, -2)
-    headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -2, -2)
-    headerSep:SetColorTexture(MarketSync.GetThemeColor("border"))
-    frame.headerSep = headerSep
+    frame._warcraftDecorated = true
+    if MarketSync.Theme and MarketSync.Theme.Register then
+        MarketSync.Theme.Register(frame)
+    end
 
     frame:Hide()
     return frame
@@ -1872,20 +2040,26 @@ end
 function MarketSync.CreateModernInset(parent, x, y, width, height)
     local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     inset:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    inset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
-    inset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+    if isLegacy then
+        inset:SetBackdropColor(0.04, 0.045, 0.05, 0.90)
+        inset:SetBackdropBorderColor(0.35, 0.38, 0.42, 0.90)
+    else
+        inset:SetBackdropColor(0.05, 0.045, 0.04, 0.90)
+        inset:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
+    end
 
     -- Subtle top inner highlight line matching Blizzard AH insets (warm bronze/gold sheen)
     local topHighlight = inset:CreateTexture(nil, "BORDER")
     topHighlight:SetHeight(1)
-    topHighlight:SetPoint("TOPLEFT", 1, -1)
-    topHighlight:SetPoint("TOPRIGHT", -1, -1)
-    topHighlight:SetColorTexture(MarketSync.GetThemeColor("border"))
+    topHighlight:SetPoint("TOPLEFT", 3, -3)
+    topHighlight:SetPoint("TOPRIGHT", -3, -3)
+    topHighlight:SetColorTexture(isLegacy and 0.35 or 0.50, isLegacy and 0.38 or 0.42, isLegacy and 0.42 or 0.28, 0.7)
     inset.topHighlight = topHighlight
 
     if x and y then
@@ -2025,7 +2199,7 @@ end
 -- ================================================================
 function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
     if not scrollFrame then return end
-    local name = scrollFrame:GetName()
+    local name = scrollFrame.GetName and scrollFrame:GetName()
     local scrollBar = (name and _G[name .. "ScrollBar"]) or scrollFrame.ScrollBar
     if not scrollBar then
         for _, child in ipairs({ scrollFrame:GetChildren() }) do
@@ -2039,7 +2213,7 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
 
     local barWidth = customWidth or 8
     local xOff = offsetX or 0
-    local sbName = scrollBar:GetName()
+    local sbName = scrollBar.GetName and scrollBar:GetName()
 
     -- Identify up/down buttons
     local upBtn = (sbName and _G[sbName .. "ScrollUpButton"]) or (name and _G[name .. "ScrollBarScrollUpButton"]) or scrollBar.ScrollUpButton or scrollBar.Back

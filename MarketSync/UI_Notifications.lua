@@ -1992,6 +1992,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     panel.rows = rows
     panel.rightBox = rightBox
     table.insert(registeredNotificationPanels, panel)
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end
 

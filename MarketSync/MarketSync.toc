@@ -2,7 +2,7 @@
 ## Title: MarketSync
 ## Notes: The Guild Auction DB - Sync prices, check history, and browse offline.
 ## Author: Gemini
-## Version: 0.9.7-rc3
+## Version: 0.9.7-rc4-local21
 ## SavedVariables: MarketSyncDB
 ## OptionalDeps: Auctionator
 ## AllowLoadGameType: camelot, classic, tbc
@@ -18,6 +18,7 @@ Providers\ForeverProvider.lua
 
 # Config: shared globals, DB init, helpers
 Config.lua
+Theme.lua
 ObservationAPI.lua
 
 # Favorites & Preferred Lists
@@ -36,6 +37,12 @@ Neutral.lua
 # Processing: EV arbitrage + craft profitability
 Processing.lua
 
+# Ledger: inventory tracking, FIFO lots, craft & purchase ledgers
+Ledger\CraftLedger.lua
+Ledger\PurchaseList.lua
+Ledger\ItemLedger.lua
+Ledger\InventoryTracking.lua
+
 # Sync: protocol, data merging, passive/bulk sync
 Sync.lua
 
@@ -49,12 +56,15 @@ UI_History.lua
 UI_Monitor.lua
 UI_Processing.lua
 UI_CraftingInfo.lua
+Ledger\UI_CraftManager.lua
+Ledger\UI_ItemLedger.lua
 UI_Notifications.lua
 UI_ItemDetail.lua
 
 # Native Auction House Embedded Panel, Scanner & Sidecar UI
 UI_AHScanner.lua
 UI_LegacySearch.lua
+Ledger\UI_PurchaseList.lua
 UI_AHSidecar.lua
 AuctionHouse.lua
 LegacyAuctionHouse.lua

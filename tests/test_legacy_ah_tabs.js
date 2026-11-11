@@ -15,6 +15,10 @@ run(`
     function frame:SetPoint(...) self.point = {...} end
     function frame:ClearAllPoints() self.point = nil end
     function frame:SetFrameLevel(level) self.level = level end
+    function frame:SetHeight(height) self.height = height end
+    function frame:SetBackdrop() end
+    function frame:SetBackdropColor() end
+    function frame:SetBackdropBorderColor() end
     function frame:GetFrameLevel() return self.level or 1 end
     function frame:SetID(id) self.id = id end
     function frame:GetID() return self.id end
@@ -33,6 +37,7 @@ run(`
   end
   AuctionFrame = CreateFrame('Frame', 'AuctionFrame')
   AuctionFrame.numTabs = 3
+  AuctionFrame.PortraitContainer = CreateFrame('Frame', nil, AuctionFrame)
   for i = 1, 3 do
     local tab = CreateFrame('Button', 'AuctionFrameTab' .. i, AuctionFrame)
     tab:SetID(i)
@@ -80,16 +85,31 @@ run(`
   assert(ah.Sidecar ~= nil and sidecarVisible == true)
   ah.LegacyTabs.search.scripts.OnClick()
   assert(ah.LegacyHosts.search:IsShown() and not ah.LegacyHosts.scanner:IsShown())
+  assert(ah.LegacyFooter:IsShown(), 'Custom tabs cover unused native action wells')
+  assert(ah.LegacyHosts.analytics.MarketSyncCompactLegacyLayout == true)
+  assert(AuctionFrame.PortraitContainer:GetFrameLevel() > ah.LegacyHosts.search:GetFrameLevel(),
+    'Portrait stays above embedded content')
   assert(sidecarVisible == true)
   ah.LegacyTabs.processing.scripts.OnClick()
   assert(ah.LegacyHosts.processing:IsShown() and sidecarVisible == false)
   AuctionFrameTab_OnClick(_G.AuctionFrameTab3)
   assert(not ah.LegacyHosts.processing:IsShown() and sidecarVisible == true)
+  assert(not ah.LegacyFooter:IsShown(), 'Native tabs restore the original footer')
   assert(sidecarMode == 'sell')
   MarketSyncDB.EnableProcessingTab = false
   ah.RefreshTabVisibility()
   assert(not ah.LegacyTabs.processing:IsShown())
   assert(ah.LegacyTabs.alerts:IsShown())
   assert(ah.AttachLegacy() == true and AuctionFrame.numTabs == 8)
+`);
+run(`
+  -- A fresh Forever attachment must preserve its existing chrome and sizing.
+  local ah = MarketSync.AuctionHouse
+  ah.LegacyAttached, ah.LegacyFooter = false, nil
+  AuctionFrame.numTabs = 3
+  GetBuildInfo = function() return '1.60.1', '', '', 16001 end
+  assert(ah.AttachLegacy())
+  assert(ah.LegacyFooter == nil)
+  assert(ah.LegacyHosts.analytics.MarketSyncCompactLegacyLayout == false)
 `);
 console.log('PASS classic Auction House tabs, panel switching, and sidecar routing');

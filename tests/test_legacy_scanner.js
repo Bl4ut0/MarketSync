@@ -21,6 +21,7 @@ run(`
     for _, fn in ipairs(pending) do fn() end
   end
   function time() return 1770000000 end
+  function GetTime() return 100 end
   function GetItemInfo(id) return id == 100 and "Test Ore" or nil end
   queries = {}
   function CanSendAuctionQuery() return true, true end
@@ -202,18 +203,22 @@ run(`
   assert(scanner.StartLiveSearch({ {itemID = 100, name = "Test Ore"},
     {itemID = 200, name = "Test Herb"}, {itemID = 100, name = "Test Ore"} }))
   assert(queries[#queries].name == "Test Ore" and queries[#queries].exact == true)
+  assert(scanner.LiveSearchProgress.completed == 0 and scanner.LiveSearchProgress.total == 2)
   results = {{id = 100, name = "Test Ore", count = 2, buyout = 200, link = "item:100"}}
   resultTotal = 51
   LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
   assert(queries[#queries].page == 1)
+  assert(scanner.LiveSearchProgress.completed == 0, "An item is incomplete while more pages remain")
   resultTotal = 51
   LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
   assert(scanner.Active and queries[#queries].name == "Test Herb" and queries[#queries].page == 0)
+  assert(scanner.LiveSearchProgress.completed == 1 and scanner.LiveSearchProgress.query == "Test Herb")
   assert(#scanner.LiveSearchResults == 1 and scanner.LiveSearchResults[1].auctions == 2)
   results = {{id = 200, name = "Test Herb", count = 5, buyout = 100, link = "item:200"}}
   resultTotal = 1
   LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
   assert(not scanner.Active and #scanner.LiveSearchResults == 2)
+  assert(scanner.LiveSearchProgress.completed == 2 and scanner.LiveSearchProgress.state == "complete")
   assert(#recorded == 0, "list searches must not write bulk scanner observations")
   local ore
   for _, row in ipairs(scanner.LiveSearchResults) do if row.itemID == 100 then ore = row end end
@@ -230,6 +235,7 @@ run(`
   LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
   assert(scanner.Active and queries[#queries].name == "Test Herb")
   scanner.Cancel("Stopped by user")
+  assert(scanner.LiveSearchProgress.state == "stopped" and scanner.LiveSearchProgress.completed == 1)
   LegacyFrame.script(LegacyFrame, "AUCTION_ITEM_LIST_UPDATE")
   assert(not scanner.Active)
 `);

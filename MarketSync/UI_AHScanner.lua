@@ -1022,5 +1022,6 @@ function MarketSync.CreateAHScannerPanel(parent)
     RefreshActiveItemsView()
     UpdateScannerState()
 
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end

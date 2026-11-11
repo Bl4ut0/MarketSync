@@ -14,25 +14,26 @@ local activeBrowseTab = 1
 if not MarketSync.CreateModernInset then function MarketSync.CreateModernInset(parent, x, y, width, height)
     local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     inset:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    if MarketSync.GetUITheme and MarketSync.GetUITheme() == "legacy" then
-        inset:SetBackdropColor(0.055, 0.060, 0.070, 0.97)
-        inset:SetBackdropBorderColor(0.30, 0.31, 0.33, 0.95)
+    local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+    if isLegacy then
+        inset:SetBackdropColor(0.04, 0.045, 0.05, 0.90)
+        inset:SetBackdropBorderColor(0.35, 0.38, 0.42, 0.90)
     else
-        inset:SetBackdropColor(0.075, 0.070, 0.065, 0.96)
-        inset:SetBackdropBorderColor(0.38, 0.32, 0.22, 0.90)
+        inset:SetBackdropColor(0.05, 0.045, 0.04, 0.90)
+        inset:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
     end
 
     -- Subtle top inner highlight line matching Blizzard AH insets (warm bronze/gold sheen)
     local topHighlight = inset:CreateTexture(nil, "BORDER")
     topHighlight:SetHeight(1)
-    topHighlight:SetPoint("TOPLEFT", 1, -1)
-    topHighlight:SetPoint("TOPRIGHT", -1, -1)
-    topHighlight:SetColorTexture(0.50, 0.42, 0.25, 0.25)
+    topHighlight:SetPoint("TOPLEFT", 3, -3)
+    topHighlight:SetPoint("TOPRIGHT", -3, -3)
+    topHighlight:SetColorTexture(isLegacy and 0.35 or 0.50, isLegacy and 0.38 or 0.42, isLegacy and 0.42 or 0.28, 0.7)
     inset.topHighlight = topHighlight
 
     if x and y then
@@ -207,6 +208,54 @@ local function CreateMainFrame()
         MainFrame:Hide()
     end)
     MainFrame.CloseBtn = closeBtn
+
+    local ledgerBtn = CreateFrame("Button", nil, MainFrame, "UIPanelButtonTemplate")
+    ledgerBtn:SetSize(78, 20)
+    ledgerBtn:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -34, -5)
+    ledgerBtn:SetText("|TInterface\\Icons\\INV_Misc_Book_09:12:12:0:0|t Ledger")
+    ledgerBtn:SetScript("OnClick", function()
+        if not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
+            print("|cffffbb44[MarketSync]|r The Item Ledger is currently disabled. Enable it under AddOn Settings > Beta Features.")
+            return
+        end
+        if MarketSync.ToggleItemLedger then
+            MarketSync.ToggleItemLedger()
+        elseif MarketSync.OpenItemLedger then
+            MarketSync.OpenItemLedger()
+        end
+    end)
+    ledgerBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if MarketSync.IsLedgerEnabled and MarketSync.IsLedgerEnabled() then
+            GameTooltip:SetText("MarketSync Item Ledger", 1, 0.82, 0)
+            GameTooltip:AddLine("Open the Item & Gold Ledger window.", 0.8, 0.8, 0.8)
+        else
+            GameTooltip:SetText("MarketSync Item Ledger |cffff4444(Disabled)|r", 1, 0.82, 0)
+            GameTooltip:AddLine("Enable the Transactional Item Ledger in AddOn Settings > Beta Features to access this feature.", 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    ledgerBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    MainFrame.LedgerButton = ledgerBtn
+
+    function MainFrame.UpdateLedgerButtonState()
+        local isEnabled = MarketSync.IsLedgerEnabled and MarketSync.IsLedgerEnabled()
+        if isEnabled then
+            if ledgerBtn.Enable then ledgerBtn:Enable() end
+            if ledgerBtn.SetAlpha then ledgerBtn:SetAlpha(1.0) end
+        else
+            if ledgerBtn.Disable then ledgerBtn:Disable() end
+            if ledgerBtn.SetAlpha then ledgerBtn:SetAlpha(0.5) end
+        end
+    end
+    MainFrame:HookScript("OnShow", function()
+        if MainFrame.UpdateLedgerButtonState then
+            MainFrame.UpdateLedgerButtonState()
+        end
+    end)
+    MainFrame.UpdateLedgerButtonState()
 
     -- Keep the collapsed sidecar as a small bump attached to the window edge.
     -- Both surfaces reuse the same Shopping / Craft / Bags sidecar.

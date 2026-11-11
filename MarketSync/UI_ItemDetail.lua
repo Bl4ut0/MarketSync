@@ -505,6 +505,7 @@ function MarketSync.CreateItemDetailPanel(parent)
     end
 
     ItemDetailPanel = panel
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end
 

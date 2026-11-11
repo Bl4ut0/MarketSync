@@ -177,8 +177,96 @@ local function CompareVersions(v1, v2)
     return 0
 end
 
+local function GetLocalRealmName()
+    return MarketSync.myRealm
+        or (type(GetNormalizedRealmName) == "function" and GetNormalizedRealmName())
+        or (type(GetRealmName) == "function" and GetRealmName())
+end
+
+local function IsKnownLocalRealm(candidate)
+    local realm = tostring(candidate or "")
+    local localRealm = tostring(GetLocalRealmName() or "")
+    if realm == "" or localRealm == "" then return false end
+    if string.lower(realm) == string.lower(localRealm) then return true end
+    return MarketSync.IsSameSyncRealm and MarketSync.IsSameSyncRealm(realm, localRealm) or false
+end
+
+local function FoldCharacterName(value)
+    return string.lower(tostring(value or "")):gsub("[%s%-]+", "")
+end
+
+function MarketSync.StripKnownRealmSuffix(identity)
+    if MarketSync.IsSafeString and not MarketSync.IsSafeString(identity) then
+        return "", nil
+    end
+    local raw = tostring(identity or "")
+    local base, suffix = raw:match("^(.+)%-([^%-]+)$")
+    if base and suffix then
+        if IsKnownLocalRealm(suffix) then
+            return base, suffix
+        end
+        -- Support hyphenated realm shards 0-100 (e.g. "Player-English-52")
+        if suffix:match("^%d+$") then
+            local innerBase, innerRealm = base:match("^(.+)%-([^%-]+)$")
+            if innerBase and innerRealm then
+                local candidateRealm = innerRealm .. "-" .. suffix
+                if IsKnownLocalRealm(candidateRealm) or IsKnownLocalRealm(innerRealm) then
+                    return innerBase, candidateRealm
+                end
+            end
+        end
+    end
+    return raw, nil
+end
+
+function MarketSync.GetLocalPlayerDisplayName()
+    local unitName, unitSecond = nil, nil
+    if type(UnitName) == "function" then
+        unitName, unitSecond = UnitName("player")
+    end
+    if type(UnitFullName) == "function" then
+        local fullFirst, fullSecond = UnitFullName("player")
+        if fullFirst and fullFirst ~= "" then
+            unitName = fullFirst
+            if fullSecond and fullSecond ~= "" then
+                unitSecond = fullSecond
+            end
+        end
+    end
+    local baseName = tostring(unitName or "Unknown")
+    if unitSecond and unitSecond ~= "" then
+        local localRealm = GetLocalRealmName()
+        -- On Forever (16001), UnitFullName/UnitName second return can be the character's surname
+        -- rather than the realm name. Combine First + Last with a space, never a hyphen.
+        if localRealm and localRealm ~= "" and not IsKnownLocalRealm(unitSecond) then
+            local foldedBase = FoldCharacterName(baseName)
+            local foldedSecond = FoldCharacterName(unitSecond)
+            if foldedSecond ~= "" and not foldedBase:find(foldedSecond, 1, true) then
+                return baseName .. " " .. tostring(unitSecond)
+            end
+        end
+    end
+    return baseName
+end
+
 local function NormalizeIdentity(value)
-    return string.lower(tostring(value or "")):gsub("%s+", "")
+    if MarketSync.IsSafeString and not MarketSync.IsSafeString(value) then return "" end
+    local raw = tostring(value or "")
+    if raw == "" then return "" end
+    local stripped, realmSuffix = MarketSync.StripKnownRealmSuffix(raw)
+    if realmSuffix then
+        return FoldCharacterName(stripped) .. "-" .. string.lower(tostring(MarketSync.NormalizeSyncRealm and MarketSync.NormalizeSyncRealm(realmSuffix) or realmSuffix))
+    end
+    local base, unknownRealm = raw:match("^(.+)%-([^%-]+)$")
+    if base and unknownRealm then
+        local localDisplayFolded = FoldCharacterName(MarketSync.GetLocalPlayerDisplayName())
+        if localDisplayFolded ~= "" and FoldCharacterName(raw) == localDisplayFolded then
+            return localDisplayFolded
+        end
+        local normUnknown = MarketSync.NormalizeSyncRealm and MarketSync.NormalizeSyncRealm(unknownRealm) or unknownRealm
+        return FoldCharacterName(base) .. "-" .. string.lower(tostring(normUnknown)):gsub("[%s%-_#]+", "")
+    end
+    return FoldCharacterName(raw)
 end
 
 function MarketSync.NoteSyncPeerBaseline(scope, identity, revision)
@@ -221,24 +309,43 @@ local function GetMinimumRecentPeerBaseline(scope, requestedRevision)
 end
 
 function MarketSync.GetLocalSyncIdentity()
+    local displayName = MarketSync.GetLocalPlayerDisplayName()
     if type(UnitFullName) == "function" then
         local name, realm = UnitFullName("player")
         if name and name ~= "" then
+            local localRealm = GetLocalRealmName()
             if realm and realm ~= "" then
-                return tostring(name) .. "-" .. tostring(realm)
+                if not localRealm or localRealm == "" or IsKnownLocalRealm(realm) then
+                    return displayName .. "-" .. tostring(realm)
+                elseif localRealm and localRealm ~= "" then
+                    return displayName .. "-" .. tostring(localRealm)
+                end
             end
-            return tostring(name)
+            return displayName
         end
     end
-    return tostring(UnitName("player") or "Unknown")
+    return displayName
 end
 
 function MarketSync.IsLocalSyncIdentity(identity)
-    local wanted = NormalizeIdentity(identity)
+    local raw = tostring(identity or "")
+    if raw == "" then return false end
+    local wanted = NormalizeIdentity(raw)
     if wanted == "" then return false end
     local full = NormalizeIdentity(MarketSync.GetLocalSyncIdentity())
-    local short = NormalizeIdentity(UnitName("player"))
-    return wanted == full or (not wanted:find("-", 1, true) and wanted == short)
+    if wanted == full then return true end
+
+    local stripped = MarketSync.StripKnownRealmSuffix(raw)
+    local wantedFolded = FoldCharacterName(stripped)
+    local displayFolded = FoldCharacterName(MarketSync.GetLocalPlayerDisplayName())
+    local shortFolded = FoldCharacterName(type(UnitName) == "function" and UnitName("player") or "")
+    if displayFolded ~= "" and wantedFolded == displayFolded then
+        return true
+    end
+    if not tostring(stripped):find("-", 1, true) and shortFolded ~= "" and wantedFolded == shortFolded then
+        return true
+    end
+    return false
 end
 
 function MarketSync.IsPeerDataCompatible(addonVersion, protocolRevision)
@@ -333,9 +440,12 @@ local function ResetGuildLane(reason)
         guildLane.timer:Cancel()
         guildLane.timer = nil
     end
+    local prevSource = guildLane.source
+    local prevRequester = guildLane.requester
     guildLane.phase = "idle"
     guildLane.scope = nil
     guildLane.source = nil
+    guildLane.requester = nil
     guildLane.revision = 0
     guildLane.sessionId = nil
     pullInProgress = false
@@ -347,7 +457,14 @@ local function ResetGuildLane(reason)
         pullRequestPendingTimer = nil
     end
     if reason then Debug("Guild transfer lane reopened: " .. tostring(reason)) end
-    if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), nil) end
+    if MarketSync.UpdateSwarmUI then
+        MarketSync.UpdateSwarmUI(MarketSync.GetLocalPlayerDisplayName and MarketSync.GetLocalPlayerDisplayName() or UnitName("player"), nil)
+        if prevSource and prevSource ~= "" then MarketSync.UpdateSwarmUI(prevSource, nil) end
+        if prevRequester and prevRequester ~= "" then MarketSync.UpdateSwarmUI(prevRequester, nil) end
+    end
+    if MarketSync.ClearTransientSwarmStates then
+        MarketSync.ClearTransientSwarmStates()
+    end
     ScheduleDeferredADVProcessing()
 end
 
@@ -465,6 +582,13 @@ local function FinalizePullContention(generation)
     for _, candidate in pairs(pullContentionCandidates) do
         if IsPullCandidateBetter(candidate, winner) then winner = candidate end
     end
+    if MarketSync.UpdateSwarmUI then
+        for _, candidate in pairs(pullContentionCandidates) do
+            if candidate ~= winner and candidate.requesterIdentity and candidate.requesterIdentity ~= "" then
+                MarketSync.UpdateSwarmUI(candidate.requesterIdentity, nil)
+            end
+        end
+    end
     pullContentionPending = false
     pullContentionCandidates = {}
     if not winner or guildLane.phase ~= "contending" then return end
@@ -472,13 +596,14 @@ local function FinalizePullContention(generation)
     guildLane.phase = "requested"
     guildLane.scope = winner.scope
     guildLane.source = winner.sourceIdentity
+    guildLane.requester = winner.requesterIdentity
     guildLane.revision = winner.revision
     guildLane.sessionId = nil
     pullRequestPending = true
     ArmGuildLaneTimeout("requested")
 
     if MarketSync.UpdateSwarmUI then
-        MarketSync.UpdateSwarmUI(winner.requesterIdentity or UnitName("player"),
+        MarketSync.UpdateSwarmUI(winner.requesterIdentity or (MarketSync.GetLocalPlayerDisplayName and MarketSync.GetLocalPlayerDisplayName()) or UnitName("player"),
             winner.scope == "N" and "Awaiting Neutral Data" or "Awaiting Data")
     end
     if MarketSync.LogNetworkEvent then

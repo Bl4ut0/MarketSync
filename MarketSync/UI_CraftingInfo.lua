@@ -4,6 +4,27 @@
 -- =============================================================
 
 MarketSync = MarketSync or {}
+
+-- Another addon can anchor its panel through a label we previously moved.
+-- Check every anchor and parent, including indirect dependencies, before
+-- making its panel our own anchor target.
+local function DependsOnRegion(region, target, visited)
+    if type(region) == "string" then region = _G[region] end
+    if not region then return false end
+    if region == target then return true end
+    visited = visited or {}
+    if visited[region] then return false end
+    visited[region] = true
+    if region.GetParent and DependsOnRegion(region:GetParent(), target, visited) then return true end
+    if region.GetPoint then
+        local count = region.GetNumPoints and region:GetNumPoints() or 1
+        for index = 1, count do
+            local _, relative = region:GetPoint(index)
+            if DependsOnRegion(relative, target, visited) then return true end
+        end
+    end
+    return false
+end
 MarketSync.RefreshCraftingInfoUI = function() end
 
 local function FormatMoney(copper)
@@ -83,16 +104,19 @@ local function CreateCraftingTreeFrame()
     f.expandedNodes = {}
     f.allExpanded = false
     f.targetQuantity = 1
+    if MarketSync.Theme and MarketSync.Theme.DecorateWarcraftWindow then
+        MarketSync.Theme.DecorateWarcraftWindow(f, "Interface\\Icons\\Trade_Engineering")
+    end
 
     -- Header Title
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", 16, -14)
-    title:SetText("MarketSync Materials & Crafting Choices")
+    title:SetPoint("TOPLEFT", 58, -14)
+    title:SetText("|cffffd700MarketSync Materials & Crafting Choices|r")
     f.title = title
 
     -- Subtitle / Recipe info
     local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    subtitle:SetPoint("TOPLEFT", 16, -34)
+    subtitle:SetPoint("TOPLEFT", 58, -36)
     subtitle:SetText("Recipe: Loading...")
     f.subtitle = subtitle
 
@@ -719,6 +743,83 @@ end
 -- BLIZZARD PROFESSION WINDOW HOOKS (Classic TradeSkillFrame)
 -- ================================================================
 
+local function ItemIDFromLink(link)
+    return type(link) == "string" and tonumber(link:match("item:(%d+)")) or nil
+end
+
+-- Resolve against the open profession, rather than cached indices from another
+-- character or a previous filter state.
+function MarketSync.JumpToProfessionItem(itemID)
+    if not itemID or (InCombatLockdown and InCombatLockdown()) then return false end
+    if TradeSkillFrame and TradeSkillFrame:IsShown() and GetNumTradeSkills then
+        -- Expand headers first: collapsed categories hide recipe indices.
+        if ExpandTradeSkillSubClass then
+            for i = GetNumTradeSkills(), 1, -1 do
+                local _, kind, _, expanded = GetTradeSkillInfo(i)
+                if kind == "header" and not expanded then ExpandTradeSkillSubClass(i) end
+            end
+        end
+        for i = 1, GetNumTradeSkills() do
+            if ItemIDFromLink(GetTradeSkillItemLink(i)) == itemID then
+                if TradeSkillFrame_SetSelection then TradeSkillFrame_SetSelection(i)
+                elseif SelectTradeSkill then SelectTradeSkill(i) end
+                if TradeSkillFrame_Update then TradeSkillFrame_Update() end
+                return true
+            end
+        end
+    elseif CraftFrame and CraftFrame:IsShown() and GetNumCrafts and GetCraftItemLink then
+        if ExpandCraftSkillLine then
+            for i = GetNumCrafts(), 1, -1 do
+                local _, _, kind, _, expanded = GetCraftInfo(i)
+                if kind == "header" and not expanded then ExpandCraftSkillLine(i) end
+            end
+        end
+        for i = 1, GetNumCrafts() do
+            if ItemIDFromLink(GetCraftItemLink(i)) == itemID then
+                if CraftFrame_SetSelection then CraftFrame_SetSelection(i)
+                elseif SelectCraft then SelectCraft(i) end
+                if CraftFrame_Update then CraftFrame_Update() end
+                return true
+            end
+        end
+    elseif ProfessionsFrame and ProfessionsFrame:IsShown() and C_TradeSkillUI
+        and C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeItemLink then
+        for _, recipeID in ipairs(C_TradeSkillUI.GetAllRecipeIDs() or {}) do
+            local info = C_TradeSkillUI.GetRecipeInfo and C_TradeSkillUI.GetRecipeInfo(recipeID)
+            if info and info.learned and ItemIDFromLink(C_TradeSkillUI.GetRecipeItemLink(recipeID)) == itemID
+                and ProfessionsFrame.SelectRecipe then
+                ProfessionsFrame:SelectRecipe(recipeID)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function HookProfessionItemButton(button, getItemID)
+    if not button or button.marketSyncRecipeJump or not button.HookScript then return end
+    button.marketSyncRecipeJump = true
+    -- OnMouseUp observes right clicks without replacing native left-click or
+    -- reagent-quality selection handlers and their click registrations.
+    button:HookScript("OnMouseUp", function(self, mouseButton)
+        if mouseButton == "RightButton" then MarketSync.JumpToProfessionItem(getItemID(self)) end
+    end)
+end
+
+local function InitClassicCraftItemHooks()
+    if not CraftFrame then return end
+    HookProfessionItemButton(CraftIcon, function()
+        return GetCraftItemLink and ItemIDFromLink(GetCraftItemLink(GetCraftSelectionIndex()))
+    end)
+    for r = 1, (MAX_CRAFT_REAGENTS or 8) do
+        local reagentIndex = r
+        HookProfessionItemButton(_G["CraftReagent" .. r], function()
+            return GetCraftReagentItemLink
+                and ItemIDFromLink(GetCraftReagentItemLink(GetCraftSelectionIndex(), reagentIndex))
+        end)
+    end
+end
+
 local function InitClassicTradeSkillHook()
     if not TradeSkillFrame then return end
     if MarketSync.TradeSkillHookInitialized then return end
@@ -728,8 +829,36 @@ local function InitClassicTradeSkillHook()
     infoFrame:SetSize(240, 52)
     -- Keep native profession controls above this informational overlay so
     -- MarketSync never visually masks reagent/action options.
-    infoFrame:SetFrameLevel(TradeSkillFrame:GetFrameLevel() + 1)
-    infoFrame:EnableMouse(false)
+    infoFrame:SetFrameLevel(TradeSkillFrame:GetFrameLevel() + 5)
+    infoFrame:EnableMouse(true)
+
+    -- Session recovery: ensure native Blizzard labels are not stuck to infoFrame from any prior session state
+    if TradeSkillDescription and TradeSkillDescription.GetPoint then
+        local pCount = TradeSkillDescription.GetNumPoints and TradeSkillDescription:GetNumPoints() or 1
+        for pi = 1, pCount do
+            local _, relTo = TradeSkillDescription:GetPoint(pi)
+            if relTo == infoFrame or relTo == "MarketSyncCraftingInfo" then
+                TradeSkillDescription:ClearAllPoints()
+                if TradeSkillSkillIcon then
+                    TradeSkillDescription:SetPoint("TOPLEFT", TradeSkillSkillIcon, "BOTTOMLEFT", 0, -10)
+                end
+                break
+            end
+        end
+    end
+    if TradeSkillReagentLabel and TradeSkillReagentLabel.GetPoint then
+        local pCount = TradeSkillReagentLabel.GetNumPoints and TradeSkillReagentLabel:GetNumPoints() or 1
+        for pi = 1, pCount do
+            local _, relTo = TradeSkillReagentLabel:GetPoint(pi)
+            if relTo == infoFrame or relTo == "MarketSyncCraftingInfo" then
+                TradeSkillReagentLabel:ClearAllPoints()
+                if TradeSkillSkillName then
+                    TradeSkillReagentLabel:SetPoint("TOPLEFT", TradeSkillSkillName, "BOTTOMLEFT", 0, -10)
+                end
+                break
+            end
+        end
+    end
 
     -- Labels
     infoFrame.costLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -791,6 +920,15 @@ local function InitClassicTradeSkillHook()
         end
 
         local numReagents = (GetTradeSkillNumReagents and GetTradeSkillNumReagents(recipeIndex)) or 0
+        HookProfessionItemButton(TradeSkillSkillIcon, function()
+            return ItemIDFromLink(GetTradeSkillItemLink(GetTradeSkillSelectionIndex()))
+        end)
+        for r = 1, numReagents do
+            local reagentIndex = r
+            HookProfessionItemButton(_G["TradeSkillReagent" .. r], function()
+                return ItemIDFromLink(GetTradeSkillReagentItemLink(GetTradeSkillSelectionIndex(), reagentIndex))
+            end)
+        end
         if numReagents == 0 then
             infoFrame:Hide()
             return
@@ -842,86 +980,202 @@ local function InitClassicTradeSkillHook()
 
         -- Direct Cost Line
         local directStr = FormatMoney(cost.directCraftCost)
-        infoFrame.costLabel:SetText("To Craft: " .. directStr)
-
-        -- Ground-Up Line
         local groundUpStr = FormatMoney(cost.groundUpCost)
-        if cost.optimalSavings > 0 then
-            local saveStr = FormatMoney(cost.optimalSavings)
-            infoFrame.groundUpLabel:SetText(string.format("Ground-Up: %s |cff00ff00(-%s / %d%%)|r", groundUpStr, saveStr, cost.optimalSavingsPct))
-        else
-            infoFrame.groundUpLabel:SetText("Ground-Up: " .. groundUpStr)
-        end
-        btnBreakdown:Show()
 
-        -- Profit Line
-        if profitData.outputPrice > 0 then
-            local pVal = profitData.groundUpProfit
-            local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-            local pStr = FormatMoney(math.abs(pVal))
-            local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-            local directComp = ""
-            if cost.optimalSavings > 0 then
-                local dVal = profitData.directProfit
-                local dStr = FormatMoney(math.abs(dVal))
-                local dCol = (dVal >= 0) and "+ " or "- "
-                directComp = string.format(" |cff888888(Direct: %s%s)|r", dCol, dStr)
-            end
-            infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)%s", pCol, pStr, mCol, profitData.groundUpMarginPct, directComp))
-            infoFrame.profitLabel:Show()
-        else
-            infoFrame.profitLabel:SetText(outputItemID and
-                "|cff888888Profit: No AH price for output item|r" or
-                "|cff888888Profit: No item output|r")
-            infoFrame.profitLabel:Show()
-        end
+        -- Determine layout type:
+        -- Single-column classic (Era/Vanilla/Anniversary): frame width <= 500 with detail pane below recipe list.
+        -- Two-column classic (WoW Forever / WotLK / Cata): frame width > 500 with detail pane in right column.
+        local detailScroll = TradeSkillDetailScrollFrame
+        local frameWidth = TradeSkillFrame.GetWidth and TradeSkillFrame:GetWidth() or 0
+        local isOneColumn = (frameWidth > 0 and frameWidth <= 500) and (detailScroll ~= nil)
 
-        -- Warnings
-        if profitData.hasWarnings and #profitData.warnings > 0 then
-            infoFrame.warningLabel:SetText("|cffff9900Warning: " .. table.concat(profitData.warnings, ", ") .. "|r")
-            infoFrame.warningLabel:Show()
-        else
-            infoFrame.warningLabel:Hide()
-        end
-
-        -- Anchoring: coordinate with or without Auctionator
         infoFrame:ClearAllPoints()
-        local originalFirstLine = TradeSkillDescription or TradeSkillReagentLabel
-        if AuctionatorCraftingInfo and AuctionatorCraftingInfo:IsShown() then
-            -- Auctionator owns this part of the layout. Undo our previous
-            -- shift before anchoring to its panel, if that shift is still live.
-            if infoFrame.shiftedDescription and infoFrame.origPoint then
-                local _, relativeTo = infoFrame.shiftedDescription:GetPoint(1)
-                if relativeTo == infoFrame then
-                    local anchor = infoFrame.origPoint
-                    infoFrame.shiftedDescription:ClearAllPoints()
-                    infoFrame.shiftedDescription:SetPoint(anchor[1], anchor[2], anchor[3], anchor[4], anchor[5])
+
+        if isOneColumn then
+            -- Single-column classic layout (Era/Vanilla/Anniversary)
+            -- Position in the empty upper-right area of TradeSkillDetailScrollFrame next to TradeSkillSkillName.
+            -- This preserves all native reagents, NEVER shifts TradeSkillDescription or TradeSkillReagentLabel,
+            -- and completely prevents anchor cycles with Auctionator or other addons.
+            if infoFrame.SetParent then infoFrame:SetParent(TradeSkillFrame) end
+            if detailScroll and detailScroll.GetFrameLevel and infoFrame.SetFrameLevel then
+                infoFrame:SetFrameLevel(detailScroll:GetFrameLevel() + 5)
+            end
+            infoFrame:SetPoint("TOPRIGHT", detailScroll, "TOPRIGHT", -24, -2)
+            infoFrame:SetSize(136, 46)
+
+            -- Buttons: compact top row
+            btnBreakdown:ClearAllPoints()
+            btnBreakdown:SetPoint("TOPLEFT", infoFrame, "TOPLEFT", 0, 0)
+            btnBreakdown:SetSize(66, 18)
+            btnBreakdown:SetText("Breakdown")
+            btnBreakdown:Show()
+
+            btnCraftList:ClearAllPoints()
+            btnCraftList:SetPoint("LEFT", btnBreakdown, "RIGHT", 4, 0)
+            btnCraftList:SetSize(66, 18)
+            btnCraftList:SetText("+ Craft List")
+            btnCraftList:Show()
+
+            -- Labels: direct cost and profit margin
+            infoFrame.costLabel:ClearAllPoints()
+            infoFrame.costLabel:SetPoint("TOPLEFT", btnBreakdown, "BOTTOMLEFT", 0, -3)
+            infoFrame.costLabel:SetWidth(136)
+            infoFrame.costLabel:SetText("Cost: " .. directStr)
+            infoFrame.costLabel:Show()
+
+            infoFrame.groundUpLabel:Hide() -- Available in rich tooltip on hover
+
+            infoFrame.profitLabel:ClearAllPoints()
+            infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.costLabel, "BOTTOMLEFT", 0, -1)
+            infoFrame.profitLabel:SetWidth(136)
+            if profitData.outputPrice > 0 then
+                local pVal = profitData.groundUpProfit
+                local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                local pStr = FormatMoney(math.abs(pVal))
+                local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.groundUpMarginPct))
+            else
+                infoFrame.profitLabel:SetText("|cff888888Profit: No AH price|r")
+            end
+            infoFrame.profitLabel:Show()
+
+            if profitData.hasWarnings and #profitData.warnings > 0 then
+                infoFrame.warningLabel:ClearAllPoints()
+                infoFrame.warningLabel:SetPoint("TOPLEFT", infoFrame.profitLabel, "BOTTOMLEFT", 0, -1)
+                infoFrame.warningLabel:SetWidth(136)
+                infoFrame.warningLabel:SetText("|cffff9900! Price warnings|r")
+                infoFrame.warningLabel:Show()
+            else
+                infoFrame.warningLabel:Hide()
+            end
+        else
+            -- Two-column classic layout (WoW Forever / WotLK / Cata)
+            -- Detail pane is on the right column with plenty of width.
+            if infoFrame.SetParent then infoFrame:SetParent(TradeSkillFrame) end
+            if infoFrame.SetFrameLevel and TradeSkillFrame.GetFrameLevel then
+                infoFrame:SetFrameLevel(TradeSkillFrame:GetFrameLevel() + 5)
+            end
+            local width = 240
+            infoFrame:SetWidth(width)
+
+            infoFrame.costLabel:ClearAllPoints()
+            infoFrame.costLabel:SetPoint("TOPLEFT", infoFrame, "TOPLEFT", 0, 0)
+            infoFrame.costLabel:SetWidth(width)
+            infoFrame.costLabel:SetText("To Craft: " .. directStr)
+            infoFrame.costLabel:Show()
+
+            infoFrame.groundUpLabel:ClearAllPoints()
+            infoFrame.groundUpLabel:SetPoint("TOPLEFT", infoFrame.costLabel, "BOTTOMLEFT", 0, -2)
+            infoFrame.groundUpLabel:SetWidth(width)
+            if cost.optimalSavings > 0 then
+                local saveStr = FormatMoney(cost.optimalSavings)
+                infoFrame.groundUpLabel:SetText(string.format("Ground-Up: %s |cff00ff00(-%s / %d%%)|r", groundUpStr, saveStr, cost.optimalSavingsPct))
+            else
+                infoFrame.groundUpLabel:SetText("Ground-Up: " .. groundUpStr)
+            end
+            infoFrame.groundUpLabel:Show()
+
+            infoFrame.profitLabel:ClearAllPoints()
+            infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.groundUpLabel, "BOTTOMLEFT", 0, -2)
+            infoFrame.profitLabel:SetWidth(width)
+            if profitData.outputPrice > 0 then
+                local pVal = profitData.groundUpProfit
+                local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                local pStr = FormatMoney(math.abs(pVal))
+                local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                local directComp = ""
+                if cost.optimalSavings > 0 then
+                    local dVal = profitData.directProfit
+                    local dStr = FormatMoney(math.abs(dVal))
+                    local dCol = (dVal >= 0) and "+ " or "- "
+                    directComp = string.format(" |cff888888(Direct: %s%s)|r", dCol, dStr)
+                end
+                infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)%s", pCol, pStr, mCol, profitData.groundUpMarginPct, directComp))
+                infoFrame.profitLabel:Show()
+            else
+                infoFrame.profitLabel:SetText(outputItemID and
+                    "|cff888888Profit: No AH price for output item|r" or
+                    "|cff888888Profit: No item output|r")
+                infoFrame.profitLabel:Show()
+            end
+
+            if profitData.hasWarnings and #profitData.warnings > 0 then
+                infoFrame.warningLabel:ClearAllPoints()
+                infoFrame.warningLabel:SetPoint("TOPLEFT", infoFrame.profitLabel, "BOTTOMLEFT", 0, -2)
+                infoFrame.warningLabel:SetWidth(width)
+                infoFrame.warningLabel:SetText("|cffff9900Warning: " .. table.concat(profitData.warnings, ", ") .. "|r")
+                infoFrame.warningLabel:Show()
+            else
+                infoFrame.warningLabel:Hide()
+            end
+
+            local textHeight = 0
+            for _, label in ipairs({ infoFrame.costLabel, infoFrame.groundUpLabel,
+                infoFrame.profitLabel, infoFrame.warningLabel }) do
+                if label:IsShown() then
+                    textHeight = textHeight + (label.GetStringHeight and label:GetStringHeight() or 12) + 2
                 end
             end
-            infoFrame:SetPoint("TOPLEFT", AuctionatorCraftingInfo, "BOTTOMLEFT", 0, -2)
-        elseif originalFirstLine then
-            local point, relativeTo, relativePoint, x, y = originalFirstLine:GetPoint(1)
-            if relativeTo ~= infoFrame or infoFrame.shiftedDescription ~= originalFirstLine then
-                -- Blizzard may reset this anchor on recipe changes. Save the
-                -- current native point before moving the label below us.
-                infoFrame.origPoint = { point, relativeTo, relativePoint, x, y }
-                infoFrame.shiftedDescription = originalFirstLine
-            end
-            local anchor = infoFrame.origPoint
-            if anchor and anchor[1] and anchor[2] and anchor[2] ~= originalFirstLine then
-                -- Never anchor MarketSync to the label we move beneath it:
-                -- doing so creates a dependency cycle on the next refresh.
-                infoFrame:SetPoint(anchor[1], anchor[2], anchor[3], anchor[4], anchor[5])
+
+            btnBreakdown:ClearAllPoints()
+            btnBreakdown:SetPoint("TOPLEFT", infoFrame, "TOPLEFT", 0, -textHeight - 4)
+            btnBreakdown:SetSize(96, 18)
+            btnBreakdown:SetText("Breakdown ▼")
+            btnBreakdown:Show()
+
+            btnCraftList:ClearAllPoints()
+            btnCraftList:SetPoint("LEFT", btnBreakdown, "RIGHT", 4, 0)
+            btnCraftList:SetSize(96, 18)
+            btnCraftList:SetText("+ Craft List")
+            btnCraftList:Show()
+
+            infoFrame:SetSize(width, textHeight + 26)
+
+            -- Anchor cleanly inside the right column without touching native Blizzard labels
+            if AuctionatorCraftingInfo and AuctionatorCraftingInfo:IsShown()
+                and not DependsOnRegion(AuctionatorCraftingInfo, infoFrame) then
+                infoFrame:SetPoint("TOPLEFT", AuctionatorCraftingInfo, "BOTTOMLEFT", 0, -4)
+            elseif detailScroll then
+                infoFrame:SetPoint("TOPLEFT", detailScroll, "TOPLEFT", 0, 0)
             else
                 infoFrame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 210, -120)
             end
-            if relativeTo ~= infoFrame then
-                originalFirstLine:ClearAllPoints()
-                originalFirstLine:SetPoint("TOPLEFT", infoFrame, "BOTTOMLEFT", 0, -6)
-            end
-        else
-            infoFrame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 210, -120)
         end
+
+        -- Rich hover details for info frame
+        infoFrame:SetScript("OnEnter", function(self)
+            if not self.currentRecipe then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(self.currentRecipe.name or "Craft Information", 1, 0.82, 0)
+            GameTooltip:AddDoubleLine("Direct Craft Cost:", directStr, 0.9, 0.9, 0.9, 1, 1, 1)
+            if cost.optimalSavings > 0 then
+                local saveStr = FormatMoney(cost.optimalSavings)
+                GameTooltip:AddDoubleLine("Ground-Up Optimal:", string.format("%s (-%s / %d%%)", groundUpStr, saveStr, cost.optimalSavingsPct), 0.9, 0.9, 0.9, 0.2, 1, 0.2)
+            else
+                GameTooltip:AddDoubleLine("Ground-Up Cost:", groundUpStr, 0.9, 0.9, 0.9, 1, 1, 1)
+            end
+            if profitData.outputPrice > 0 then
+                GameTooltip:AddDoubleLine("AH Market Price:", FormatMoney(profitData.outputPrice), 0.9, 0.9, 0.9, 1, 1, 1)
+                local pVal = profitData.groundUpProfit
+                local pCol = (pVal >= 0) and "+ " or "- "
+                GameTooltip:AddDoubleLine("Estimated Profit:", string.format("%s%s (%d%%)", pCol, FormatMoney(math.abs(pVal)), profitData.groundUpMarginPct), 0.9, 0.9, 0.9, pVal >= 0 and 0.2 or 1, pVal >= 0 and 1 or 0.2, 0.2)
+            else
+                GameTooltip:AddDoubleLine("AH Market Price:", "No data", 0.9, 0.9, 0.9, 0.6, 0.6, 0.6)
+            end
+            if profitData.hasWarnings and #profitData.warnings > 0 then
+                GameTooltip:AddLine(" ")
+                for _, w in ipairs(profitData.warnings) do
+                    GameTooltip:AddLine("Warning: " .. w, 1, 0.6, 0.2, true)
+                end
+            end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Click Breakdown for interactive materials tree.", 0.6, 0.8, 1, true)
+            GameTooltip:AddLine("Click + Craft List to add to your shopping list.", 0.6, 0.8, 1, true)
+            GameTooltip:Show()
+        end)
+        infoFrame:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
 
         infoFrame:Show()
     end
@@ -1006,6 +1260,19 @@ local function InitModernProfessionsHook()
     infoFrame.btnCraftList = btnCraftList
 
     local function UpdateModernCraftingInfo()
+        for _, slots in pairs(schematicForm.reagentSlots or {}) do
+            for _, slot in ipairs(slots) do
+                HookProfessionItemButton(slot.Button, function(button)
+                    local reagent = button.GetReagent and button:GetReagent()
+                    return reagent and reagent.itemID
+                end)
+            end
+        end
+        HookProfessionItemButton(schematicForm.OutputIcon, function()
+            local info = schematicForm.GetRecipeInfo and schematicForm:GetRecipeInfo()
+            return info and C_TradeSkillUI.GetRecipeItemLink
+                and ItemIDFromLink(C_TradeSkillUI.GetRecipeItemLink(info.recipeID))
+        end)
         if not MarketSyncDB or MarketSyncDB.EnableProfessionCraftInfo == false then
             infoFrame:Hide()
             return
@@ -1087,9 +1354,10 @@ local function InitModernProfessionsHook()
 
         infoFrame:ClearAllPoints()
         local reagents = schematicForm.Reagents
-        if AuctionatorCraftingInfoProfessionsFrame and AuctionatorCraftingInfoProfessionsFrame:IsShown() then
+        if AuctionatorCraftingInfoProfessionsFrame and AuctionatorCraftingInfoProfessionsFrame:IsShown()
+            and not DependsOnRegion(AuctionatorCraftingInfoProfessionsFrame, infoFrame) then
             infoFrame:SetPoint("TOPLEFT", AuctionatorCraftingInfoProfessionsFrame, "BOTTOMLEFT", 0, -4)
-        elseif reagents then
+        elseif reagents and not DependsOnRegion(reagents, infoFrame) then
             infoFrame:SetPoint("TOPLEFT", reagents, "BOTTOMLEFT", 0, -10)
         else
             infoFrame:SetPoint("BOTTOMLEFT", schematicForm, "BOTTOMLEFT", 20, 20)
@@ -1120,13 +1388,26 @@ end
 local hookWatcher = CreateFrame("Frame")
 hookWatcher:RegisterEvent("ADDON_LOADED")
 hookWatcher:RegisterEvent("TRADE_SKILL_SHOW")
+-- CRAFT_SHOW belongs to the older Craft UI and is absent on modern clients.
+-- Validate before registering: some clients report an unknown event even when
+-- RegisterEvent is called inside pcall.
+local canRegisterCraftShow
+if C_EventUtils and C_EventUtils.IsEventValid then
+    canRegisterCraftShow = C_EventUtils.IsEventValid("CRAFT_SHOW")
+else
+    canRegisterCraftShow = type(GetCraftInfo) == "function" and type(GetCraftItemLink) == "function"
+end
+if canRegisterCraftShow then hookWatcher:RegisterEvent("CRAFT_SHOW") end
 
 hookWatcher:SetScript("OnEvent", function(self, event, arg1)
-    if event == "TRADE_SKILL_SHOW" then
+    if event == "CRAFT_SHOW" then
+        InitClassicCraftItemHooks()
+    elseif event == "TRADE_SKILL_SHOW" then
         InitClassicTradeSkillHook()
     elseif event == "ADDON_LOADED" then
         if arg1 == "Blizzard_TradeSkillUI" or arg1 == "Blizzard_CraftUI" then
             InitClassicTradeSkillHook()
+            InitClassicCraftItemHooks()
         elseif arg1 == "Blizzard_Professions" then
             InitModernProfessionsHook()
         end
@@ -1134,6 +1415,7 @@ hookWatcher:SetScript("OnEvent", function(self, event, arg1)
 end)
 
 -- Attempt immediate initialization if frame is already present
+InitClassicCraftItemHooks()
 if TradeSkillFrame then
     InitClassicTradeSkillHook()
 end

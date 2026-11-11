@@ -7,6 +7,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7-rc4-local21] - 2026-11-10
+
+### Changed & Added
+- **Crafting & Materials Window Native Warcraft Interface Reskin**:
+  - Reskinned the Crafting Manager window (`MarketSyncCraftManager`) from an oversized, flat 1060px dialog box into an authentic Blizzard double-wide panel (`832x480`), matching the authentic dimensions and styling of `AuctionFrame`, `TradeSkillFrame`, and `MarketSyncMainFrame`.
+  - Added native Blizzard frame embellishments: circular portrait ring (`Interface\Minimap\UI-Minimap-Border`) with blacksmithing hammer emblem, centered arched header banner plate (`Interface\DialogFrame\UI-DialogBox-Header`), and authentic `UIPanelCloseButton`.
+  - Reorganized the 3 core functional panes into a balanced, uncluttered 3-column workflow within 832px:
+    - **Left Pane (`panes[3]` - Craft Queue & Plans, 250px)**: Displays pending and saved crafts, status indicators, and dedicated management action buttons (`Mark Crafted`, `Record Sale`, `Remove Craft`, `Craft History`).
+    - **Middle Pane (`panes[1]` - Recipe Breakdown Tree, 278px)**: Hierarchical expandable ingredient breakdown tree with item icons, quantity needed, and dropdown selection (`Buy`, `Craft`, `Provide`).
+    - **Right Pane (`panes[2]` - Purchase Plan & Recorded Costs, 256px)**: Live calculated material shopping plan, right-click purchase prompt, and financial cost breakdowns.
+  - Re-anchored top toolbar strip (`800x30`) with authentic Blizzard buttons for preset ground-up strategies (`Optimal`, `Buy Finished`, `Craft All Raw`), saved plan import, customer craft attribution, actual output recording, and profession popout menu.
+  - Added authentic docked bottom tabs (`Materials & Planning` and `Craft History`) docked directly onto the bottom border matching the main MarketSync frame.
+  - Upgraded bottom footer with a 36x36 output item icon enclosed in a `UI-Quickslot2` border, selection context text, and aligned action buttons (`Export Shopping`, `Add to Craft List` / `Update Craft`, and `Close`).
+  - Updated layout verification suite (`tests/test_craft_manager_layout.js`) to assert standard double-wide 832x480 dimensions and verified all 19 test suites pass.
+
+## [0.9.7-rc4-local20] - 2026-11-10
+
+### Changed & Fixed
+- **Clean Main Window Tabs (Reverted Icons)**:
+  - Ensured all bottom tabs on the main MarketSync frame (`Personal Scan`, `Guild Sync`, `Neutral AH`, `Analytics`, `Debugging`) are rendered cleanly without embedded icon badges, matching the uncluttered look of 0.9.7.
+- **Ledger Beta Feature Button & Shortcut Disabling**:
+  - When the Transactional Item Ledger is disabled (`EnableLedgerBeta == false`):
+    - All UI buttons opening the Item Ledger are disabled and dimmed to 50% opacity:
+      - Main frame title-bar "Ledger" button (`MainFrame.LedgerButton`)
+      - Craft Manager header "Item Ledger" button (`f.ledgerBtn`)
+      - Craft row right-click context menu option ("Open Item Ledger" is disabled and greyed out)
+    - Minimap icon shortcuts (right-click on primary icon, left-click on dedicated ledger icon) are disabled and display an informative tooltip indicating the beta feature is disabled in AddOn Settings.
+    - Slash command shortcuts (`/ledger`, `/msledger`, `/ms ledger`, `/ms items`) inform the player that the feature is disabled in settings rather than opening a blank or broken ledger.
+    - Direct API entry points (`MarketSync.OpenItemLedger` and `MarketSync.ToggleItemLedger`) fail safely and return `nil`.
+    - Disabling the beta dynamically in AddOn Settings hides `MarketSyncItemLedger` if currently open and immediately refreshes all button states via `MarketSync.UpdateLedgerUIState()`.
+- **Parallelized Multi-Realm Name Matching for Guild Sync**:
+  - Enhanced `MarketSync.NormalizeSyncRealm(realm)` to support numbered backend shard realms (0-100+) with any delimiter or spacing (e.g. `English 52`, `English52`, `English-52`, `English_52`), allowing seamless guild sync across multi-realm playsets.
+
+### Fixed
+- **Item Ledger Mass Resolution Script Timeout (`UI_ItemLedger.lua:998: script ran too long`)**:
+  - Fixed a watchdog script execution timeout when clicking "Clear All Bag Changes" or acknowledging large batches of storage/bag observations (100+ records).
+  - Implemented batch transaction mode (`I.BeginBatch()` / `I.EndBatch()`) in [ItemLedger.lua](file:///c:/Dev%20Projects/MarketSync/MarketSync/Ledger/ItemLedger.lua) to suppress synchronous intermediate UI refresh notifications during multi-record resolutions, opening inventory snapshots, and reconciliation passes.
+  - Added deferred frame refresh scheduling (`C_Timer.After(0)`) to `I.Refresh` in [UI_ItemLedger.lua](file:///c:/Dev%20Projects/MarketSync/MarketSync/Ledger/UI_ItemLedger.lua) and `L.Refresh` in [UI_CraftManager.lua](file:///c:/Dev%20Projects/MarketSync/MarketSync/Ledger/UI_CraftManager.lua), preventing cascade refresh loops when multiple transactions resolve in the same script handler.
+  - Optimized catalog item collection so costly multi-character inventory and item-name scans only run when viewing the Character Stock tab rather than on every activity stream update.
+  - Added unit test asserting mass observation resolution across 200+ records executes in a single UI refresh without script timeout.
+
+## [0.9.7-rc4-local18] - 2026-11-07
+
+### Fixed
+- **Restricted / Secret String Immunity across Chat & Ledger Handlers**:
+  - Fixed runtime errors occurring on modern WoW Retail (11.0+ The War Within / 12.0+ Midnight) and tainted execution environments:
+    - `MarketSync/Chat.lua:1842: attempt to index local 'sender' (a secret string value, while execution tainted by 'MarketSync')`
+    - `MarketSync/Ledger/InventoryTracking.lua:517: attempt to compare local 'message' (a secret string value, while execution tainted by 'MarketSync')`
+    - `MarketSync/Ledger/PurchaseList.lua:126: attempt to compare local 'message' (a secret string value, while execution tainted by 'MarketSync')`
+  - Added centralized detection helpers `MarketSync.IsSecretValue(val)` and `MarketSync.IsSafeString(val)` in [Config.lua](file:///c:/Dev%20Projects/MarketSync/MarketSync/Config.lua) using native Blizzard `issecretvalue()` with protected `pcall` fallbacks.
+  - Guarded incoming `CHAT_MSG_GUILD`, `CHAT_MSG_PARTY`, `CHAT_MSG_RAID`, `CHAT_MSG_SAY`, `CHAT_MSG_SYSTEM`, `CHAT_MSG_LOOT`, and `CHAT_MSG_ADDON` message text, senders, and prefixes so secret strings fail closed silently without invoking indexing, string matching, or equality operators on protected values.
+  - Ensured chat price check settings (`EnableChatPriceCheck`) are evaluated upfront before touching event arguments.
+  - Added automated test suite coverage for secret string protection and tainted context execution across all chat and ledger event pipelines.
+
+## [0.9.7-rc4-local17] - 2026-11-05
+
+### Fixed
+- **Mailbox Collection Lua Error (`InventoryTracking.lua:168: attempt to index local 'observation' (a nil value)`)**:
+  - Fixed a Lua runtime error when retrieving items or money from mailboxes (`TakeInboxItem`, `TakeInboxMoney`, and "Open All" in Blizzard's MailFrame).
+  - Added an early return check to `Collect` when the transactional ledger beta is disabled (`MarketSyncDB.EnableLedgerBeta = false`), preventing unnecessary collection tracking and record allocation while preserving lightweight mailbox inventory snapshots for tooltip holdings.
+  - Added a nil guard to `token` generation (`observation and ("mail:" .. observation.id) or ...`) so even if an observation record fails to generate, mailbox collection never throws a nil-indexing error.
+  - Added ledger beta check guards to `SendMail` and trade window event handlers.
+
+## [0.9.7-rc4-local16] - 2026-11-04
+
+### Changed
+- **Restored Clean Tabs without Icons**:
+  - Reverted the bottom navigation tabs on the main window to clean Warcraft-styled text tabs without icon overlays, eliminating visual clutter.
+- **Backend Shard (0–100) Realm Parallelization for Guild Sync**:
+  - Added full cross-shard realm normalization for Forever / Project Epoch servers where a single playstyle economy is sharded across backend realms 0 through 100 (e.g., `English 52`, `English`, `English 0`, `English 100`, `English-52`, `English_52`).
+  - Updated `MarketSync.NormalizeSyncRealm` and `MarketSync.IsSameSyncRealm` to strip trailing delimiters (spaces, hyphens, underscores, hash symbols) and numeric shard identifiers (0-100+) before comparing realm markets, ensuring guild members across different backend shards match and synchronize seamlessly.
+  - Enhanced `MarketSync.StripKnownRealmSuffix` to resolve hyphenated shard names (`Player-English-52`), correctly mapping them to the local sync realm and preventing players from being split into duplicate phantom entries in the Swarm Queue / Network Monitor.
+  - Updated `CHAT_MSG_ADDON` sender preprocessing so guild peers communicating from backend shards 0-100 are cleanly discovered, accepted, and deduplicated.
+
+## [0.9.7-rc4-local15] - 2026-11-04
+
+### Added
+- **Opt-In Transactional Item Ledger Beta Toggle (`MarketSyncDB.EnableLedgerBeta`)**:
+  - Placed the entire transactional ledger engine behind an explicit beta toggle (`MarketSyncDB.EnableLedgerBeta = false` by default) so users are never forced into background lot reconciliation, transactional logs, or FIFO cost burn while the ledger system is undergoing active development and testing.
+  - Added an in-window header toggle button `[Enable Beta]` / `[Beta: Active]` and an explanatory Warcraft-styled notice banner within the Item Ledger interface (`UI_ItemLedger`).
+  - Added a toggle checkbox in AddOn Settings (`Interface Options` -> `MarketSync` -> `Beta & Experimental Features`).
+
+### Changed
+- **Lightweight Multi-Character Observation Tracking**:
+  - Decoupled tooltip storage holdings (`I.Holdings(id)`) from the transactional lot/ledger engine.
+  - Bag, bank, mail, and equipped item counts across all characters continue to be tracked via lightweight storage snapshots and displayed on tooltips without running transactional diffs, auto-generating vendor/mail transactions, or creating opening inventory lots.
+- **Craft Tracking Decoupled from Transactional Lots**:
+  - Updated `CraftLedger` and `UI_CraftManager` so crafting workflows, recipe planning, material purchase lists, and manual expense tracking remain fully operational regardless of whether the transactional ledger beta is enabled or disabled.
+  - When the beta is disabled, craft creations and completions bypass transactional lot deductions and reserved cost locking without errors.
+
+## [0.9.7-rc4-local14] - 2026-11-04
+
+### Fixed
+- **Tooltip Active Refresh on Anonymous Frames & Recipe Schematic Buttons**:
+  - Fixed a Lua error (`Config.lua:1547: attempt to index a nil value`) triggered when pressing modifier keys (Shift/Ctrl) over anonymous buttons (e.g., `Blizzard_ProfessionsRecipeSchematicForm` recipe outputs and reagents in modern clients).
+  - Protected `owner:GetName()` evaluation in `MarketSync.RefreshActiveTooltip()` to ensure it returns a valid string before attempting string matching (`Character.*Slot`).
+  - Added slot bounds validation (`slot >= 1 and slot <= 19`) for character inventory tooltips.
+  - Added support for modern Retail `tip.RefreshData()` when `tip.supportsDataRefresh` is true, falling back safely via `pcall` to `tip:SetHyperlink(link)`.
+  - Added nil guards to `SkinModernScrollBar` for anonymous scroll frame / slider hierarchies.
+
+## [0.9.7-rc4-local13] - 2026-10-24
+
+### Fixed
+- **ItemRack Gear Swapping Performance & Ledger Inventory Tracking Isolation**:
+  - **Eliminated Gear Swap Ledger Pollution**: Resolved a major performance bottleneck where ItemRack set swaps (10-19 items equipped simultaneously) generated dozens of unwanted `inventory observation` transactions, unassigned ledger discrepancies, and expensive auction price queries.
+  - **Character Possession Invariant ($\Delta_{\text{character}} = \Delta_{\text{bags}} + \Delta_{\text{equipped}}$)**:
+    - Updated `I.Snapshot` so that moving items between bags and equipment slots on the same character evaluates to net zero possession delta ($\Delta = 0$). Internal swaps between bag slots or between bags and worn equipment are completely immune to ledger transactions.
+    - Exempted `storage == "equipped"` from creating `opening inventory` lots or `inventory observation` records, while preserving `character.storage["equipped"]` for tooltip holdings display (`Bags: X, Equipped: Y`).
+  - **Trailing Debounce for Rapid Inventory & Equipment Events**:
+    - Replaced the naive 0.3s timer with a proper trailing debounce timer (`0.35s` quiet window). Rapid bursts of 15-20 `BAG_UPDATE_DELAYED` and `PLAYER_EQUIPMENT_CHANGED` events from ItemRack or macro swaps push the timer forward, executing only a single lightweight snapshot after the entire set swap settles.
+  - **Throttled `SeedObservedStock` Execution**:
+    - Removed the heavy $O(N \times M)$ `SeedObservedStock()` lot-reconciliation loop from routine bag update and equipment change event handlers. `SeedObservedStock()` now runs strictly on `PLAYER_LOGIN`, `BANKFRAME_CLOSED`, and manual "Refresh storage" button clicks.
+    - Updated `SeedObservedStock()` so equipped gear is excluded from `unattributed inventory` generation, and possessed gear prevents lot destruction/loss when items are worn by the player.
+
+## [0.9.7-rc4-local12] - 2026-10-23
+
+### Fixed
+- **Crafting Page Native Layout Preservation (Classic Era & Non-Forever Clients)**:
+  - Fixed a critical layout bug where MarketSync's profession breakout in Classic Era was pushed outside the window onto the game terrain (`TOPRIGHT, 10, -40`) and caused the crafting page's reagents and contents to disappear completely.
+  - **Eliminated Destructive Frame Mutations**: Removed all calls to `originalFirstLine:ClearAllPoints()` and `originalFirstLine:SetPoint(...)`. MarketSync no longer mutates Blizzard's native `TradeSkillDescription` or `TradeSkillReagentLabel`, guaranteeing that Blizzard's reagent lists (`TradeSkillReagent1..8`), labels, and craft contents are 100% intact, visible, and never displaced or clipped.
+  - **Eliminated Auctionator Anchor Cycle**: Removed the emergency cycle fallback that threw `infoFrame` outside the window. MarketSync and Auctionator now run completely decoupled without circular anchor dependencies.
+  - **Adaptive Layout Architecture (1-Column vs 2-Column)**:
+    - **1-Column Classic Layout (Era / Vanilla / Anniversary)**: Positioned the breakout buttons (`Breakdown` and `+ Craft List`) and direct cost/profit labels neatly within the empty upper-right quadrant of `TradeSkillDetailScrollFrame` (next to `TradeSkillSkillName`), leaving the reagents and Auctionator's pane below completely untouched and unobstructed.
+    - **2-Column Classic Layout (WoW Forever / WotLK / Cata)**: Positioned cleanly inside the right column without disturbing native Blizzard labels.
+  - **Session State Recovery**: Added automatic self-healing on addon load to restore native Blizzard anchor points if any prior session state or older addon version moved `TradeSkillDescription` or `TradeSkillReagentLabel`.
+  - **Rich Hover Tooltips**: Added interactive GameTooltip to the crafting info overlay showing direct craft cost, ground-up recursive cost with component savings, expected AH market price, profit margins, and reagent price warnings.
+
+## [0.9.7-rc4-local11] - 2026-10-21
+
+### Improved
+- **Authentic WoW Forever Window Framework**: Completely overhauled all secondary standalone windows (`UI_CraftManager.lua`, `UI_Monitor.lua` Task Manager & Rate Limiter, `UI_ItemLedger.lua`, `UI_PurchaseList.lua`, and `UI_Main.lua` dialogs) to use Blizzard's native dialog backdrops (`Interface\DialogFrame\UI-DialogBox-Background-Dark` + `Interface\DialogFrame\UI-DialogBox-Border`), authentic circular portrait emblem rings hanging at top-left (`Interface\Minimap\UI-Minimap-Border`), centered Blizzard header banner plates (`Interface\DialogFrame\UI-DialogBox-Header`), and native `UIPanelCloseButton` widgets.
+- **Restored Native Button Artwork**: Removed destructive `WHITE8X8` flat solid-color button texture overrides from `Theme.lua` (`T.Button`). Standard Blizzard `UIPanelButtonTemplate` buttons now preserve their authentic 3D beveled bronze/gold/red edges, embossed text, and proper hover/pressed states across all secondary windows.
+- **Authentic Inset Styling**: Updated `CreateModernInset` to use Blizzard's stone dialog background (`Interface\DialogFrame\UI-DialogBox-Background`) with `Interface\Tooltips\UI-Tooltip-Border` and column header plates (`Interface\Buttons\UI-Listbox-Highlight2`), replacing flat 1px white pixel rectangles with rich, authentic World of Warcraft pane architecture.
+- **Local Multi-Client Deployment**: Added `_forever_` client target to `.tools/install_local.ps1` and deployed `0.9.7-rc4-local11` across all local client installations (`_anniversary_`, `_classic_`, `_classic_beta_`, `_classic_era_`, `_classic_era_ptr_`, `_forever_`, and `_retail_`).
+
+
+### Added
+- Reorganized all Ledger and Inventory Tracking modules into a dedicated `MarketSync/Ledger/` subfolder (`CraftLedger.lua`, `PurchaseList.lua`, `ItemLedger.lua`, `InventoryTracking.lua`, `UI_CraftManager.lua`, `UI_ItemLedger.lua`, `UI_PurchaseList.lua`) with dedicated entry points: Minimap Right-Click (Shift-Right-Click for Settings), optional 2nd Ledger Minimap icon (`MarketSyncDB.EnableLedgerMinimapIcon`), a `Ledger` header bar button on the main MarketSync window, and `/ledger` / `/msledger` / `/ms ledger` slash commands.
+- Upgraded `UI_ItemLedger.lua` to **Design C (Progressive Hybrid)** featuring 4 top-level KPI summary cards, 3 view tabs (`In / Out Activity`, `Character Stock & Lots`, `Needs Review`), an In/Out direction filter (`Flow: In & Out`, `+In Only`, `-Out Only`), an inline Per-Item In/Out History drawer, and dedicated inspector cards for Auto-Tagged Materials, Zero-Cost Guild Crafts, Crafting Value Gained vs. Raw Mat AH Value, and Compacted Historical Rollups.
+- Added automatic material tagging (`ItemLedger.AutoTagMaterials`) to automatically tag confirmed incoming materials against active craft orders needing those reagents.
+- Added automatic zero-cost guild craft round-trip linking (`ItemLedger.AutoMatchGuildCraft` and `ItemLedger.LinkGuildCraft`) that detects 0-cost incoming materials from a counterparty, a matching craft, and output return to the same counterparty within 30 minutes, recording a zero-cost guild craft (`0c` material expense) and capturing any tip as service profit.
+- Added Crafting Value Gained vs. Raw Material AH Sell Value (`ItemLedger.EvaluateValueGained` and enhanced `CraftLedger.Totals`) comparing realized sale net against both FIFO Paid Cost and the 95% net AH opportunity value of the raw materials.
+- Added tiered logical ledger compaction (`ItemLedger.TrimLedger` and `ItemLedger.GetRollupSummary`) with configurable retention (`MarketSyncDB.LedgerRetentionDays`: 14, 30, 60, or 90 days) that compacts old settled transactions into primary `+/-` item and gold rollups while preserving unconsumed FIFO lots and unresolved items.
+- Compact multi-character inventory and processing tooltip layout inspired by Syndicator, showing 1-line total stock, character locations (`Main: Bags 10, Bank 20`), 1-line AH buyout price, and 1-line disenchanting EV.
+- Dynamic modifier key (`Shift` by default, configurable to `Ctrl` or `Alt`) expands tooltips instantly on keypress via `MODIFIER_STATE_CHANGED`, revealing per-storage snapshot ages, FIFO cost basis, customer craft demand, and full disenchant/milling probability tables.
+- Active craft demand integration in tooltips showing items needed across active craft ledger jobs and remaining output quantities in the craft queue.
+- AddOn settings configuration for tooltip modifier keys (`MarketSyncDB.TooltipModifier`) and craft demand toggling (`MarketSyncDB.EnableTooltipCraftDemand`).
+- Visual inventory ledger with item icons and tooltips, quality-colored names, transaction status labels, summary cards, name/player/item search, activity filters, readable item/cost/ownership cards, and context-sensitive action menus. Technical audit fields are hidden behind an explicit toggle.
+- Local item ledger with character/storage snapshots, optional ownership tooltips, confirmed mail/trade tracking, cost-preserving owned-character transfers, stock reservations, and an exchange review window.
+- Customer-supplied craft links separate custody, deliveries, earned payments, deposits, refunds, and own expenses. Unknown acquisition costs remain distinct from market estimates; unpaid services do not invent income.
+- Audited purchase/output corrections, inventory-verified creation receipts, and tracking for output-less profession actions through manual completion.
+- Classic Search Auctions has a Purchase List hover estimate and confirmation queue for the selected craft-linked shopping list. Plans prefer cheapest unit prices, disclose whole-stack extras and higher price tiers, revalidate each stack, and stop for a new review when auctions or required quantities change. Confirmed spending is linked to the selected craft; extra units retain their actual acquisition cost in the item ledger.
+- Three-pane craft manager with selectable pending jobs, editable Buy/Craft/Provide decisions, profession shortcuts, and linked temporary shopping lists that shrink as confirmed purchases arrive.
+- Character-owned purchase receipts and craft history. Completed crafts leave the pending queue; history retains material spending, manually recorded sale prices and fees, and profit on sold quantities.
+- Confirmed classic buyout and modern commodity/item purchase capture, localized creation-receipt tracking, manual purchase/completion fallbacks, and an explicit, repeat-safe import for previous saved craft plans.
+- Compact Craft breakout now summarizes pending crafts and outstanding purchases and opens the full manager. Existing jobs use Update Craft rather than creating duplicate entries.
+
+### Fixed
+- Unified MarketSync-owned window backgrounds, buttons and scrollbars with the selected Forever/Legacy theme. Large crafting, inventory ledger and purchase dialogs now share a workspace, restoring the originating craft when a child closes and preserving save/discard/cancel handling for drafts.
+- Skip the legacy CRAFT_SHOW event on clients that do not expose it, while retaining older Craft UI hooks on supported clients.
+- Prevented circular crafting-panel anchors when Auctionator's panel depends directly or indirectly on MarketSync. Dependent layouts use a stable profession-frame anchor, with guarded reagent-label restoration.
+
 ## [0.9.7-rc3] - 2026-10-13
 
 ### Fixed

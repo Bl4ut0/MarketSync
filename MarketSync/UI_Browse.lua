@@ -2274,6 +2274,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         end)
     end
 
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end
 -- Force load specific caches on demand

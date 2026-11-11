@@ -34,6 +34,14 @@ run(`
     assert(MarketSync.IsSameSyncRealm(base, base .. "2"))
     assert(MarketSync.IsSameSyncRealm(base .. "2", base .. "123"))
   end
+  -- Backend shard parallelization for 0 through 100 realms (e.g. "English 52", "English", "English 0", "English 100")
+  assert(MarketSync.IsSameSyncRealm("English", "English 52"))
+  assert(MarketSync.IsSameSyncRealm("English 52", "English 14"))
+  assert(MarketSync.IsSameSyncRealm("English 52", "English52"))
+  assert(MarketSync.IsSameSyncRealm("English 0", "English 100"))
+  assert(MarketSync.IsSameSyncRealm("English-52", "English_52"))
+  assert(MarketSync.IsSameSyncRealm("English #52", "English 52"))
+  assert(not MarketSync.IsSameSyncRealm("English 52", "German 52"))
   assert(not MarketSync.IsSameSyncRealm("PvP2", "PvE2"))
   assert(not MarketSync.IsSameSyncRealm("RP", "HC2"))
   assert(not MarketSync.IsSameSyncRealm("ClassicBetaPvP", "PvP2"))
@@ -133,5 +141,24 @@ run(`
   assert(download and download[1] == "M" and download[2] == 0
     and download[3] == "Guild Person-ClassicBetaPvP2" and download[4] == 995451,
     "fresh same-faction data must request the exact peer across numbered partitions")
+
+  -- Verify backend shard parallelization 0-100 on "English" playset
+  MarketSync.myRealm = "English"
+  peer = nil
+  peerStatus = nil
+  chatFrame:OnEvent("CHAT_MSG_ADDON", MarketSync.PREFIX,
+    "ADV;English 52@Horde;100;10;0.9.7-rc2;123;2;READY",
+    "GUILD", "Guild Person-English 52")
+  assert(peer == "Guild Person" and peerStatus == "Ready", "English 52 peer must be discovered when local realm is English")
+  peer = nil
+  chatFrame:OnEvent("CHAT_MSG_ADDON", MarketSync.PREFIX,
+    "ADV;English 100@Horde;100;10;0.9.7-rc2;123;2;READY",
+    "GUILD", "Guild Person-English 100")
+  assert(peer == "Guild Person" and peerStatus == "Ready", "English 100 peer must be discovered when local realm is English")
+  peer = nil
+  chatFrame:OnEvent("CHAT_MSG_ADDON", MarketSync.PREFIX,
+    "ADV;German 52@Horde;100;10;0.9.7-rc2;123;2;READY",
+    "GUILD", "Guild Person-German 52")
+  assert(peer == nil, "different realm language/playset must not match")
 `);
 console.log('PASS Forever playset comparison, peer discovery, PULL and BEGIN routing, and other-client isolation');

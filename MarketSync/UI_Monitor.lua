@@ -72,16 +72,16 @@ end
 local function CreateMonitorFrame()
     if MonitorFrame then return end
 
-    MonitorFrame = MarketSync.CreateModernDialog("MarketSyncMonitorFrame", 680, 560, "|cFFFFD100Network Monitor & Debug Console|r")
+    MonitorFrame = MarketSync.CreateModernDialog("MarketSyncMonitorFrame", 680, 560, "|cFFFFD100Network Monitor & Debug Console|r", "Interface\\Icons\\INV_Misc_Coin_01")
     MonitorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     MonitorFrame:SetFrameLevel(100)
     MonitorFrame:SetToplevel(true)
     MonitorFrame:Hide()
 
     -- Quick button to inspect all active background work.
-    local btnTaskMgr = CreateFrame("Button", nil, MonitorFrame.Header, "UIPanelButtonTemplate")
-    btnTaskMgr:SetSize(110, 20)
-    btnTaskMgr:SetPoint("RIGHT", MonitorFrame.CloseButton, "LEFT", -6, 0)
+    local btnTaskMgr = CreateFrame("Button", nil, MonitorFrame, "UIPanelButtonTemplate")
+    btnTaskMgr:SetSize(110, 22)
+    btnTaskMgr:SetPoint("TOPRIGHT", MonitorFrame, "TOPRIGHT", -36, -6)
     btnTaskMgr:SetText("Task Manager")
     btnTaskMgr:SetScript("OnClick", function()
         if MarketSync.ToggleTaskManager then
@@ -238,22 +238,111 @@ end
 -- ================================================================
 MarketSync.SwarmPeers = {}
 
+local TRANSIENT_SWARM_STATES = {
+    ["Electing Sync Source"] = true,
+    ["Awaiting Data"] = true,
+    ["Awaiting Neutral Data"] = true,
+    ["Receiving"] = true,
+    ["Receiving Neutral"] = true,
+    ["Sending"] = true,
+    ["Sending Neutral"] = true,
+    ["Observing Sync"] = true,
+    ["Throttled"] = true,
+}
+
+local function NormalizeSwarmPeerKey(name)
+    return string.lower(tostring(name or "")):gsub("[%s%-]+", "")
+end
+
+local function CanonicalizeSwarmUser(user)
+    if not user or user == "" then return nil, false end
+    local raw = tostring(user)
+    if MarketSync.StripKnownRealmSuffix then
+        raw = select(1, MarketSync.StripKnownRealmSuffix(raw))
+    else
+        local base, suffix = raw:match("^(.+)%-([^%-]+)$")
+        local localRealm = MarketSync.myRealm
+            or (type(GetNormalizedRealmName) == "function" and GetNormalizedRealmName())
+            or (type(GetRealmName) == "function" and GetRealmName())
+        if base and suffix and localRealm and localRealm ~= ""
+            and (string.lower(suffix) == string.lower(localRealm)
+                or (MarketSync.IsSameSyncRealm and MarketSync.IsSameSyncRealm(suffix, localRealm))) then
+            raw = base
+        end
+    end
+
+    local isLocal = MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(raw) or false
+    if isLocal then
+        -- If passed a hyphenated First-Last (e.g. "Blauto-Theblind"), convert to the clean space-separated display name
+        if raw:find("-", 1, true) and MarketSync.GetLocalPlayerDisplayName then
+            raw = MarketSync.GetLocalPlayerDisplayName()
+        end
+    end
+    return raw, isLocal
+end
+
 function MarketSync.UpdateSwarmUI(user, status)
     if user then
-        if status then
-            MarketSync.SwarmPeers[user] = { status = status, time = time() }
-        else
-            -- Instead of deleting the user when they finish, drop them to Idle.
-            if MarketSync.SwarmPeers[user] then
-                local isLocal = MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(user)
-                local fallback = (isLocal and not IsInGuild()) and "No Guild" or "Idle"
-                MarketSync.SwarmPeers[user].status = fallback
-                MarketSync.SwarmPeers[user].time = time()
+        local canonical, isLocal = CanonicalizeSwarmUser(user)
+        if canonical and canonical ~= "" then
+            local normTarget = NormalizeSwarmPeerKey(canonical)
+            local existingKey = nil
+            for peerKey in pairs(MarketSync.SwarmPeers) do
+                local peerIsLocal = isLocal and MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(peerKey)
+                local sameNormalized = NormalizeSwarmPeerKey(peerKey) == normTarget
+                if peerIsLocal or sameNormalized then
+                    if not existingKey or peerKey == canonical or (#peerKey > #existingKey and not peerKey:find("-", 1, true)) then
+                        existingKey = peerKey
+                    end
+                end
+            end
+
+            if status then
+                -- Remove any duplicate alias keys for this same player/peer before writing
+                for peerKey in pairs(MarketSync.SwarmPeers) do
+                    local peerIsLocal = isLocal and MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(peerKey)
+                    local sameNormalized = NormalizeSwarmPeerKey(peerKey) == normTarget
+                    if (peerIsLocal or sameNormalized) and peerKey ~= canonical then
+                        MarketSync.SwarmPeers[peerKey] = nil
+                    end
+                end
+                MarketSync.SwarmPeers[canonical] = { status = status, time = time() }
+            else
+                -- Instead of deleting the user when they finish, drop their existing entry to Idle
+                -- and remove any duplicate alias rows.
+                local targetKey = existingKey or (MarketSync.SwarmPeers[canonical] and canonical or nil)
+                if targetKey then
+                    local fallback = (isLocal and type(IsInGuild) == "function" and not IsInGuild()) and "No Guild" or "Idle"
+                    for peerKey in pairs(MarketSync.SwarmPeers) do
+                        local peerIsLocal = isLocal and MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(peerKey)
+                        local sameNormalized = NormalizeSwarmPeerKey(peerKey) == normTarget
+                        if (peerIsLocal or sameNormalized) and peerKey ~= targetKey then
+                            MarketSync.SwarmPeers[peerKey] = nil
+                        end
+                    end
+                    MarketSync.SwarmPeers[targetKey] = { status = fallback, time = time() }
+                end
             end
         end
     end
     
     ScheduleMonitorRefresh()
+end
+
+function MarketSync.ClearTransientSwarmStates()
+    local now = time()
+    local changed = false
+    for peerKey, info in pairs(MarketSync.SwarmPeers) do
+        if type(info) == "table" and TRANSIENT_SWARM_STATES[info.status] then
+            local isLocal = MarketSync.IsLocalSyncIdentity and MarketSync.IsLocalSyncIdentity(peerKey)
+            info.status = (isLocal and type(IsInGuild) == "function" and not IsInGuild()) and "No Guild" or "Idle"
+            info.time = now
+            changed = true
+        end
+    end
+    if changed then
+        ScheduleMonitorRefresh()
+    end
 end
 
 RenderSwarmUI = function()
@@ -277,7 +366,10 @@ RenderSwarmUI = function()
         if statusText == "Receiving" then return 6 end
         if statusText == "Awaiting Neutral Data" then return 6 end
         if statusText == "Awaiting Data" then return 5 end
+        if statusText == "Electing Sync Source" then return 5 end
+        if statusText == "Observing Sync" then return 5 end
         if statusText == "Neutral Capture" then return 5 end
+        if statusText == "Throttled" then return 4 end
         if statusText == "Waiting" then return 4 end
         if string.find(statusText, "Blocked", 1, true) then return 4 end
         if statusText == "Ready" then return 3 end
@@ -297,7 +389,10 @@ RenderSwarmUI = function()
         if statusText == "Receiving" then return "|cff66ffcc" end
         if statusText == "Awaiting Neutral Data" then return "|cff66ccff" end
         if statusText == "Awaiting Data" then return "|cffffff00" end
+        if statusText == "Electing Sync Source" then return "|cffffd100" end
+        if statusText == "Observing Sync" then return "|cff88ccff" end
         if statusText == "Neutral Capture" then return "|cff33ccff" end
+        if statusText == "Throttled" then return "|cffff8800" end
         if statusText == "Waiting" then return "|cffff8800" end
         if string.find(statusText, "Blocked", 1, true) then return "|cffffaa00" end
         if statusText == "Ready" then return "|cffffffff" end
@@ -422,7 +517,7 @@ end
 local function CreateTaskManagerFrame()
     if TaskManagerFrame then return end
     TaskManagerFrame = MarketSync.CreateModernDialog("MarketSyncTaskManagerFrame", 760, 570,
-        "|cFFFFD100MarketSync Task Manager|r")
+        "|cFFFFD100MarketSync Task Manager|r", "Interface\\Icons\\INV_Misc_Book_09")
     TaskManagerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     TaskManagerFrame:SetFrameLevel(110)
     TaskManagerFrame:SetToplevel(true)
@@ -430,13 +525,37 @@ local function CreateTaskManagerFrame()
 
     local workPanel = MarketSync.CreateModernInset(TaskManagerFrame, 14, -48, 454, 460)
     local memoryPanel = MarketSync.CreateModernInset(TaskManagerFrame, 476, -48, 270, 460)
+
+    local workHdr = workPanel:CreateTexture(nil, "BORDER")
+    workHdr:SetPoint("TOPLEFT", 3, -3)
+    workHdr:SetPoint("TOPRIGHT", -3, -3)
+    workHdr:SetHeight(26)
+    workHdr:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight2")
+    if workHdr.SetVertexColor then workHdr:SetVertexColor(0.50, 0.42, 0.28, 0.40) end
+
+    local workTitle = workPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    workTitle:SetPoint("LEFT", workHdr, "LEFT", 10, 0)
+    workTitle:SetText("|cffffd100Scanner & Background Tasks|r")
+
     local workText = workPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    workText:SetPoint("TOPLEFT", 12, -12)
+    workText:SetPoint("TOPLEFT", 12, -34)
     workText:SetWidth(430)
     workText:SetJustifyH("LEFT")
     TaskManagerFrame.workText = workText
+
+    local memHdr = memoryPanel:CreateTexture(nil, "BORDER")
+    memHdr:SetPoint("TOPLEFT", 3, -3)
+    memHdr:SetPoint("TOPRIGHT", -3, -3)
+    memHdr:SetHeight(26)
+    memHdr:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight2")
+    if memHdr.SetVertexColor then memHdr:SetVertexColor(0.50, 0.42, 0.28, 0.40) end
+
+    local memTitle = memoryPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    memTitle:SetPoint("LEFT", memHdr, "LEFT", 10, 0)
+    memTitle:SetText("|cffffd100Memory & Overhead|r")
+
     local memoryText = memoryPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    memoryText:SetPoint("TOPLEFT", 10, -12)
+    memoryText:SetPoint("TOPLEFT", 10, -34)
     memoryText:SetWidth(250)
     memoryText:SetJustifyH("LEFT")
     TaskManagerFrame.memoryText = memoryText
@@ -489,7 +608,7 @@ local RateMonitorFrame = nil
 local function CreateRateMonitorFrame()
     if RateMonitorFrame then return end
 
-    RateMonitorFrame = MarketSync.CreateModernDialog("MarketSyncRateMonitorFrame", 400, 440, "|cFFFFD100Network Rate Limiter|r")
+    RateMonitorFrame = MarketSync.CreateModernDialog("MarketSyncRateMonitorFrame", 400, 440, "|cFFFFD100Network Rate Limiter|r", "Interface\\Icons\\Spell_Nature_AstralRecalGroup")
     RateMonitorFrame:SetPoint("CENTER", UIParent, "CENTER", 200, 0)
     RateMonitorFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     RateMonitorFrame:SetFrameLevel(105)
@@ -531,13 +650,13 @@ local function CreateRateMonitorFrame()
     barTrack:SetSize(344, 20)
     barTrack:SetPoint("TOPLEFT", 14, -104)
     barTrack:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 }
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 }
     })
-    barTrack:SetBackdropColor(MarketSync.GetThemeColor("header"))
-    barTrack:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    barTrack:SetBackdropColor(0, 0, 0, 0.85)
+    barTrack:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.90)
 
     local rateBar = CreateFrame("StatusBar", nil, barTrack)
     rateBar:SetPoint("TOPLEFT", 1, -1)

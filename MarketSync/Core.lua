@@ -76,7 +76,17 @@ local function CreateMinimapButton()
                 end
                 return
             elseif button == "RightButton" then
-                if MarketSync.OpenSettings then MarketSync.OpenSettings() end
+                if IsShiftKeyDown and IsShiftKeyDown() then
+                    if MarketSync.OpenSettings then MarketSync.OpenSettings() end
+                elseif not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
+                    print("|cffffbb44[MarketSync]|r The Item Ledger is currently disabled. Enable it under AddOn Settings > Beta Features.")
+                elseif MarketSync.ToggleItemLedger then
+                    MarketSync.ToggleItemLedger()
+                elseif MarketSync.OpenItemLedger then
+                    MarketSync.OpenItemLedger()
+                elseif MarketSync.OpenSettings then
+                    MarketSync.OpenSettings()
+                end
             elseif button == "MiddleButton" then
                 if MarketSync_ToggleUI then
                     MarketSync_ToggleUI()
@@ -101,8 +111,13 @@ local function CreateMinimapButton()
             tooltip:AddLine("MarketSync")
             tooltip:AddLine(" ")
             tooltip:AddLine("|cFF00FF00Left-Click|r to Open Window")
+            if MarketSync.IsLedgerEnabled and MarketSync.IsLedgerEnabled() then
+                tooltip:AddLine("|cFF00FF00Right-Click|r to Open Item Ledger")
+            else
+                tooltip:AddLine("|cff888888Right-Click: Item Ledger (Disabled)|r")
+            end
             tooltip:AddLine("|cFF00FF00Middle-Click|r for Notifications")
-            tooltip:AddLine("|cFF00FF00Right-Click|r for Settings")
+            tooltip:AddLine("|cFF00FF00Shift-Right-Click|r for Settings")
             tooltip:AddLine("|cFF00FF00Shift-Left-Click|r to toggle alerts for this session")
             if MarketSync.NotificationsMuted then
                 tooltip:AddLine("|cffffaa00Alerts muted until logout|r")
@@ -112,6 +127,49 @@ local function CreateMinimapButton()
 
     icon:Register("MarketSync", MarketSyncLDB, MarketSyncDB.MinimapIcon)
     if MarketSyncDB.MinimapIcon.hide then icon:Hide("MarketSync") end
+
+    -- Optional 2nd Minimap Button dedicated to the Item & Craft Ledger
+    if not MarketSyncDB.LedgerMinimapIcon then
+        MarketSyncDB.LedgerMinimapIcon = { hide = not MarketSyncDB.EnableLedgerMinimapIcon, angle = 3.25, minimapPos = 195 }
+    end
+    MarketSyncDB.LedgerMinimapIcon.hide = not MarketSyncDB.EnableLedgerMinimapIcon
+    local MarketSyncLedgerLDB = ldb:NewDataObject("MarketSyncLedger", {
+        type = "launcher",
+        text = "MarketSync Ledger",
+        icon = "Interface\\Icons\\INV_Misc_Book_09",
+        OnClick = function(_, button)
+            if button == "RightButton" then
+                if MarketSync.OpenCraftManager then MarketSync.OpenCraftManager() end
+            else
+                if not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
+                    print("|cffffbb44[MarketSync]|r The Item Ledger is currently disabled. Enable it under AddOn Settings > Beta Features.")
+                    return
+                end
+                if MarketSync.ToggleItemLedger then
+                    MarketSync.ToggleItemLedger()
+                elseif MarketSync.OpenItemLedger then
+                    MarketSync.OpenItemLedger()
+                end
+            end
+        end,
+        OnTooltipShow = function(tooltip)
+            tooltip:AddLine("MarketSync Ledger")
+            tooltip:AddLine(" ")
+            if MarketSync.IsLedgerEnabled and MarketSync.IsLedgerEnabled() then
+                tooltip:AddLine("|cFF00FF00Left-Click|r to Toggle Item & Gold Ledger")
+            else
+                tooltip:AddLine("|cffff4444Item Ledger: Disabled in Settings|r")
+                tooltip:AddLine("|cff888888Left-Click disabled|r")
+            end
+            tooltip:AddLine("|cFF00FF00Right-Click|r to Open Craft Manager")
+        end,
+    })
+    icon:Register("MarketSyncLedger", MarketSyncLedgerLDB, MarketSyncDB.LedgerMinimapIcon)
+    if MarketSyncDB.LedgerMinimapIcon.hide then
+        icon:Hide("MarketSyncLedger")
+    else
+        icon:Show("MarketSyncLedger")
+    end
     
     -- Re-implement Flashing Overlay on the frame LibDBIcon created
     local btn = icon:GetMinimapButton("MarketSync")
@@ -164,6 +222,51 @@ function MarketSync.SetMinimapIconHidden(hidden)
         icon:Hide("MarketSync")
     else
         icon:Show("MarketSync")
+    end
+end
+
+function MarketSync.SetLedgerMinimapIconEnabled(enabled)
+    if not MarketSyncDB then return end
+    MarketSyncDB.EnableLedgerMinimapIcon = enabled and true or false
+    if not MarketSyncDB.LedgerMinimapIcon then MarketSyncDB.LedgerMinimapIcon = { angle = 3.25, minimapPos = 195 } end
+    MarketSyncDB.LedgerMinimapIcon.hide = not MarketSyncDB.EnableLedgerMinimapIcon
+    local icon = LibStub and LibStub("LibDBIcon-1.0", true)
+    if not icon or not icon:IsRegistered("MarketSyncLedger") then return end
+    if MarketSyncDB.LedgerMinimapIcon.hide then
+        icon:Hide("MarketSyncLedger")
+    else
+        icon:Show("MarketSyncLedger")
+    end
+end
+
+if not MarketSync.IsLedgerEnabled then
+    function MarketSync.IsLedgerEnabled()
+        return (MarketSyncDB and MarketSyncDB.EnableLedgerBeta == true) or false
+    end
+end
+
+if not MarketSync.SetLedgerEnabled then
+    function MarketSync.SetLedgerEnabled(enabled)
+        if not MarketSyncDB then return end
+        MarketSyncDB.EnableLedgerBeta = enabled and true or false
+        if enabled then
+            local t = MarketSync.InventoryTracking
+            if t and t.CaptureBags then t.CaptureBags() end
+            if MarketSync.ItemLedger and MarketSync.ItemLedger.SeedObservedStock then
+                MarketSync.ItemLedger.SeedObservedStock()
+            end
+        else
+            local w = MarketSyncItemLedger
+            if w and w.Hide and w:IsShown() then w:Hide() end
+        end
+        if MarketSync.ItemLedger and MarketSync.ItemLedger.Refresh then
+            MarketSync.ItemLedger.Refresh()
+        end
+        local w = MarketSyncItemLedger
+        if w and w.Refresh and w:IsShown() then w:Refresh() end
+        if MarketSync.UpdateLedgerUIState then
+            MarketSync.UpdateLedgerUIState()
+        end
     end
 end
 
@@ -436,7 +539,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 3: AUCTION HOUSE & SCANNING
     -- ================================================================
-    local cardAH = CreateCard(565, 216, cardProf, -16)
+    local cardAH = CreateCard(565, 308, cardProf, -16)
 
     local hAH = cardAH:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hAH:SetPoint("TOPLEFT", 16, -14)
@@ -472,6 +575,44 @@ local function PopulateAddonSettings(panel)
     CreateOptCheckbox(cardAH, 16, -174, "Enable Chat Price Check ('? [item]')",
         "Automatically answer queries from other players using '? [Item Link]'.",
         "EnableChatPriceCheck", true, nil)
+
+    CreateOptCheckbox(cardAH, 16, -204, "Show items on other characters",
+        "Show character names, quantities and last observed storage on item tooltips. Disable this display if your bag addon provides it. Inventory and craft bookkeeping remain active.",
+        "ShowItemsOnOtherCharacters", true, nil)
+
+    CreateOptCheckbox(cardAH, 16, -234, "Show Pending Craft Demand on Tooltips",
+        "Display crafting material requirements and queued craft items across active ledger jobs.",
+        "EnableTooltipCraftDemand", true, nil)
+
+    local modHeader = cardAH:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    modHeader:SetPoint("TOPLEFT", 16, -268)
+    modHeader:SetText("|cffffd700Details Modifier Key:|r")
+
+    local modDropdown = CreateFrame("Frame", "MarketSyncAddonTooltipModDropdown", cardAH, "UIDropDownMenuTemplate")
+    modDropdown:SetPoint("LEFT", modHeader, "RIGHT", -10, -2)
+    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(modDropdown, 100) end
+    if UIDropDownMenu_Initialize then
+        UIDropDownMenu_Initialize(modDropdown, function()
+            for _, m in ipairs({{"SHIFT", "Shift"}, {"CTRL", "Ctrl"}, {"ALT", "Alt"}}) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text, info.value = m[2], m[1]
+                info.checked = (MarketSyncDB and MarketSyncDB.TooltipModifier or "SHIFT") == m[1]
+                info.func = function()
+                    if MarketSyncDB then MarketSyncDB.TooltipModifier = m[1] end
+                    if UIDropDownMenu_SetText then UIDropDownMenu_SetText(modDropdown, m[2]) end
+                    if CloseDropDownMenus then CloseDropDownMenus() end
+                end
+                if UIDropDownMenu_AddButton then UIDropDownMenu_AddButton(info) end
+            end
+        end)
+    end
+
+    local function RefreshTooltipMod()
+        local current = MarketSyncDB and MarketSyncDB.TooltipModifier or "SHIFT"
+        local label = (current == "CTRL" and "Ctrl") or (current == "ALT" and "Alt") or "Shift"
+        if UIDropDownMenu_SetText then UIDropDownMenu_SetText(modDropdown, label) end
+    end
+    table.insert(refreshControls, RefreshTooltipMod)
 
     -- ================================================================
     -- CARD 4: AUDIO & NOTIFICATIONS
@@ -628,7 +769,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 5: DATA SYNC & SWARM
     -- ================================================================
-    local cardSwarm = CreateCard(565, 204, cardAudio, -16)
+    local cardSwarm = CreateCard(565, 268, cardAudio, -16)
 
     local hSwarm = cardSwarm:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hSwarm:SetPoint("TOPLEFT", 16, -14)
@@ -681,6 +822,39 @@ local function PopulateAddonSettings(panel)
         chkHideMinimap:SetChecked(MarketSyncDB and MarketSyncDB.MinimapIcon and MarketSyncDB.MinimapIcon.hide == true)
     end)
 
+    CreateOptCheckbox(cardSwarm, 16, -174, "Show Separate Ledger Minimap Icon",
+        "Display a dedicated second minimap button for one-click access to the MarketSync Item & Craft Ledger.",
+        "EnableLedgerMinimapIcon", false, function(val)
+            if MarketSync.SetLedgerMinimapIconEnabled then MarketSync.SetLedgerMinimapIconEnabled(val) end
+        end)
+
+    local retHeader = cardSwarm:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    retHeader:SetPoint("TOPLEFT", 16, -208)
+    retHeader:SetText("|cffffd700Ledger Detail Retention:|r")
+
+    local retDropdown = CreateFrame("Frame", "MarketSyncAddonLedgerRetDropdown", cardSwarm, "UIDropDownMenuTemplate")
+    retDropdown:SetPoint("LEFT", retHeader, "RIGHT", -10, -2)
+    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(retDropdown, 120) end
+    if UIDropDownMenu_Initialize then
+        UIDropDownMenu_Initialize(retDropdown, function()
+            for _, opt in ipairs({ { 14, "14 Days" }, { 30, "30 Days" }, { 60, "60 Days" }, { 90, "90 Days" } }) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text, info.value = opt[2], opt[1]
+                info.checked = (MarketSyncDB and tonumber(MarketSyncDB.LedgerRetentionDays) or 30) == opt[1]
+                info.func = function()
+                    if MarketSyncDB then MarketSyncDB.LedgerRetentionDays = opt[1] end
+                    if UIDropDownMenu_SetText then UIDropDownMenu_SetText(retDropdown, opt[2]) end
+                    if CloseDropDownMenus then CloseDropDownMenus() end
+                end
+                if UIDropDownMenu_AddButton then UIDropDownMenu_AddButton(info) end
+            end
+        end)
+    end
+    table.insert(refreshControls, function()
+        local days = MarketSyncDB and tonumber(MarketSyncDB.LedgerRetentionDays) or 30
+        if UIDropDownMenu_SetText then UIDropDownMenu_SetText(retDropdown, tostring(days) .. " Days") end
+    end)
+
     -- Swarm Action Buttons
     local btnManageUsers = CreateFrame("Button", nil, cardSwarm, "UIPanelButtonTemplate")
     btnManageUsers:SetPoint("TOPRIGHT", cardSwarm, "TOPRIGHT", -16, -54)
@@ -701,7 +875,7 @@ local function PopulateAddonSettings(panel)
     -- ================================================================
     -- CARD 6: BETA & EXPERIMENTAL FEATURES
     -- ================================================================
-    local cardBeta = CreateCard(565, 134, cardSwarm, -16)
+    local cardBeta = CreateCard(565, 154, cardSwarm, -16)
 
     local hBeta = cardBeta:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     hBeta:SetPoint("TOPLEFT", 16, -14)
@@ -724,6 +898,12 @@ local function PopulateAddonSettings(panel)
             if MainFrame and MainFrame.RefreshTabVisibility then MainFrame.RefreshTabVisibility() end
             if MarketSync.AuctionHouse and MarketSync.AuctionHouse.RefreshTabVisibility then MarketSync.AuctionHouse.RefreshTabVisibility() end
             if UpdateAudioAndAlertsCard then UpdateAudioAndAlertsCard() end
+        end)
+
+    CreateOptCheckbox(cardBeta, 16, -114, "|cffff6600[BETA]|r Enable Transactional Item Ledger",
+        "Tracks detailed transactional movement (vendor purchases/sales, trade, mail, inventory reconciliation, FIFO cost lots). When disabled, MarketSync uses lightweight inventory tracking for tooltip bag/bank counts without transactional ledger overhead.",
+        "EnableLedgerBeta", false, function(val)
+            if MarketSync.SetLedgerEnabled then MarketSync.SetLedgerEnabled(val) end
         end)
 
     local cardAppearance = CreateCard(565, 116, cardBeta, -16)
@@ -1102,6 +1282,7 @@ MarketSync.RegisterAuctionatorHooks = RegisterAuctionatorHooks
 
 local function SafeRegisterEvent(frame, eventName)
     if frame and eventName then
+        if C_EventUtils and C_EventUtils.IsEventValid and not C_EventUtils.IsEventValid(eventName) then return end
         pcall(frame.RegisterEvent, frame, eventName)
     end
 end
@@ -1671,6 +1852,16 @@ SlashCmdList["MarketSync"] = function(msg)
         if MarketSync_ToggleUI then
             MarketSync_ToggleUI()
         end
+    elseif cmd == "ledger" or cmd == "items" then
+        if not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
+            print("|cffffbb44[MarketSync]|r The Item Ledger is currently disabled. Enable it under AddOn Settings > Beta Features.")
+            return
+        end
+        if MarketSync.ToggleItemLedger then
+            MarketSync.ToggleItemLedger()
+        elseif MarketSync.OpenItemLedger then
+            MarketSync.OpenItemLedger()
+        end
     elseif cmd == "stats" or cmd == "config" then
         if Settings and Settings.OpenToCategory then
             Settings.OpenToCategory(category:GetID())
@@ -1684,7 +1875,22 @@ SlashCmdList["MarketSync"] = function(msg)
     else
         print("|cFF00FF00[MarketSync]|r Commands:")
         print("  /ms search - Open the browse window.")
+        print("  /ms ledger (or /ledger) - Open the Item & Gold Ledger.")
         print("  /ms config - Open settings panel.")
         print("  /ms block [name] - Block a sender.")
+    end
+end
+
+SLASH_MarketSyncLedger1 = "/ledger"
+SLASH_MarketSyncLedger2 = "/msledger"
+SlashCmdList["MarketSyncLedger"] = function()
+    if not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
+        print("|cffffbb44[MarketSync]|r The Item Ledger is currently disabled. Enable it under AddOn Settings > Beta Features.")
+        return
+    end
+    if MarketSync.ToggleItemLedger then
+        MarketSync.ToggleItemLedger()
+    elseif MarketSync.OpenItemLedger then
+        MarketSync.OpenItemLedger()
     end
 end

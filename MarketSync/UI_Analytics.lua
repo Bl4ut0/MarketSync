@@ -322,6 +322,7 @@ end
 -- ================================================================
 function MarketSync.CreateAnalyticsPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
+    local compactLegacy = parent.MarketSyncCompactLegacyLayout == true
     local LEFT_X = isEmbedded and 6 or 20
     local TOP_Y = isEmbedded and -6 or -68
     local BOTTOM_Y = isEmbedded and 6 or 35
@@ -1203,6 +1204,20 @@ function MarketSync.CreateAnalyticsPanel(parent)
     debugNote:SetJustifyH("LEFT")
     debugNote:SetText("|cFF888888Intraday analytics compute cyclical price dips based on 30-minute scan snapshots across sessions.|r")
 
+    if compactLegacy then
+        -- Classic hosts are shorter than the modern AH. Reserve space for all
+        -- four metric rows and the explanatory note before sizing the chart.
+        local function FitLegacyChart()
+            local height = rightInset:GetHeight()
+            if height and height > 0 then
+                graphCard:SetHeight(math.max(100, height - 58 - 158))
+            end
+        end
+        rightInset:HookScript("OnSizeChanged", FitLegacyChart)
+        panel.FitLegacyChart = FitLegacyChart
+        FitLegacyChart()
+    end
+
     -- 4. Empty State Placeholder (Visible when no item is selected)
     local emptyState = CreateFrame("Frame", nil, rightInset)
     emptyState:SetAllPoints(rightInset)
@@ -1422,6 +1437,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     end
 
     function panel:OnShow()
+        if self.FitLegacyChart then self.FitLegacyChart() end
         RefreshItemsList()
         if panel.currentItem then
             panel:ShowItem(panel.currentItem.dbKey, panel.currentItem.link, panel.currentItem.name, panel.currentItem.icon, panel.currentItem.price)
@@ -1436,6 +1452,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     panel:SetScript("OnShow", panel.OnShow)
 
     table.insert(registeredPanels, panel)
+    if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end
 

@@ -839,8 +839,13 @@ test('classic crafting info never creates a reagent-label anchor cycle', () => {
         if anchor then return table.unpack(anchor) end
       end
       function r:ClearAllPoints() self.points = {} end
-      function r:SetSize() end
-      function r:SetWidth() end
+      function r:SetSize(w, h) self.width = w; self.height = h end
+      function r:SetWidth(w) self.width = w end
+      function r:GetWidth() return self.width or 600 end
+      function r:SetHeight(h) self.height = h end
+      function r:GetHeight() return self.height or 500 end
+      function r:SetParent(p) self.parent = p end
+      function r:GetParent() return self.parent end
       function r:SetText() end
       function r:SetJustifyH() end
       function r:SetFrameLevel() end
@@ -891,14 +896,95 @@ test('classic crafting info never creates a reagent-label anchor cycle', () => {
     local _, infoRelative = MarketSyncCraftingInfo:GetPoint(1)
     local _, reagentRelative = TradeSkillReagentLabel:GetPoint(1)
     assert(infoRelative == TradeSkillFrame, "Crafting info should use the saved stable Blizzard anchor")
-    assert(reagentRelative == MarketSyncCraftingInfo, "Reagent label should sit below crafting info")
+    assert(reagentRelative == TradeSkillFrame, "Reagent label must NEVER be moved or re-anchored by MarketSync")
 
     AuctionatorCraftingInfo = CreateFrame("Frame", "AuctionatorCraftingInfo", TradeSkillFrame)
     AuctionatorCraftingInfo:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 210, -100)
     AuctionatorCraftingInfo:Show()
     onSelection()
-    local _, restoredRelative = TradeSkillReagentLabel:GetPoint(1)
-    assert(restoredRelative == TradeSkillFrame, "Auctionator layout should restore the native reagent anchor")
+    local _, safeReagentRelative = TradeSkillReagentLabel:GetPoint(1)
+    assert(safeReagentRelative == TradeSkillFrame, "Native reagent anchor must remain intact with Auctionator present")
+    assert(select(2, MarketSyncCraftingInfo:GetPoint(1)) == AuctionatorCraftingInfo or select(2, MarketSyncCraftingInfo:GetPoint(1)) == TradeSkillFrame,
+      "Crafting info should coordinate cleanly without anchor cycle")
+  `);
+});
+
+test('classic Era 1-column layout preserves reagent contents and positions breakout inside frame', () => {
+  const L = createLuaState(`
+    local region
+    region = function(parent)
+      local r = { parent = parent, shown = true, scripts = {}, points = {} }
+      function r:SetPoint(point, relativeTo, relativePoint, x, y)
+        self.points[1] = { point, relativeTo, relativePoint, x, y }
+      end
+      function r:GetPoint(index)
+        local anchor = self.points[index or 1]
+        if anchor then return table.unpack(anchor) end
+      end
+      function r:ClearAllPoints() self.points = {} end
+      function r:SetSize(w, h) self.width = w; self.height = h end
+      function r:SetWidth(w) self.width = w end
+      function r:GetWidth() return self.width or 384 end
+      function r:SetHeight(h) self.height = h end
+      function r:GetHeight() return self.height or 512 end
+      function r:SetParent(p) self.parent = p end
+      function r:GetParent() return self.parent end
+      function r:SetText() end
+      function r:SetJustifyH() end
+      function r:SetFrameLevel() end
+      function r:GetFrameLevel() return 1 end
+      function r:EnableMouse() end
+      function r:Enable() self.enabled = true end
+      function r:Disable() self.enabled = false end
+      function r:SetNormalFontObject() end
+      function r:SetHighlightFontObject() end
+      function r:SetScript(name, fn) self.scripts[name] = fn end
+      function r:RegisterEvent() end
+      function r:CreateFontString() return region(self) end
+      function r:Show() self.shown = true end
+      function r:Hide() self.shown = false end
+      function r:IsShown() return self.shown end
+      return r
+    end
+    CreateFrame = function(_, name, parent)
+      local frame = region(parent)
+      if name then _G[name] = frame end
+      return frame
+    end
+    TradeSkillFrame = CreateFrame("Frame", "TradeSkillFrame")
+    TradeSkillFrame:SetSize(384, 512)
+    TradeSkillDetailScrollFrame = CreateFrame("Frame", "TradeSkillDetailScrollFrame", TradeSkillFrame)
+    TradeSkillDetailScrollFrame:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 20, -234)
+    TradeSkillDetailScrollFrame:SetSize(296, 168)
+    TradeSkillSkillName = CreateFrame("Frame", "TradeSkillSkillName", TradeSkillDetailScrollFrame)
+    TradeSkillSkillName:SetPoint("TOPLEFT", TradeSkillDetailScrollFrame, "TOPLEFT", 50, -3)
+    TradeSkillReagentLabel = CreateFrame("Frame", "TradeSkillReagentLabel", TradeSkillDetailScrollFrame)
+    TradeSkillReagentLabel:SetPoint("TOPLEFT", TradeSkillSkillName, "BOTTOMLEFT", 0, -10)
+
+    hooksecurefunc = function(name, fn) if name == "TradeSkillFrame_SetSelection" then onSelection = fn end end
+    GetTradeSkillSelectionIndex = function() return 1 end
+    GetTradeSkillNumReagents = function() return 2 end
+    GetTradeSkillItemLink = function() return "|Hitem:4314|h[Heavy Linen Gloves]|h" end
+    GetTradeSkillReagentItemLink = function(idx, r) return "|Hitem:" .. (100 + r) .. "|h[Reagent]|h" end
+    GetTradeSkillReagentInfo = function(idx, r) return "Bolt of Linen Cloth", nil, 2 end
+    GetTradeSkillInfo = function() return "Heavy Linen Gloves" end
+    GetTradeSkillNumMade = function() return 1 end
+    MarketSyncDB = { EnableProfessionCraftInfo = true }
+    MarketSync.CalculateRecipeProfit = function()
+      return { costData = { directCraftCost = 10, groundUpCost = 10, optimalSavings = 0 },
+        outputPrice = 25, groundUpProfit = 15, groundUpMarginPct = 60, hasWarnings = false, warnings = {} }
+    end
+  `);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `
+    onSelection()
+    assert(MarketSyncCraftingInfo:IsShown(), "Crafting info must be shown")
+    local point, relTo, relPoint, x, y = MarketSyncCraftingInfo:GetPoint(1)
+    assert(relTo == TradeSkillDetailScrollFrame, "Crafting info in Era 1-column layout must anchor to TradeSkillDetailScrollFrame")
+    assert(point == "TOPRIGHT" and relPoint == "TOPRIGHT", "Crafting info must anchor to TOPRIGHT of detail frame")
+    -- Ensure native Blizzard frames are 100% untouched
+    local _, reagentRel = TradeSkillReagentLabel:GetPoint(1)
+    assert(reagentRel == TradeSkillSkillName, "Native Blizzard TradeSkillReagentLabel must remain anchored to TradeSkillSkillName")
   `);
 });
 
@@ -1025,6 +1111,74 @@ test('cross-character choices exclude incompatible game versions and factions', 
     assert(MarketSyncDB.KnownCraftingRecipesByCharacter["OtherVersion-Faerlina"].__clientExpansion == 1,
       "Incompatible alt cache must not be overwritten")
   `);
+});
+
+test('profession item navigation resolves live legacy indices and learned modern recipes', () => {
+  const L = createLuaState();
+  execLua(L, `
+    CreateFrame = function()
+      return { RegisterEvent = function() end, SetScript = function() end }
+    end
+  `);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `
+    TradeSkillFrame = { IsShown = function() return true end }
+    GetNumTradeSkills = function() return 2 end
+    GetTradeSkillItemLink = function(i) return "item:" .. (100 + i) end
+    TradeSkillFrame_SetSelection = function(i) selectedRecipe = i end
+    assert(MarketSync.JumpToProfessionItem(102) and selectedRecipe == 2)
+    assert(not MarketSync.JumpToProfessionItem(999))
+    InCombatLockdown = function() return true end
+    assert(not MarketSync.JumpToProfessionItem(101) and selectedRecipe == 2)
+    InCombatLockdown = nil
+    TradeSkillFrame = nil
+    ProfessionsFrame = {
+      IsShown = function() return true end,
+      SelectRecipe = function(self, id) selectedRecipe = id end,
+    }
+    C_TradeSkillUI = {
+      GetAllRecipeIDs = function() return { 10, 20 } end,
+      GetRecipeInfo = function(id) return { learned = id == 20 } end,
+      GetRecipeItemLink = function() return "item:500" end,
+    }
+    assert(MarketSync.JumpToProfessionItem(500) and selectedRecipe == 20)
+    CraftFrame = { IsShown = function() return true end }
+    GetNumCrafts = function() return 1 end
+    GetCraftItemLink = function() return "item:600" end
+    CraftFrame_SetSelection = function(id) selectedRecipe = id end
+    assert(MarketSync.JumpToProfessionItem(600) and selectedRecipe == 1)
+  `);
+});
+
+test('craft lifecycle only registers CRAFT_SHOW on clients that support it', () => {
+  const L = createLuaState();
+  execLua(L, `
+    registered = {}
+    CreateFrame = function()
+      return {
+        RegisterEvent = function(_, event)
+          assert(event ~= "CRAFT_SHOW" or craftSupported, "Unknown event registration attempted")
+          registered[event] = true
+        end,
+        SetScript = function() end,
+      }
+    end
+    craftSupported = false
+    C_EventUtils = { IsEventValid = function(event) return event ~= "CRAFT_SHOW" or craftSupported end }
+    GetCraftInfo = function() end
+    GetCraftItemLink = function() end
+  `);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `assert(not registered.CRAFT_SHOW and registered.TRADE_SKILL_SHOW and registered.ADDON_LOADED)`);
+  execLua(L, `craftSupported = true; registered = {}`);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `assert(registered.CRAFT_SHOW)`);
+  execLua(L, `C_EventUtils = nil; craftSupported = false; GetCraftInfo = nil; GetCraftItemLink = nil; registered = {}`);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `assert(not registered.CRAFT_SHOW)`);
+  execLua(L, `craftSupported = true; GetCraftInfo = function() end; GetCraftItemLink = function() end; registered = {}`);
+  execLua(L, uiCraftingInfoLua);
+  execLua(L, `assert(registered.CRAFT_SHOW)`);
 });
 
 console.log(`\nAll ${passed} profession tests passed successfully!`);
