@@ -20,7 +20,8 @@ function T.Apply(root)
         if depth > 12 then return end
         local isButton = frame.IsObjectType and frame:IsObjectType("Button")
 
-        if frame == root and frame.SetBackdrop and frame.GetBackdrop and frame:GetBackdrop() then
+        local hasNativeBorder = (type(frame.PortraitContainer) == "table") or (type(frame.TitleContainer) == "table") or (type(frame.NineSlice) == "table")
+        if frame == root and not hasNativeBorder and frame.SetBackdrop and frame.GetBackdrop and frame:GetBackdrop() then
             -- Root dialog window uses authentic Blizzard dialog textures with stone parchment background
             frame:SetBackdrop({
                 bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
@@ -89,6 +90,28 @@ end
 -- matching the authentic WoW Forever / Classic interface framework.
 function T.DecorateWarcraftWindow(frame, iconTexture, titleText)
     if not frame then return end
+
+    if (type(frame.PortraitContainer) == "table") or (type(frame.TitleContainer) == "table") or (type(frame.NineSlice) == "table") then
+        -- Native PortraitFrameTemplate: set portrait texture and title directly
+        local portrait = (frame.GetPortrait and frame:GetPortrait())
+            or (type(frame.PortraitContainer) == "table" and frame.PortraitContainer.portrait)
+            or frame.portrait or _G[(frame.GetName and frame:GetName() or "") .. "Portrait"]
+        if portrait then
+            if SetPortraitToAsset then
+                SetPortraitToAsset(portrait, iconTexture or "Interface\\Icons\\INV_Misc_QuestionMark")
+            elseif portrait.SetTexture then
+                portrait:SetTexture(iconTexture or "Interface\\Icons\\INV_Misc_QuestionMark")
+                if portrait.SetTexCoord then portrait:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+            end
+        end
+        local title = (frame.GetTitleText and frame:GetTitleText())
+            or (type(frame.TitleContainer) == "table" and frame.TitleContainer.TitleText)
+            or frame.TitleText or frame.titleText or _G[(frame.GetName and frame:GetName() or "") .. "TitleText"]
+        if title and titleText and title.SetText then
+            title:SetText(titleText)
+        end
+        return
+    end
 
     -- Circular portrait ring hanging off the top-left corner
     if not frame.warcraftRing and frame.CreateTexture then

@@ -19,6 +19,27 @@ local function Button(parent, x, y, width, label, click, template)
     local b = CreateFrame("Button", nil, parent, template or "UIPanelButtonTemplate")
     b:SetPoint("TOPLEFT", x, y); b:SetSize(width, 22); b:SetText(label); b:SetScript("OnClick", click); return b
 end
+local function CreateInset(parent, x, y, width, height)
+    if MarketSync.CreateModernInset then
+        local inset = MarketSync.CreateModernInset(parent, x, y, width, height)
+        if x and y then inset:SetPoint("TOPLEFT", x, y) end
+        if width and height then inset:SetSize(width, height) end
+        return inset
+    end
+    local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if x and y then inset:SetPoint("TOPLEFT", x, y) end
+    if width and height then inset:SetSize(width, height) end
+    inset:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    inset._marketSyncThemeRole = "inset"
+    inset:SetBackdropColor(0.05, 0.045, 0.04, 0.90)
+    inset:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
+    return inset
+end
 local function Copy(t) local out = {}; for k,v in pairs(t or {}) do out[k] = v end; return out end
 local function Prompt(key, label, callback)
     StaticPopupDialogs[key] = { text = label, button1 = "Save", button2 = "Cancel", hasEditBox = true,
@@ -88,19 +109,35 @@ function MarketSync.ShowCraftProfessions(anchor)
 end
 local function Create()
     if window then return window end
-    local f = CreateFrame("Frame", "MarketSyncCraftManager", UIParent, "BackdropTemplate"); window = f
-    f:SetSize(832, 480); f:SetPoint("CENTER"); f:SetClampedToScreen(true); f:SetFrameStrata("DIALOG")
-    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+    local ok, res
+    local legacyTheme = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+    if legacyTheme then
+        ok, res = pcall(CreateFrame, "Frame", "MarketSyncCraftManager", UIParent, "BackdropTemplate")
+    else
+        ok, res = pcall(CreateFrame, "Frame", "MarketSyncCraftManager", UIParent, "PortraitFrameTemplate")
+    end
+    local f
+    if ok and res then
+        f = res
+    else
+        f = CreateFrame("Frame", "MarketSyncCraftManager", UIParent)
+    end
+    window = f
+    f:SetSize(832, 480); f:SetPoint("CENTER"); f:SetClampedToScreen(true); f:SetFrameStrata("HIGH")
+    f:SetToplevel(true); f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
-    f:SetBackdropColor(0.04, 0.035, 0.03, 0.95)
-    f:SetBackdropBorderColor(0.60, 0.50, 0.35, 1.0)
+
+    if legacyTheme and f.SetBackdrop then
+        f:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 10, right = 10, top = 10, bottom = 10 },
+        })
+        f:SetBackdropColor(0.08, 0.08, 0.09, 1)
+    end
     if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(f) end
+
     local function Close()
         DiscardOrRun(f,function() f.closing=true; f:Hide(); f.closing=false end,"closing")
     end
@@ -108,24 +145,81 @@ local function Create()
     f:SetScript("OnHide",function()
         if f.dirty and not f.closing then f:Show(); Close() end
     end)
-    local closeIcon=CreateFrame("Button",nil,f,"UIPanelCloseButton")
-    closeIcon:SetPoint("TOPRIGHT",2,2); closeIcon:SetScript("OnClick",Close)
-    f.CloseButton = closeIcon
-    if MarketSync.Theme and MarketSync.Theme.DecorateWarcraftWindow then
-        MarketSync.Theme.DecorateWarcraftWindow(f, "Interface\\Icons\\Trade_BlackSmithing", "|cffffd100Materials & Crafting Choices|r")
+
+    -- Portrait in top-left
+    local portrait = (f.GetPortrait and f:GetPortrait())
+        or (type(f.PortraitContainer) == "table" and f.PortraitContainer.portrait)
+        or _G["MarketSyncCraftManagerPortrait"]
+    if not portrait then
+        portrait = f:CreateTexture(nil, "BACKGROUND")
+        portrait:SetSize(60, 60)
+        portrait:SetPoint("TOPLEFT", 6, -6)
+        if f.CreateMaskTexture then
+            local mask = f:CreateMaskTexture()
+            if mask then
+                mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                mask:SetSize(58, 58)
+                mask:SetPoint("TOPLEFT", 8, -7)
+                if portrait.AddMaskTexture then portrait:AddMaskTexture(mask) end
+            end
+        end
     end
-    if MarketSync.Theme and MarketSync.Theme.Register then MarketSync.Theme.Register(f) end
-    f.subtitle = Text(f, 60, -34, 570)
-    Button(f, 646, -31, 24, "-", function()
+    f.portrait = portrait
+    local function UpdatePortrait()
+        if SetPortraitToAsset and portrait then
+            SetPortraitToAsset(portrait, "Interface\\Icons\\Trade_BlackSmithing")
+        elseif portrait and portrait.SetTexture then
+            portrait:SetTexture("Interface\\Icons\\Trade_BlackSmithing")
+            if portrait.SetTexCoord then portrait:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+        end
+    end
+    f:HookScript("OnShow", UpdatePortrait)
+    UpdatePortrait()
+
+    -- Title Text inside Blizzard Title Bar
+    local titleText = (f.GetTitleText and f:GetTitleText())
+        or (type(f.TitleContainer) == "table" and f.TitleContainer.TitleText)
+        or _G["MarketSyncCraftManagerTitleText"]
+    if not titleText then
+        titleText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        titleText:SetPoint("TOP", 0, -18)
+    end
+    titleText:SetTextColor(1, 0.82, 0)
+    titleText:SetText("MarketSync - Materials & Crafting Choices")
+    f.titleText = titleText
+    f.TitleText = titleText
+
+    -- Close button
+    local closeIcon = (type(f.CloseButton) == "table" and f.CloseButton) or _G["MarketSyncCraftManagerCloseButton"]
+    if not closeIcon then
+        closeIcon = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        closeIcon:SetPoint("TOPRIGHT", -4, -4)
+    end
+    closeIcon:SetScript("OnClick", Close)
+    f.CloseButton = closeIcon
+    f.closeButton = closeIcon
+
+    -- Quantity Stepper in header area
+    local qtyFrame = CreateFrame("Frame", nil, f)
+    qtyFrame:SetPoint("TOPRIGHT", f, "TOPRIGHT", -44, legacyTheme and -12 or -3)
+    qtyFrame:SetSize(130, 20)
+    local minusBtn = CreateFrame("Button", nil, qtyFrame, "UIPanelButtonTemplate")
+    minusBtn:SetSize(20, 20); minusBtn:SetPoint("LEFT", 0, 0); minusBtn:SetText("-")
+    minusBtn:SetScript("OnClick", function()
         if not f.history then
             f.quantity = math.max(1, (f.quantity or 1) - 1)
             f.dirty = true
             f:Refresh()
         end
     end)
-    f.qty = Text(f, 674, -34, 76, nil, "GameFontHighlight")
-    if f.qty.SetJustifyH then f.qty:SetJustifyH("CENTER") end
-    Button(f, 754, -31, 24, "+", function()
+    local qtyText = qtyFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    qtyText:SetPoint("LEFT", minusBtn, "RIGHT", 4, 0)
+    qtyText:SetPoint("RIGHT", qtyFrame, "RIGHT", -24, 0)
+    qtyText:SetJustifyH("CENTER")
+    f.qty = qtyText
+    local plusBtn = CreateFrame("Button", nil, qtyFrame, "UIPanelButtonTemplate")
+    plusBtn:SetSize(20, 20); plusBtn:SetPoint("RIGHT", 0, 0); plusBtn:SetText("+")
+    plusBtn:SetScript("OnClick", function()
         if not f.history then
             f.quantity = (f.quantity or 1) + 1
             f.dirty = true
@@ -133,19 +227,12 @@ local function Create()
         end
     end)
 
-    local strategy = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    strategy:SetPoint("TOPLEFT", 16, -58); strategy:SetSize(800, 30)
+    f.subtitle = Text(f, 66, legacyTheme and -36 or -32, 580, nil, "GameFontHighlightSmall")
+
+    -- Top Strategy Inset Toolbar
+    local strategy = CreateInset(f, 16, -56, 800, 30)
     local baseLevel = (f.GetFrameLevel and f:GetFrameLevel()) or 1
     if strategy.SetFrameLevel then strategy:SetFrameLevel(baseLevel + 1) end
-    strategy:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 }
-    })
-    strategy._marketSyncThemeRole = "inset"
-    strategy:SetBackdropColor(0.06, 0.05, 0.04, 0.90)
-    strategy:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
 
     local function Preset(value)
         local cost = f.recipe and MarketSync.CalculateGroundUpCraftCost(f.recipe,{},f.quantity)
@@ -209,28 +296,15 @@ local function Create()
 
     f.expanded = {}
     f.panes = {}
-    -- Three native insets:
-    -- Panes index 1: Recipe breakdown (Center: X=274, width=278)
-    -- Panes index 2: Purchase plan / Recorded costs (Right: X=560, width=256)
-    -- Panes index 3: Craft Management (Left: X=16, width=250)
+    -- Three native insets matching Blizzard UI
     local paneSpecs = {
-        [1] = { 274, 278, "Recipe breakdown" },
-        [2] = { 560, 256, "Purchase plan" },
+        [1] = { 272, 278, "Recipe breakdown" },
+        [2] = { 556, 260, "Purchase plan" },
         [3] = { 16,  250, "Craft Management" },
     }
     for i = 1, 3 do
         local spec = paneSpecs[i]
-        local pane = CreateFrame("Frame", nil, f, "BackdropTemplate")
-        pane:SetPoint("TOPLEFT", spec[1], -92); pane:SetSize(spec[2], 320)
-        pane:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 }
-        })
-        pane._marketSyncThemeRole = "inset"
-        pane:SetBackdropColor(0.03, 0.025, 0.02, 0.94)
-        pane:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
+        local pane = CreateInset(f, spec[1], -90, spec[2], 306)
 
         local paneHdrBg = pane:CreateTexture(nil, "BORDER")
         paneHdrBg:SetPoint("TOPLEFT", 3, -3); paneHdrBg:SetPoint("TOPRIGHT", -3, -3); paneHdrBg:SetHeight(24)
@@ -268,12 +342,12 @@ local function Create()
     end
 
     local p = f.panes[3]
-    f.completeButton = Button(p, 4, -264, 118, "Mark Crafted", function()
+    f.completeButton = Button(p, 4, -252, 118, "Mark Crafted", function()
         Report(f.jobID and L.Complete(f.jobID))
         if f.jobID and L.Get(f.jobID).status == "Crafted" then f.history = true end
         f:Refresh()
     end)
-    f.saleButton = Button(p, 126, -264, 118, "Record Sale", function()
+    f.saleButton = Button(p, 126, -252, 118, "Record Sale", function()
         local id = f.jobID; if not id then return end
         Prompt("MARKETSYNC_CRAFT_SALE", "Sale: quantity, gross sale gold, fees in gold (e.g. 1,42,2.1)", function(text)
             local q, g, fee = text:match("^%s*(%d+)%s*,%s*([%d%.]+)%s*,%s*([%d%.]+)%s*$")
@@ -281,7 +355,7 @@ local function Create()
             Report(q and g and fee and L.RecordSale(id, q, g * 10000, fee * 10000))
         end)
     end)
-    f.removeButton = Button(p, 4, -290, 118, "Remove Craft", function()
+    f.removeButton = Button(p, 4, -278, 118, "Remove Craft", function()
         if not f.jobID then return end
         local id = f.jobID
         StaticPopupDialogs.MARKETSYNC_REMOVE_JOB = {
@@ -291,7 +365,7 @@ local function Create()
         }
         StaticPopup_Show("MARKETSYNC_REMOVE_JOB")
     end)
-    f.historyButton = Button(p, 126, -290, 118, "Craft History", function()
+    f.historyButton = Button(p, 126, -278, 118, "Craft History", function()
         DiscardOrRun(f, function()
             f.history = not f.history
             f.jobID = nil
@@ -302,7 +376,7 @@ local function Create()
     end)
 
     f.selectedIcon = f:CreateTexture(nil, "ARTWORK")
-    f.selectedIcon:SetPoint("TOPLEFT", 18, -422)
+    f.selectedIcon:SetPoint("TOPLEFT", 18, -404)
     f.selectedIcon:SetSize(36, 36)
     local iconBorder = f:CreateTexture(nil, "OVERLAY")
     iconBorder:SetPoint("CENTER", f.selectedIcon, "CENTER", 0, 0)
@@ -310,20 +384,22 @@ local function Create()
     iconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
     f.selectedIconBorder = iconBorder
 
-    f.selectionText = Text(f, 62, -423, 400)
-    f.state = Text(f, 62, -444, 400, nil, "GameFontNormalSmall")
+    f.selectionText = Text(f, 62, -406, 400)
+    f.state = Text(f, 62, -424, 400, nil, "GameFontNormalSmall")
 
-    f.shoppingButton = Button(f, 474, -430, 116, "Export Shopping", function()
+    f.shoppingButton = Button(f, 474, -410, 116, "Export Shopping", function()
         OpenShopping(f.jobID and L.Get(f.jobID))
     end)
-    f.save = Button(f, 596, -430, 130, "Add to Craft List", function()
+    f.save = Button(f, 596, -410, 130, "Add to Craft List", function()
         SaveDraft(f)
     end)
-    f.closeButton = Button(f, 732, -430, 84, "Close", Close)
+    f.closeButton = Button(f, 732, -410, 84, "Close", Close)
 
     local function CreateCraftTab(id, text)
         local tabName = "MarketSyncCraftManagerTab" .. id
-        local templates = {"CharacterFrameTabButtonTemplate", "PanelTabButtonTemplate"}
+        local templates = legacyTheme
+            and {"CharacterFrameTabButtonTemplate", "PanelTabButtonTemplate"}
+            or {"AuctionHouseFrameDisplayModeTabTemplate", "AuctionHouseFrameTabTemplate", "PanelTabButtonTemplate"}
         local tab
         for _, tmpl in ipairs(templates) do
             local ok, res = pcall(CreateFrame, "Button", tabName, f, tmpl)
@@ -332,18 +408,28 @@ local function Create()
         if not tab then tab = CreateFrame("Button", tabName, f) end
         tab:SetID(id)
         tab:SetText(text)
+        tab:SetHeight(32)
+        tab:SetWidth(150)
         local baseLevel = f.GetFrameLevel and f:GetFrameLevel() or 1
-        if tab.SetFrameLevel then tab:SetFrameLevel(baseLevel + 2) end
-        if PanelTemplates_TabResize then PanelTemplates_TabResize(tab, 0) end
+        if tab.SetFrameLevel then tab:SetFrameLevel(baseLevel + 4) end
+        if type(tab.Text) == "table" and tab.Text.SetWidth then tab.Text:SetWidth(134) end
+        if PanelTemplates_TabResize then PanelTemplates_TabResize(tab, 0, 150) end
+        if PanelTemplates_DeselectTab then PanelTemplates_DeselectTab(tab) end
         return tab
     end
 
     local tab1 = CreateCraftTab(1, "Materials & Planning")
     local tab2 = CreateCraftTab(2, "Craft History")
-    tab1:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 16, 2)
-    tab2:SetPoint("TOPLEFT", tab1, "TOPRIGHT", -4, 0)
     f.tabs = {tab1, tab2}
     f.numTabs = 2
+
+    if legacyTheme then
+        tab1:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 60, 12)
+        tab2:SetPoint("TOPLEFT", tab1, "TOPRIGHT", -8, 0)
+    else
+        tab1:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 19, -28)
+        tab2:SetPoint("BOTTOMLEFT", tab1, "BOTTOMRIGHT", -2, 0)
+    end
 
     tab1:SetScript("OnClick", function()
         if f.history then

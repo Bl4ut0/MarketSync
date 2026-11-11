@@ -288,28 +288,88 @@ function MarketSync.OpenItemLedger(jobID)
         return
     end
     if not window then
-        local f = CreateFrame("Frame", "MarketSyncItemLedger", UIParent, "BackdropTemplate")
+        local ok, res
+        local legacyTheme = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+        if legacyTheme then
+            ok, res = pcall(CreateFrame, "Frame", "MarketSyncItemLedger", UIParent, "BackdropTemplate")
+        else
+            ok, res = pcall(CreateFrame, "Frame", "MarketSyncItemLedger", UIParent, "PortraitFrameTemplate")
+        end
+        local f
+        if ok and res then
+            f = res
+        else
+            f = CreateFrame("Frame", "MarketSyncItemLedger", UIParent)
+        end
         window = f
         f:SetSize(1060, 660)
         f:SetPoint("CENTER")
-        f:SetFrameStrata("DIALOG")
+        f:SetFrameStrata("HIGH")
+        f:SetToplevel(true)
         f:SetClampedToScreen(true)
         f:SetMovable(true)
         f:EnableMouse(true)
         f:RegisterForDrag("LeftButton")
         f:SetScript("OnDragStart", f.StartMoving)
         f:SetScript("OnDragStop", f.StopMovingOrSizing)
-        f:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-        f:SetBackdropColor(Color("dialog"))
-        f:SetBackdropBorderColor(Color("border"))
-        if MarketSync.Theme and MarketSync.Theme.DecorateWarcraftWindow then
-            MarketSync.Theme.DecorateWarcraftWindow(f, "Interface\\Icons\\INV_Misc_Coin_01", "|cffffd100Inventory & Craft Ledger |cffff8800[Beta]|r|r")
+        if legacyTheme and f.SetBackdrop then
+            f:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+                tile = true, tileSize = 32, edgeSize = 32,
+                insets = { left = 10, right = 10, top = 10, bottom = 10 },
+            })
+            f:SetBackdropColor(0.08, 0.08, 0.09, 1)
         end
 
-        f.context = Label(f, 60, -36, 760)
+        local portrait = (f.GetPortrait and f:GetPortrait())
+            or (type(f.PortraitContainer) == "table" and f.PortraitContainer.portrait)
+            or _G["MarketSyncItemLedgerPortrait"]
+        if not portrait then
+            portrait = f:CreateTexture(nil, "BACKGROUND")
+            portrait:SetSize(60, 60)
+            portrait:SetPoint("TOPLEFT", 6, -6)
+            if f.CreateMaskTexture then
+                local mask = f:CreateMaskTexture()
+                if mask then
+                    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                    mask:SetSize(58, 58)
+                    mask:SetPoint("TOPLEFT", 8, -7)
+                    if portrait.AddMaskTexture then portrait:AddMaskTexture(mask) end
+                end
+            end
+        end
+        f.portrait = portrait
+        local function UpdatePortrait()
+            if SetPortraitToAsset and portrait then
+                SetPortraitToAsset(portrait, "Interface\\Icons\\INV_Misc_Coin_01")
+            elseif portrait and portrait.SetTexture then
+                portrait:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
+                if portrait.SetTexCoord then portrait:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+            end
+        end
+        f:HookScript("OnShow", UpdatePortrait)
+        UpdatePortrait()
 
-        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-        close:SetPoint("TOPRIGHT", 2, 2)
+        local titleText = (f.GetTitleText and f:GetTitleText())
+            or (type(f.TitleContainer) == "table" and f.TitleContainer.TitleText)
+            or _G["MarketSyncItemLedgerTitleText"]
+        if not titleText then
+            titleText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            titleText:SetPoint("TOP", 0, -18)
+        end
+        titleText:SetTextColor(1, 0.82, 0)
+        titleText:SetText("MarketSync - Inventory & Craft Ledger")
+        f.titleText = titleText
+        f.TitleText = titleText
+
+        f.context = Label(f, 66, legacyTheme and -36 or -32, 760)
+
+        local close = (type(f.CloseButton) == "table" and f.CloseButton) or _G["MarketSyncItemLedgerCloseButton"]
+        if not close then
+            close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+            close:SetPoint("TOPRIGHT", -4, -4)
+        end
         close:SetScript("OnClick", function() f:Hide() end)
         f.CloseButton = close
 
