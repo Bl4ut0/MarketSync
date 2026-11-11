@@ -1845,12 +1845,20 @@ SLASH_MarketSync1 = "/marketsync"
 SLASH_MarketSync2 = "/ms"
 SLASH_MarketSync3 = "/aucann"
 SlashCmdList["MarketSync"] = function(msg)
-    local cmd, arg = msg:match("^(%S*)%s*(.*)$")
-    cmd = cmd:lower()
+    local cmd, arg = (msg or ""):match("^(%S*)%s*(.*)$")
+    cmd = cmd and cmd:lower() or ""
 
-    if cmd == "search" or cmd == "browse" or cmd == "ui" then
+    if cmd == "" or cmd == "ui" or cmd == "open" or cmd == "search" or cmd == "browse" or cmd == "toggle" then
         if MarketSync_ToggleUI then
             MarketSync_ToggleUI()
+        end
+    elseif cmd == "craft" or cmd == "crafting" or cmd == "crafts" or cmd == "mats" then
+        if MarketSync.ToggleCraftManager then
+            MarketSync.ToggleCraftManager()
+        elseif MarketSync.OpenCraftManager then
+            MarketSync.OpenCraftManager()
+        elseif MarketSync.OpenCraftingTree then
+            MarketSync.OpenCraftingTree()
         end
     elseif cmd == "ledger" or cmd == "items" then
         if not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
@@ -1862,7 +1870,22 @@ SlashCmdList["MarketSync"] = function(msg)
         elseif MarketSync.OpenItemLedger then
             MarketSync.OpenItemLedger()
         end
-    elseif cmd == "stats" or cmd == "config" then
+    elseif cmd == "sidecar" or cmd == "drawer" or cmd == "breakout" then
+        if MarketSync.ToggleAHSidecar then
+            MarketSync.ToggleAHSidecar()
+        elseif MarketSync.AHSidecar and MarketSync.AHSidecar.Toggle then
+            MarketSync.AHSidecar.Toggle()
+        elseif MarketSync.AHSidecar and MarketSync.AHSidecar.ShowForMain then
+            MarketSync.AHSidecar.ShowForMain()
+        end
+    elseif cmd == "theme" then
+        if arg == "legacy" or arg == "forever" or arg == "auto" then
+            MarketSync.SetUITheme(arg)
+        else
+            print("|cFF00FF00[MarketSync]|r Current theme: " .. MarketSync.GetUIThemePreference() .. " (active: " .. MarketSync.GetUITheme() .. ")")
+            print("  Usage: /ms theme [legacy|forever|auto]")
+        end
+    elseif cmd == "stats" or cmd == "config" or cmd == "options" or cmd == "settings" then
         if Settings and Settings.OpenToCategory then
             Settings.OpenToCategory(category:GetID())
         else
@@ -1874,10 +1897,26 @@ SlashCmdList["MarketSync"] = function(msg)
         if #arg > 0 then MarketSync.ToggleBlock(arg) else print("Usage: /ms unblock [playername]") end
     else
         print("|cFF00FF00[MarketSync]|r Commands:")
-        print("  /ms search - Open the browse window.")
-        print("  /ms ledger (or /ledger) - Open the Item & Gold Ledger.")
+        print("  /ms - Toggle main MarketSync window.")
+        print("  /ms craft (or /mscraft) - Open Crafting & Materials Manager.")
+        print("  /ms ledger (or /ledger) - Open Item & Gold Ledger.")
+        print("  /ms sidecar (or /sidecar) - Toggle Shopping Lists & Bag Selling drawer.")
+        print("  /ms theme [legacy|forever|auto] - Switch UI theme.")
         print("  /ms config - Open settings panel.")
         print("  /ms block [name] - Block a sender.")
+    end
+end
+
+SLASH_MarketSyncCraft1 = "/mscraft"
+SLASH_MarketSyncCraft2 = "/craftmanager"
+SLASH_MarketSyncCraft3 = "/crafts"
+SlashCmdList["MarketSyncCraft"] = function()
+    if MarketSync.ToggleCraftManager then
+        MarketSync.ToggleCraftManager()
+    elseif MarketSync.OpenCraftManager then
+        MarketSync.OpenCraftManager()
+    elseif MarketSync.OpenCraftingTree then
+        MarketSync.OpenCraftingTree()
     end
 end
 
@@ -1892,5 +1931,17 @@ SlashCmdList["MarketSyncLedger"] = function()
         MarketSync.ToggleItemLedger()
     elseif MarketSync.OpenItemLedger then
         MarketSync.OpenItemLedger()
+    end
+end
+
+SLASH_MarketSyncSidecar1 = "/sidecar"
+SLASH_MarketSyncSidecar2 = "/mssidecar"
+SlashCmdList["MarketSyncSidecar"] = function()
+    if MarketSync.ToggleAHSidecar then
+        MarketSync.ToggleAHSidecar()
+    elseif MarketSync.AHSidecar and MarketSync.AHSidecar.Toggle then
+        MarketSync.AHSidecar.Toggle()
+    elseif MarketSync.AHSidecar and MarketSync.AHSidecar.ShowForMain then
+        MarketSync.AHSidecar.ShowForMain()
     end
 end

@@ -250,7 +250,7 @@ function MarketSync.CreateAHSidecar(parent)
     toggleBtn:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -60)
     toggleBtn:SetFrameLevel(ahFrame:GetFrameLevel() + (legacyAH and 31 or 5))
     toggleBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
@@ -478,6 +478,34 @@ function MarketSync.CreateAHSidecar(parent)
     craftContainer:Hide()
 
     local activeMode = "lists"
+    local function ApplySidecarTheme()
+        local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+        if isLegacy then
+            frame:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+                tile = true, tileSize = 32, edgeSize = 14,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 },
+            })
+            frame:SetBackdropColor(0.08, 0.08, 0.09, 0.98)
+            frame:SetBackdropBorderColor(0.55, 0.55, 0.60, 0.98)
+            headerBg:SetVertexColor(0.40, 0.42, 0.45, 0.35)
+        else
+            frame:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+                tile = true, tileSize = 16, edgeSize = 14,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 },
+            })
+            frame:SetBackdropColor(0.065, 0.055, 0.045, 0.98)
+            frame:SetBackdropBorderColor(0.60, 0.50, 0.35, 1.0)
+            headerBg:SetVertexColor(0.60, 0.50, 0.30, 0.45)
+        end
+        headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
+    end
+    frame:HookScript("OnShow", ApplySidecarTheme)
+    ApplySidecarTheme()
+
     local function SetMode(mode)
         if mode ~= "craft" and mode ~= "sell" then mode = "lists" end
         activeMode = mode
@@ -485,6 +513,7 @@ function MarketSync.CreateAHSidecar(parent)
         listsContainer:SetShown(mode == "lists")
         craftContainer:SetShown(mode == "craft")
         sellContainer:SetShown(mode == "sell")
+        local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
         for _, tab in ipairs({ tabLists, tabCraft, tabBags }) do
             local selected = (tab == tabLists and mode == "lists")
                 or (tab == tabCraft and mode == "craft") or (tab == tabBags and mode == "sell")
@@ -493,7 +522,11 @@ function MarketSync.CreateAHSidecar(parent)
                 tab:SetBackdropBorderColor(1, 0.82, 0, 0.95)
             else
                 tab:SetBackdropColor(MarketSync.GetThemeColor("header"))
-                tab:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+                if isLegacy then
+                    tab:SetBackdropBorderColor(0.40, 0.42, 0.45, 0.85)
+                else
+                    tab:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.85)
+                end
             end
         end
         tabLists.label:SetText(mode == "lists" and "|cFFFFD100Shopping|r" or "|cFFB0A080Shopping|r")
@@ -528,6 +561,24 @@ function MarketSync.CreateAHSidecar(parent)
             if Sidecar.host == "ah" then toggleBtn:Show() else toggleBtn:Hide() end
         end
     end
+
+    function Sidecar.Toggle(mode)
+        if frame:IsShown() then
+            if Sidecar.host == "main" and Sidecar.HideForMain then
+                Sidecar.HideForMain()
+            else
+                Sidecar.SetExpanded(false)
+            end
+        else
+            if Sidecar.host == "main" or (not AuctionFrame and not AuctionHouseFrame and MarketSync.MainFrame and MarketSync.MainFrame:IsShown()) then
+                Sidecar.ShowForMain(mode)
+            else
+                Sidecar.SetExpanded(true)
+            end
+        end
+    end
+    MarketSync.ToggleAHSidecar = Sidecar.Toggle
+    MarketSync.AHSidecar.Toggle = Sidecar.Toggle
 
     toggleBtn:SetScript("OnClick", function()
         Sidecar.SetExpanded(true)

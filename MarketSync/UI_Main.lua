@@ -266,10 +266,10 @@ local function CreateMainFrame()
         sidecarTab:SetFrameLevel((MainFrame.GetFrameLevel and MainFrame:GetFrameLevel() or 0) + 10)
     end
     sidecarTab:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
     sidecarTab:SetBackdropColor(MarketSync.GetThemeColor("header"))
     sidecarTab:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))

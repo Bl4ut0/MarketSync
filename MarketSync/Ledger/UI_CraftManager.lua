@@ -805,3 +805,22 @@ function MarketSync.OpenCraftingTree(recipeOrItemID, anchor, saved)
     if MarketSync.ShowWorkspaceWindow then MarketSync.ShowWorkspaceWindow(f) else f:Show() end
     f:Refresh()
 end
+
+function MarketSync.OpenCraftManager(jobID)
+    if jobID then
+        local job = MarketSync.CraftLedger and MarketSync.CraftLedger.Get and MarketSync.CraftLedger.Get(jobID)
+        if job then
+            return MarketSync.OpenCraftingTree(job.recipe, nil, { ledgerID = jobID })
+        end
+    end
+    return MarketSync.OpenCraftingTree()
+end
+
+function MarketSync.ToggleCraftManager(jobID)
+    local f = MarketSyncCraftManager
+    if f and f:IsShown() then
+        f:Hide()
+    else
+        MarketSync.OpenCraftManager(jobID)
+    end
+end
