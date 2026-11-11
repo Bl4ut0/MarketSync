@@ -302,11 +302,12 @@ function MarketSync.CreateAHSidecar(parent)
         frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     end
     frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 14,
+        tile = true, tileSize = 16, edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
+    frame._marketSyncThemeRole = "dialog"
     frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
     frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     frame:SetParent(UIParent)
@@ -324,9 +325,21 @@ function MarketSync.CreateAHSidecar(parent)
     header:SetScript("OnDragStart", function() frame:StartMoving() end)
     header:SetScript("OnDragStop", function() frame:StopMovingOrSizing() end)
 
+    local headerBg = header:CreateTexture(nil, "BORDER")
+    headerBg:SetPoint("TOPLEFT", 0, 0)
+    headerBg:SetPoint("BOTTOMRIGHT", 0, 0)
+    headerBg:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight2")
+    headerBg:SetVertexColor(0.50, 0.42, 0.28, 0.35)
+
+    local headerIcon = header:CreateTexture(nil, "ARTWORK")
+    headerIcon:SetSize(18, 18)
+    headerIcon:SetPoint("LEFT", 6, 0)
+    headerIcon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+    if headerIcon.SetTexCoord then headerIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+
     local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("LEFT", 8, 0)
-    title:SetText("|cFFFFD100MarketSync|r")
+    title:SetPoint("LEFT", headerIcon, "RIGHT", 6, 0)
+    title:SetText("|cFFFFD100MarketSync Sidecar|r")
 
     local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
     closeBtn:SetSize(24, 24)
@@ -358,11 +371,16 @@ function MarketSync.CreateAHSidecar(parent)
     tabLists:SetSize(99, 24)
     tabLists:SetPoint("TOPLEFT", headerSep, "BOTTOMLEFT", 2, -6)
     tabLists:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 8,
+        tile = true, tileSize = 16, edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
+    local tabListsHl = tabLists:CreateTexture(nil, "HIGHLIGHT")
+    tabListsHl:SetAllPoints(tabLists)
+    tabListsHl:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight")
+    tabListsHl:SetBlendMode("ADD")
+    tabListsHl:SetAlpha(0.25)
     tabLists.icon = tabLists:CreateTexture(nil, "ARTWORK")
     if tabLists.icon then
         if tabLists.icon.SetSize then tabLists.icon:SetSize(12, 12) end
@@ -378,11 +396,16 @@ function MarketSync.CreateAHSidecar(parent)
     tabCraft:SetSize(99, 24)
     tabCraft:SetPoint("LEFT", tabLists, "RIGHT", 4, 0)
     tabCraft:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 8,
+        tile = true, tileSize = 16, edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
+    local tabCraftHl = tabCraft:CreateTexture(nil, "HIGHLIGHT")
+    tabCraftHl:SetAllPoints(tabCraft)
+    tabCraftHl:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight")
+    tabCraftHl:SetBlendMode("ADD")
+    tabCraftHl:SetAlpha(0.25)
     tabCraft.icon = tabCraft:CreateTexture(nil, "ARTWORK")
     if tabCraft.icon then
         if tabCraft.icon.SetSize then tabCraft.icon:SetSize(12, 12) end
@@ -398,11 +421,16 @@ function MarketSync.CreateAHSidecar(parent)
     tabBags:SetSize(99, 24)
     tabBags:SetPoint("LEFT", tabCraft, "RIGHT", 4, 0)
     tabBags:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 8,
+        tile = true, tileSize = 16, edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
+    local tabBagsHl = tabBags:CreateTexture(nil, "HIGHLIGHT")
+    tabBagsHl:SetAllPoints(tabBags)
+    tabBagsHl:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight")
+    tabBagsHl:SetBlendMode("ADD")
+    tabBagsHl:SetAlpha(0.25)
     tabBags.icon = tabBags:CreateTexture(nil, "ARTWORK")
     if tabBags.icon then
         if tabBags.icon.SetSize then tabBags.icon:SetSize(12, 12) end
@@ -460,12 +488,17 @@ function MarketSync.CreateAHSidecar(parent)
         for _, tab in ipairs({ tabLists, tabCraft, tabBags }) do
             local selected = (tab == tabLists and mode == "lists")
                 or (tab == tabCraft and mode == "craft") or (tab == tabBags and mode == "sell")
-            tab:SetBackdropColor(MarketSync.GetThemeColor(selected and "hover" or "header"))
-            tab:SetBackdropBorderColor(MarketSync.GetThemeColor(selected and "headerBorder" or "border"))
+            if selected then
+                tab:SetBackdropColor(MarketSync.GetThemeColor("hover"))
+                tab:SetBackdropBorderColor(1, 0.82, 0, 0.95)
+            else
+                tab:SetBackdropColor(MarketSync.GetThemeColor("header"))
+                tab:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+            end
         end
-        tabLists.label:SetText(mode == "lists" and "|cFFFFD100Shopping|r" or "|cFF888888Shopping|r")
-        tabCraft.label:SetText(mode == "craft" and "|cFFFFD100Craft|r" or "|cFF888888Craft|r")
-        tabBags.label:SetText(mode == "sell" and "|cFFFFD100Bags|r" or "|cFF888888Bags|r")
+        tabLists.label:SetText(mode == "lists" and "|cFFFFD100Shopping|r" or "|cFFB0A080Shopping|r")
+        tabCraft.label:SetText(mode == "craft" and "|cFFFFD100Craft|r" or "|cFFB0A080Craft|r")
+        tabBags.label:SetText(mode == "sell" and "|cFFFFD100Bags|r" or "|cFFB0A080Bags|r")
         if mode == "lists" and Sidecar.UpdateListsView then Sidecar.UpdateListsView()
         elseif mode == "craft" and Sidecar.UpdateCraftView then Sidecar.UpdateCraftView()
         elseif mode == "sell" and Sidecar.UpdateSellView then Sidecar.UpdateSellView() end
@@ -678,8 +711,13 @@ function MarketSync.CreateAHSidecar(parent)
     local craftInset = CreateFrame("Frame", nil, craftContainer, "BackdropTemplate")
     craftInset:SetPoint("TOPLEFT", craftAdd, "BOTTOMLEFT", -6, -8)
     craftInset:SetPoint("BOTTOMRIGHT", craftContainer, "BOTTOMRIGHT", 0, 0)
-    craftInset:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    craftInset:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    craftInset._marketSyncThemeRole = "inset"
     craftInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
     craftInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     local craftScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarCraftScroll", craftInset,
@@ -1175,11 +1213,12 @@ function MarketSync.CreateAHSidecar(parent)
     listInset:SetPoint("TOPLEFT", addBox, "BOTTOMLEFT", -6, -6)
     listInset:SetPoint("BOTTOMRIGHT", 0, 0)
     listInset:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
+    listInset._marketSyncThemeRole = "inset"
     listInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
     listInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     listInset:EnableMouse(true)
@@ -1233,7 +1272,18 @@ function MarketSync.CreateAHSidecar(parent)
                     row:SetHeight(rowH)
                     row:SetPoint("LEFT", 2, 0)
                     row:SetPoint("RIGHT", -2, 0)
-                    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+                    row:SetBackdrop({
+                        bgFile = "Interface\\Buttons\\WHITE8X8",
+                        edgeFile = "Interface\\Buttons\\WHITE8X8",
+                        edgeSize = 1,
+                        insets = { left = 0, right = 0, top = 0, bottom = 0 }
+                    })
+                    local hl = row:CreateTexture(nil, "HIGHLIGHT")
+                    hl:SetAllPoints(row)
+                    hl:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight")
+                    hl:SetBlendMode("ADD")
+                    hl:SetAlpha(0.25)
+                    row.hl = hl
 
                     row.icon = row:CreateTexture(nil, "ARTWORK")
                     row.icon:SetSize(20, 20)
@@ -1265,6 +1315,7 @@ function MarketSync.CreateAHSidecar(parent)
                 else
                     row:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
                 end
+                row:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
                 row.icon:SetTexture(item.icon)
                 local quantity = MarketSync.Favorites.GetQuantity and MarketSync.Favorites.GetQuantity(currentListName, item.itemID) or 1
@@ -1395,11 +1446,12 @@ function MarketSync.CreateAHSidecar(parent)
     sellInset:SetPoint("TOPLEFT", sellFilterBox, "BOTTOMLEFT", -4, -6)
     sellInset:SetPoint("BOTTOMRIGHT", 0, 0)
     sellInset:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
+    sellInset._marketSyncThemeRole = "inset"
     sellInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
     sellInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
@@ -1450,9 +1502,9 @@ function MarketSync.CreateAHSidecar(parent)
                     header = CreateFrame("Frame", nil, sellScrollContent, "BackdropTemplate")
                     header:SetSize(284, 22)
                     header:SetBackdrop({
-                        bgFile = "Interface\\Buttons\\WHITE8X8",
-                        edgeFile = "Interface\\Buttons\\WHITE8X8",
-                        edgeSize = 1,
+                        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+                        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                        tile = true, tileSize = 16, edgeSize = 8,
                         insets = { left = 1, right = 1, top = 1, bottom = 1 },
                     })
                     header:SetBackdropColor(MarketSync.GetThemeColor("header"))
@@ -1492,15 +1544,22 @@ function MarketSync.CreateAHSidecar(parent)
                         btn:SetSize(42, 42)
                         btn:SetBackdrop({
                             bgFile = "Interface\\Buttons\\WHITE8X8",
-                            edgeFile = "Interface\\Buttons\\WHITE8X8",
-                            edgeSize = 1,
+                            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                            edgeSize = 8,
                             insets = { left = 1, right = 1, top = 1, bottom = 1 },
                         })
+                        btn:SetBackdropColor(0.04, 0.035, 0.03, 0.8)
+                        btn:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
                         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
                         btn.icon = btn:CreateTexture(nil, "ARTWORK")
                         btn.icon:SetSize(36, 36)
                         btn.icon:SetPoint("CENTER", 0, 0)
+
+                        local slotBorder = btn:CreateTexture(nil, "OVERLAY")
+                        slotBorder:SetAllPoints(btn)
+                        slotBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+                        btn.slotBorder = slotBorder
 
                         btn.count = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
                         btn.count:SetPoint("BOTTOMRIGHT", -2, 2)

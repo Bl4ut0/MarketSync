@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7-rc5] - 2026-11-10
+
+### Changed & Added
+- **Auction House Breakout Sidecar Native Warcraft Reskin**:
+  - Reskinned `MarketSyncAHSidecarFrame` to match the authentic Blizzard dialog styling instead of flat `WHITE8X8` frames.
+  - Replaced sidecar backdrop with `Interface\DialogFrame\UI-DialogBox-Background-Dark` and `UI-DialogBox-Border`.
+  - Replaced plain header with an authentic listbox banner (`Interface\Buttons\UI-Listbox-Highlight2`) in warm amber-gold and an authentic book emblem icon (`INV_Misc_Book_09`).
+  - Styled mode tabs (`Shopping`, `Craft`, `Bags`) with `UI-DialogBox-Background`, gold hover highlights (`UI-Listbox-Highlight`), and crisp selection borders.
+  - Upgraded content insets (`craftInset`, `listInset`, `sellInset`) with `UI-DialogBox-Background-Dark` and `UI-Tooltip-Border`.
+  - Added Blizzard quickslot item borders (`Interface\Buttons\UI-Quickslot2`) for all item slots in the Bag Selling grid.
+  - Added hover highlights to shopping list rows.
+- **Client Manifest & Release Upgrade**:
+  - Promoted release candidate to `0.9.7-rc5` across all manifests and client distributions.
+
 ## [0.9.7-rc4-local21] - 2026-11-10
 
 ### Changed & Added
