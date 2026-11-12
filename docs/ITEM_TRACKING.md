@@ -1,6 +1,8 @@
 # Item and customer-craft tracking
 
-This local preview adds a persistent local ledger alongside craft orders, organized in a dedicated modular subsystem (`MarketSync/Ledger/`). Open the Ledger directly via **Minimap Right-Click**, the **Ledger** button in the MarketSync header bar, the optional **2nd Ledger Minimap Icon** (`Settings → Show dedicated Ledger Minimap Icon`), `/ledger`, `/msledger`, or **Materials & Crafting Choices → Item Ledger** to inspect inventory, exchanges, cost lots, and unresolved movements. Nothing is sent through guild sync.
+> **Beta Status**: The Transactional Item Ledger is an experimental beta module and is **auto-disabled by default** (`MarketSyncDB.EnableLedgerBeta = false`). To enable it, navigate to **Game Menu → Options → AddOns → MarketSync → Beta & Experimental Features → Enable Transactional Item Ledger**. When disabled, all Ledger UI buttons (MainFrame title bar, Craft Manager header, item context menus, and minimap shortcuts) are dimmed and disabled. Lightweight multi-character inventory tracking continues running in the background for tooltip counts with zero ledger overhead.
+
+This local preview adds a persistent local ledger alongside craft orders, organized in a dedicated modular subsystem (`MarketSync/Ledger/`). When enabled, open the Ledger directly via **Minimap Right-Click**, the **Ledger** button in the MarketSync header bar, the optional **2nd Ledger Minimap Icon** (`Settings → Show dedicated Ledger Minimap Icon`), `/ledger`, `/msledger`, or **Materials & Crafting Choices → Item Ledger** to inspect inventory, exchanges, cost lots, and unresolved movements. Nothing is sent through guild sync.
 
 ## Ledger Architecture & Design C Interface (`MarketSync/Ledger/`)
 

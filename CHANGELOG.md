@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.7-rc5] - 2026-11-10
+## [0.9.7-rc6] - 2026-11-11
+
+### Changed & Added
+- **Native Warcraft Interface Reskin for Crafting Manager & Item Ledger**:
+  - Re-architected `MarketSyncCraftManager` and `MarketSyncItemLedger` to inherit Blizzard's native `PortraitFrameTemplate`.
+  - Added authentic Blizzard NineSlice frame borders, round circular portrait ring with blacksmithing hammer / ledger book icons masked to a circle, standard title bar text, and top-right close buttons.
+  - Implemented docked bottom tabs (`Materials & Planning`, `Craft History`) using `AuctionHouseFrameDisplayModeTabTemplate` matching the main MarketSync frame.
+  - Preserved authentic double-wide 832x480 dimensions matching Blizzard panels (`AuctionFrame`, `TradeSkillFrame`, `MarketSyncMainFrame`).
+- **Auction House Breakout Sidecar Dual-Theme Support**:
+  - Reskinned the breakout sidecar drawer (`MarketSyncAHSidecarFrame`) with dynamic theme switching:
+    - **Forever / Modern (`_forever_`, `_retail_`)**: Dark bronze theme with Blizzard `UI-DialogBox-Background-Dark`, authentic `UI-DialogBox-Border`, amber-gold header accents, and bronze tab framing.
+    - **Legacy / Classic Era (`_classic_`, `_classic_era_`)**: Authentic parchment / slate theme with `UI-DialogBox-Background`, silver/slate borders, and slate header accents.
+  - Upgraded docking tabs and open/close drawer toggle buttons to native Blizzard dialog/tooltip backdrops.
+  - Wired `Sidecar.Toggle` and aliased to `MarketSync.ToggleAHSidecar` across both main frame and Auction House.
+- **Unified Slash Commands (`/ms` & `/marketsync`)**:
+  - Running `/ms` or `/marketsync` with no arguments now toggles the main MarketSync window instead of only printing help text.
+  - Added dedicated subcommands:
+    - `/ms craft` (or `/ms crafting`, `/ms crafts`, `/ms mats`) — opens/toggles the Crafting & Materials Manager.
+    - `/ms sidecar` (or `/ms drawer`, `/ms breakout`) — toggles the AH shopping and bag selling drawer.
+    - `/ms ledger` (or `/ms items`) — opens the Item Ledger when enabled.
+    - `/ms theme [forever|legacy|auto]` — changes UI theme dynamically.
+    - `/ms config` (or `/ms settings`, `/ms options`) — opens the AddOn settings panel.
+  - Registered standalone slash commands: `/mscraft`, `/craftmanager`, `/crafts`, `/sidecar`, `/mssidecar`, `/ledger`, `/msledger`.
+- **Modular AddOn Settings Configuration & Beta Features**:
+  - Integrated with WoW's native canvas settings panel (`Settings.RegisterAddOnCategory` on 10.0+ and `InterfaceOptions_AddCategory` on Classic), organized into 8 distinct settings cards.
+  - **Processing and Price Alerts Tabs**: Positioned as stable, production-ready modules nearing core release for day-to-day profit calculation and price threshold monitoring.
+  - **Transactional Item Ledger Beta Auto-Disabled**: `EnableLedgerBeta` defaults to `false` (`MarketSyncDB.EnableLedgerBeta = false`) to ensure zero memory or CPU overhead for users not testing the experimental FIFO ledger.
+  - When the Ledger Beta is disabled, all UI entry points (MainFrame title bar button, Craft Manager header button, row context menu option, and minimap icon shortcuts) are gracefully dimmed and disabled. Lightweight multi-character bag/bank tracking remains active for tooltips.
+- **Multi-Realm Sharding & Playset Scalability (100+ Backend Realms)**:
+  - Validated and documented backend realm sharding in `MarketSync.NormalizeSyncRealm`:
+    - Automatically strips trailing shard numbers (`0` through `100+`) preceded by spaces, hyphens, underscores, or hash signs (e.g. `English 52`, `English-52`, `English 0`, `English 100`, `ClassicBetaPvP2`).
+    - Pattern matching `%d+$` natively supports arbitrary integers with no ceiling at 100, folding all sharded instances into a single canonical playset for guild-sync communication.
+    - Faction boundaries (`@Horde` / `@Alliance`) remain strictly isolated across all sharded realms.
+- **Client Manifest & Release Upgrade**:
+  - Promoted release candidate to `0.9.7-rc6` across all manifests and client distributions.
 
 ### Changed & Added
 - **Auction House Breakout Sidecar Native Warcraft Reskin**:

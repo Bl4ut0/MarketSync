@@ -147,7 +147,29 @@ For external web dashboards, discord bots, or pricing sites:
 
 ---
 
-## Summary of Scale Metrics (30,000 Items)
+## 8. Multi-Realm Sharding & Playset Scalability (100+ Backend Realms)
+
+### A. Numbered Shard Folding (`MarketSync.NormalizeSyncRealm`)
+On the Forever platform, a single unified playset may be partitioned across dozens or hundreds of backend world servers (shards) bearing numbered suffixes, such as `English 0`, `English 14`, `English 52`, `English 100`, or `ClassicBetaPvP1` through `ClassicBetaPvP100+`.
+
+MarketSync's synchronization layer uses pattern-based realm folding:
+```lua
+local base = realm:gsub("[%s%-_#]*%d+$", "")
+local folded = string.lower(base):gsub("[%s%-_#]+", "")
+```
+- **Arbitrary Shard Scaling**: Because `%d+$` matches one or more numeric digits at the end of the string, there is **no hard ceiling at 100**. Shards `0` through `100`, `250`, or `1,000+` are dynamically recognized and collapsed into the canonical root identifier (e.g. `english` or `classicbetapvp`).
+- **Flexible Delimiters**: Delimiters including spaces (`English 52`), hyphens (`English-52`), underscores (`English_52`), hash marks (`English#52`), and fused suffixes (`English52`) all normalize identically.
+- **Fail-Closed Faction Isolation**: Shard folding strictly preserves the faction suffix (`@Alliance` or `@Horde`), preventing cross-faction data contamination regardless of shard distribution.
+
+### B. Network Load Invariance Under 100+ Shards
+Even when 100+ sharded realms share the same guild addon channel:
+1. **Single Broadcaster Election**: At any given 30-minute bucket, only the single peer with the most authoritative scan timestamp advertises data. Other peers remain listeners.
+2. **Token Bucket Rate Limiting**: Outbound addon messaging is strictly capped at `< 640 B/s`, well below Blizzard's `~1,000 B/s` disconnect threshold (`ERR_ADDON_MESSAGE_THROTTLED`).
+3. **PULL/PUSH Peer Cooldowns**: Clients request deltas (`PULL`) with randomized jitter and exponential backoff, preventing peer contention even across hundreds of guild members.
+
+---
+
+## Summary of Scale Metrics (30,000 Items & 100+ Realms)
 
 | Metric | Measurement / Value | Notes |
 | :--- | :--- | :--- |
@@ -155,6 +177,7 @@ For external web dashboards, discord bots, or pricing sites:
 | **Disk Size (`SavedVariables`)** | ~4.5 MB – 9.0 MB | Kept small by Tiered Retention (Hot/Warm/Cold/Purge). |
 | **Scan Read Time** | ~1.2s across 120 frames | Paged at 250 rows/tick; zero frame freezing. |
 | **Scan Write & Emit Time** | ~1.5s across 150 frames | Paced at 150 items/tick; interactive UI progress bar. |
-| **Network Sync Bandwidth** | Strictly capped < 800 B/s | Prevents `ERR_ADDON_MESSAGE_THROTTLED` disconnects. |
+| **Network Sync Bandwidth** | Strictly capped < 640 B/s | Prevents `ERR_ADDON_MESSAGE_THROTTLED` disconnects. |
+| **Backend Shard Capacity** | 100+ realms / playset | Normalized via `%d+$` with zero performance degradation. |
 | **Background Maintenance** | Runs at 90s and 120s post-login | Chunked coroutines yielding every 500 items. |
 | **UI Responsiveness** | Consistent 60+ FPS | All operations are frame-sliced or coroutine-yielded. |

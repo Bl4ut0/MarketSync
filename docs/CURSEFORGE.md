@@ -6,17 +6,32 @@ MarketSync is an Auction House companion for **WoW Forever, Classic Era / Season
 
 **Auctionator is optional.** MarketSync includes a standalone scanner and can also import supported Auctionator scans when you prefer its scanning interface.
 
-This guide covers **0.9.7-rc3**, the current release candidate. Legacy-client testing is ongoing; the available Auction House controls depend on your client.
+This guide covers **0.9.7-rc6**, the current release candidate.
 
 ## Start here
 
 1. Install MarketSync for your client and enable it at character selection.
 2. Open an auctioneer and complete a **Full AH Scan** with MarketSync or your selected Auctionator scanner.
 3. Close the Auction House so MarketSync can announce the new scan to your guild.
-4. Click the minimap icon or use **`/ms search`** to browse your saved prices.
-5. Create a shopping list, open Analytics for an item, or enable **Processing** and **Alerts** in Settings when you want those tools.
+4. Click the minimap icon or use **`/ms`** to browse your saved prices.
+5. Access the Crafting Manager via **`/ms craft`**, or expand the AH drawer beside the auction house.
+6. Open AddOn Settings via **`/ms config`** to customize memory management, sound triggers, and optional features.
 
 For crafting, open each profession window once so MarketSync can discover the character's known recipes.
+
+---
+
+## Authentic Warcraft Interface Styling
+
+MarketSync features pixel-perfect, native Blizzard interface design:
+- **PortraitFrameTemplate Architecture**: The main MarketSync browser, the Crafting & Materials Manager, and the Item Ledger inherit Blizzard's authentic frame template, complete with round metallic portrait rings, authentic emblems, standard Blizzard title bars, and top-right close buttons.
+- **Docked Bottom Tabs**: Windows feature Blizzard's docked bottom tabs (`AuctionHouseFrameDisplayModeTabTemplate`), matching the authentic appearance of `AuctionFrame` and `TradeSkillFrame`.
+- **Dual-Theme Support**:
+  - **Forever / Modern (`_forever_`, `_retail_`)**: Styled in dark bronze dialog textures (`UI-DialogBox-Background-Dark`), amber-gold banners, and bronze tab borders.
+  - **Legacy / Classic Era (`_classic_`, `_classic_era_`)**: Styled in authentic parchment (`UI-DialogBox-Background`), silver/slate framing, and muted accents.
+- Change themes anytime using **`/ms theme [forever|legacy|auto]`** or under **Settings → Window Theme**.
+
+---
 
 ## Understand your price data
 
@@ -40,7 +55,9 @@ Neutral-AH data has its own view and sync scope. It is kept separate from the ma
 
 Alliance and Horde have separate saved price histories, alert state, and sync markets, including when you play both factions in the same environment.
 
-On Forever, numbered backend partitions of the same playset can synchronize. For example, `ClassicBetaPvP` and `ClassicBetaPvP2` match. Different playsets remain separate. Other supported clients retain exact realm matching.
+On Forever, numbered backend partitions of the same playset can synchronize (e.g. `English 0` through `English 100+`, `ClassicBetaPvP1` through `ClassicBetaPvP100+`). Different playsets remain separate. Other supported clients retain exact realm matching.
+
+---
 
 ## Scan with or without Auctionator
 
@@ -49,8 +66,6 @@ On Forever, numbered backend partitions of the same playset can synchronize. For
 The **Scanner** page lets you run a full Auction House scan or scan selected shopping lists. A full scan builds a broad saved-price snapshot; selected lists focus on the items you track.
 
 Full scans follow the client's Auction House cooldown. Native item searches wait for complete results before recording them. Large snapshots are processed in batches so reads, history updates, and item loading can progress across frames.
-
-Scanning an item does not automatically add it to a shopping list or create an alert. Those are explicit item actions.
 
 ### Using Auctionator
 
@@ -64,7 +79,7 @@ On supported Classic clients, the enhanced **Search** page shows live auctions g
 
 **Scan Entire List** and **Scan Buy Materials** collect results for multiple items into one table. The game still queries items and their result pages in sequence; each item's results remain available together for browsing.
 
-Select a price/stack row to check a live stack. MarketSync rechecks its source page before enabling **Buy 1 Stack**, then asks you to confirm the purchase. Live Search is a buying view; use the Scanner page for a saved full scan.
+---
 
 ## The Auction House breakout drawer
 
@@ -76,127 +91,76 @@ Open the MarketSync arrow beside the Auction House to expand the **sidecar drawe
 | **Craft** | Keep crafting requests, adjust quantities, and choose which materials to buy, craft, or provide. |
 | **Bags** | Browse auctionable bag items, search their market, and select items into the AH selling interface. |
 
-The drawer can be collapsed when you want more room. Its actions use the Auction House interfaces available on your client.
+The drawer can be collapsed when you want more room. Toggle it anytime via **`/ms sidecar`** or `/sidecar`.
 
-## Right-click item actions
+---
 
-Supported item rows and headers expose a shared right-click menu. Available actions depend on the page and item:
+## Crafting & Materials Workstation
 
-| Action | Use it to… |
-| --- | --- |
-| **Search in AH** | Look up the item at the auctioneer. |
-| **Show Analytics** | Open its price history and market detail. |
-| **Create Price Alert** | Start an alert with the item already selected. |
-| **Add to List → [list name]** | Add the item to an existing shopping list. |
-| **Remove from [list name]** | Remove an item when you opened the menu from that list. |
-| **Link to Chat** | Insert an available item link into chat. |
+The **Crafting & Materials Manager** (`/ms craft` or `/mscraft`) is a double-wide 832x480 workstation organized into 3 balanced columns:
 
-Processing results add context-specific choices such as **Select / Deselect**, **Add to Favorites**, and, for craft results, **Add to Craft List**.
+1. **Left Column (Craft Management & Queue)**: Displays pending and saved crafts, status indicators, and dedicated management controls (`Mark Crafted`, `Record Sale`, `Remove Craft`, `Craft History`).
+2. **Middle Column (Recipe Breakdown Tree)**: Interactive hierarchical ingredient tree showing component recipes, quantity needed, and supply choices (`Buy`, `Craft`, `Provide`).
+3. **Right Column (Purchase Plan)**: Calculated material shopping plan, right-click purchase prompt, and financial cost breakdowns.
 
-## Build shopping lists
+Top preset toolbar buttons allow 1-click strategy evaluation: **Optimal** (smartest ground-up cost), **Buy Finished** (buy end item directly), **Craft All Raw** (recurse to base materials), and **Customer Craft** (zero-cost client provided materials).
 
-Use shopping lists for consumables, profession materials, gear targets, or items you regularly check.
+---
 
-1. Open **Shopping** in the AH drawer and choose **+ New** to create a named list, or select an existing list such as Favorites.
-2. Add an item through **right-click → Add to List → [list name]** on a supported MarketSync item row.
-3. Alternatively, drag an item into the Shopping entry area or enter its name or item ID.
-4. Click an entry to search for it, or use **Scan Entire List** to search the list through the supported client flow.
-5. Remove entries with their remove control or the contextual **Remove from [list name]** action.
+## Modular Configuration & Settings Cards
 
-Shopping lists and craft-request lists are separate. Adding an item to Shopping does not create a crafting plan.
+MarketSync features an 8-card categorized settings interface under WoW's native AddOn Settings:
 
-## Build craft lists and material plans
+1. **Performance & Memory Management**:
+   - **Low RAM Mode (Default: ON)**: Drops index tables and runs GC when browse windows close.
+   - **Cache Build Speed Slider**: 1 (Conservative) to 4 (Maximum) yielding rates.
+   - **Live RAM Footprint Estimator**: Informs you of exact index memory usage in MB.
+2. **Professions & Crafting (Production Feature)**:
+   - Live TradeSkill window margin calculations, vendor materials, and component trees.
+3. **Auction House & Scanning**:
+   - Scanner toggle, tooltip buyout prices, Expected Values (EV) for disenchant/prospecting/milling, and multi-character inventory counts.
+4. **Audio & Notifications**:
+   - Audio alerts with sound preview, volume slider, minimap flashing, and on-screen raid alert banners.
+5. **Data Sync & Swarm**:
+   - Guild sync and Neutral AH sync toggles, user blocking/unblocking, and smart rule bandwidth management.
+6. **Beta & Experimental Features**:
+   - **Processing Tab**: Production-ready module near general release for recursive crafting solver, vendor arbitrage, and batch shopping lists.
+   - **Price Alerts Tab**: Production-ready module near general release for price threshold monitoring, watchlists, and raid warnings.
+   - **Transactional Item Ledger (Auto-Disabled by Default)**: Experimental FIFO cost tracking, inventory reconciliation, and ledger logs. Kept auto-disabled (`EnableLedgerBeta = false`) to avoid overhead for non-testers. All UI buttons are dimmed/disabled until toggled on.
+7. **Window Theme**:
+   - Auto (client version), Forever (dark bronze), or Legacy (parchment/slate).
+8. **Debugging & Diagnostics**:
+   - Network Monitor and diagnostic chat output.
 
-Craft lists start with what you want to make, then help you decide how to obtain the ingredients.
+---
 
-### Add a craft
+## Multi-Realm Sharding & Backend Scalability
 
-- In **Processing → Craft Profit**, right-click a craft result and choose **Add to Craft List**.
-- Craft detail panels also provide **+ Craft List** for supported recipe/item selections.
-- In the AH drawer's **Craft** tab, you can drop a crafted item or recipe, or enter a supported item ID or link.
+On Forever, single playsets are distributed across numbered backend shards (e.g. `English 0` through `English 100+`, `ClassicBetaPvP1` through `ClassicBetaPvP100+`).
 
-Use **+ New** to keep separate named craft lists and the quantity controls to adjust your requests. Recipe availability depends on the profession knowledge MarketSync has captured.
+MarketSync automatically strips trailing numeric shard suffixes (`%d+$`) across arbitrary integer ranges (no ceiling at 100) and folds them into a canonical playset key (`english`).
+- **Safe Network Limits**: Outgoing bandwidth is strictly governed by a Token Bucket ceiling (< 640 B/s), and only 1 broadcaster is elected per bucket.
+- **Faction Isolation**: All shard operations strictly preserve faction boundaries (`@Horde` vs `@Alliance`).
 
-### Choose Buy, Craft, or Provide
+---
 
-The material checklist lets you decide how each component will be supplied:
-
-- **Craft:** make a component through an available known recipe.
-- **Buy:** include it in the material purchase plan.
-- **Provide:** supply it yourself, for example from storage or farming.
-
-The drawer explains its checkboxes: the craft check selects crafting, the Buy check selects purchasing, and materials not selected for purchase are provided by you. Choices and requested quantities are saved with the plan.
-
-### Search and export the materials
-
-**Scan Buy Materials** searches the required non-vendor AH materials marked Buy. **Copy to Shopping** exports the purchase plan to a shopping list with quantities.
-
-The export is a snapshot of the current purchase plan. It replaces that plan's exported shopping list when refreshed; it does not keep every edit synchronized automatically between the two lists.
-
-## Processing and crafting calculations
-
-Enable **Processing** in Settings to access:
-
-- **Target Material:** find supported processing routes into a selected material.
-- **Process Scan:** compare supported processing opportunities using available cached prices.
-- **Craft Profit:** compare known recipes, reagent costs, output prices, and estimated profit.
-
-Where supported, calculations can include craftable intermediate components and selected reagent choices. Missing prices remain missing rather than becoming invented costs. Broad scans use the built market cache, so build the relevant Personal/Guild cache before running them.
-
-Processing estimates depend on the recipes, market data, and probability tables available for your client. Disenchant outcome ranges describe possible outcomes, not guaranteed returns. Legacy disenchant odds have not been independently validated for Forever custom gear.
-
-## Analytics and item history
-
-Open **Show Analytics** from an item action menu to inspect recorded pricing history, scan age, and available source information. Analytics also provides recent-scan and shopping-list views for focusing on relevant items.
-
-Random-suffix items can retain distinct price records when exact suffix data is available. Observation time belongs to the individual quote; scanning another item or rebuilding a cache does not make an old price newly observed.
-
-## Price alerts
-
-Enable **Alerts** in Settings, then use **Create Price Alert** from a supported item menu to select an item and configure its price conditions.
-
-Alerts use recorded prices and your settings. Creating an alert does not buy an item or guarantee that a matching live auction remains available.
-
-**Shift-left-click the minimap icon** to mute alert delivery for the session. Use the shortcut again to restore delivery; logging out also ends the session mute. The first mute asks for confirmation.
-
-## Bag browsing and selling
-
-The AH drawer's **Bags** tab groups auctionable inventory by bag and provides a name filter. Refresh it after inventory changes.
-
-Left-click a supported item to select it into the Auction House sell slot. Right-click to search its market. Displayed market or match-price guidance helps you review your listing; normal AH controls still handle posting.
-
-## Guild synchronization and the Network Monitor
-
-Guild members with compatible MarketSync builds exchange newer verified observations through WoW's hidden guild addon channel. Sync requires members to be online, and combat/instance settings can temporarily pause participation.
-
-The Network Monitor shows announcements, peer state, transfer activity, and cache processing. **Ready** means a peer was discovered; it does not mean a download is needed. A peer advertising zero records has no eligible data in that announcement. A pull is requested when the peer has suitable newer data for your market.
-
-Transfers are checked for completeness before application. Replayed records do not create duplicate history entries, and revision-based selection limits updates to the eligible newer data.
-
-## Performance, storage, and privacy
-
-MarketSync stores its database in local WoW SavedVariables. Guild synchronization uses the game client; it does not automatically upload your prices to an external cloud service.
-
-Large databases take memory, and item names/icons may continue loading while caches build. Low RAM and on-demand cache settings let you choose when to build searchable views. Retention compacts older histories and expires data beyond its configured tiers.
-
-The debugging tools include a Network Monitor and Task Manager for inspecting sync, cache, and background activity.
-
-## Upgrading and troubleshooting
-
-For guild testing, update both users to the current candidate and reload. Complete a fresh scan and close the AH before checking advertisements and pulls.
-
-Older unlabelled prices remain archived after faction separation. Earlier builds also combined personal and received observations; rc3 preserves cumulative history and separates records whose received source can be identified. A personal value already overwritten by an older build cannot be reconstructed exactly.
-
-When reporting an issue, include your client/build, MarketSync version, faction, realm/playset, scanner choice, reproduction steps, Lua errors, and relevant Network Monitor output.
-
-## Commands and links
+## Commands
 
 | Command | Action |
-| --- | --- |
-| `/ms search` or `/ms browse` | Open or toggle the browse window. |
-| `/ms config` | Open Settings. |
-| `/ms block <name>` | Block a sync sender. |
-| `/ms unblock <name>` | Unblock a sync sender. |
+| :--- | :--- |
+| `/ms` or `/marketsync` | Toggle the main MarketSync window |
+| `/ms craft` (or `/mscraft`, `/craftmanager`, `/crafts`) | Open Crafting & Materials Manager |
+| `/ms sidecar` (or `/sidecar`, `/mssidecar`) | Toggle AH Shopping & Bag Selling drawer |
+| `/ms ledger` (or `/ledger`, `/msledger`) | Open Item Ledger (when Beta is enabled) |
+| `/ms search` or `/ms browse` | Open the offline market browser |
+| `/ms theme [forever\|legacy\|auto]` | Switch UI window styling |
+| `/ms config` (or `/ms settings`, `/ms options`) | Open AddOn settings panel |
+| `/ms block <player>` | Block a specific sync sender |
+| `/ms unblock <player>` | Unblock a sync sender |
+
+---
+
+## Links & License
 
 [Source and documentation](https://github.com/Bl4ut0/MarketSync) · [Release downloads](https://github.com/Bl4ut0/MarketSync/releases) · [Report an issue](https://github.com/Bl4ut0/MarketSync/issues)
 
