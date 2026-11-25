@@ -2260,7 +2260,7 @@ function MarketSync.CreateModernDialog(name, width, height, titleText, iconTextu
     if ringTex.SetTexCoord then ringTex:SetTexCoord(0, 0.59375, 0, 0.59375) end
     frame.warcraftRingTex = ringTex
 
-    local iconPath = iconTexture or "Interface\\AddOns\\MarketSync\\Media\\MarketSyncIcon"
+    local iconPath = iconTexture or "Interface\\Icons\\INV_Misc_Coin_01"
     local headerIcon = ring:CreateTexture(nil, "ARTWORK")
     headerIcon:SetSize(36, 36)
     headerIcon:SetPoint("CENTER", ring, "CENTER", 0, 0)

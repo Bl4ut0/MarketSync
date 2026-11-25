@@ -140,7 +140,7 @@ class PackageTests(unittest.TestCase):
 
     def test_lua_texture_paths_resolve_in_repo(self):
         # Textures referenced by the addon Lua that are not shipped yet. Remove an entry once the asset exists.
-        known_missing = {"Media/MarketSyncIcon"}
+        known_missing = set()
         pattern = re.compile(r'Interface\\\\AddOns\\\\MarketSync\\\\([^"]+)"')
         addon_dir = module.ROOT / "MarketSync"
         references = set()

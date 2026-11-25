@@ -1026,6 +1026,37 @@ function MarketSync.CreateAnalyticsPanel(parent)
     sep1:SetPoint("TOPLEFT", rightInset, "TOPLEFT", 10, isEmbedded and -56 or -52)
     sep1:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", -10, isEmbedded and -56 or -52)
     sep1:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
+
+    -- Source toggles (phase 3): choose which history the graph shows. They sit in
+    -- the top-right of the right panel. Check placement in game.
+    local SOURCE_CHOICES = {
+        { key = "local", label = "Local + Sync", x = -10 },
+        { key = "datapack", label = "Data Pack", x = -98 },
+        { key = "neutral", label = "Neutral AH", x = -186 },
+    }
+    local sourceButtons = {}
+    panel.historySource = (MarketSyncDB and MarketSyncDB.AnalyticsSource) or "local"
+    local function SetHistorySource(source)
+        panel.historySource = source
+        if MarketSyncDB then MarketSyncDB.AnalyticsSource = source end
+        for key, btn in pairs(sourceButtons) do
+            if btn.LockHighlight and btn.UnlockHighlight then
+                if key == source then btn:LockHighlight() else btn:UnlockHighlight() end
+            end
+        end
+        if panel.currentKey and panel.ShowItem then
+            panel:ShowItem(panel.currentKey, panel.currentLink, panel.currentName, panel.currentIcon, panel.currentPrice)
+        end
+    end
+    for _, choice in ipairs(SOURCE_CHOICES) do
+        local btn = CreateFrame("Button", nil, rightInset, "UIPanelButtonTemplate")
+        btn:SetSize(86, 20)
+        btn:SetText(choice.label)
+        btn:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", choice.x, isEmbedded and -26 or -28)
+        btn:SetScript("OnClick", function() SetHistorySource(choice.key) end)
+        sourceButtons[choice.key] = btn
+    end
+    SetHistorySource(panel.historySource)
     panel.sep1 = sep1
 
     -- 2. Historical Trend Section (Unified inside rightInset, no double-borders)
@@ -1276,6 +1307,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
     -- SHOW ITEM DATA METHOD
     -- ================================================================
     function panel:ShowItem(dbKey, itemLink, itemName, iconTex, price)
+        self.currentKey, self.currentLink, self.currentName, self.currentIcon, self.currentPrice = dbKey, itemLink, itemName, iconTex, price
         if not dbKey and not itemLink and not itemName then
             ShowEmptyState()
             return
@@ -1317,7 +1349,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
         self.mPrice:SetText(FormatMoney(marketPrice))
 
         -- Retrieve History Data
-        local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key) or {}
+        local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key, { source = self.historySource or "local" }) or {}
         self.currentHistory = history
         self.graph:Plot(history, self.graphPointLimit)
         self:UpdateVisibleRange()

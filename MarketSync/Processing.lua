@@ -3525,14 +3525,43 @@ local function ResolveHistoryDBKey(input)
     return input
 end
 
-function MarketSync.GetItemHistory(dbKey)
+-- Merged Data Pack record for one item, across every loaded partition.
+function MarketSync.GetDataPackRecord(dbKey)
+    local packDB = _G.MarketSyncDataDB
+    if type(packDB) ~= "table" then return nil end
+    local merged
+    for _, part in pairs(packDB) do
+        local rec = type(part) == "table" and part[dbKey]
+        if type(rec) == "table" and type(rec.h) == "table" then
+            merged = merged or { h = {}, l = {}, a = {} }
+            for day, price in pairs(rec.h) do merged.h[day] = price end
+            for day, low in pairs(rec.l or {}) do merged.l[day] = low end
+            for day, qty in pairs(rec.a or {}) do merged.a[day] = qty end
+        end
+    end
+    return merged
+end
+
+-- opts.source selects the history: "local" (Personal, Guild and Auctionator,
+-- the default), "neutral" (Neutral AH only), or "datapack" (Data Pack only).
+function MarketSync.GetItemHistory(dbKey, opts)
     dbKey = ResolveHistoryDBKey(dbKey)
-    local pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
-    local priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
+    local source = opts and opts.source or "local"
+    local pData, priceData, meta
+    if source == "neutral" then
+        local rdb = MarketSync.GetRealmDB()
+        pData = rdb.NeutralData and rdb.NeutralData[dbKey]
+        meta = rdb.NeutralMeta and rdb.NeutralMeta[dbKey]
+    elseif source == "datapack" then
+        priceData = MarketSync.GetDataPackRecord(dbKey)
+    else
+        pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+        priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
+    end
     if (not priceData or not priceData.h) and (not pData or not pData.h) then return {} end
 
     local history = {}
-    local meta = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
+    meta = meta or (MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey])
     local FromBase36 = MarketSync.FromBase36
 
     -- Track which days have granular data so we don't double-count

@@ -1,7 +1,7 @@
 ## Interface: 16001, 120107, 120105, 120100, 120007, 120005, 120001, 120000, 50504, 50503, 38000, 20506, 20505, 11509, 11508
 ## Title: MarketSync
 ## Notes: The Guild Auction DB - Sync prices, check history, and browse offline.
-## Author: Gemini
+## Author: Alex Mammen
 ## Version: 0.9.8-rc1
 ## SavedVariables: MarketSyncDB
 ## OptionalDeps: Auctionator, MarketSyncData
