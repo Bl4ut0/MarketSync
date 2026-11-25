@@ -1471,9 +1471,9 @@ function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price)
             MarketSync.MainFrame:Show()
         end
         if MarketSync.SelectMainFrameTab then
-            MarketSync.SelectMainFrameTab(4)
-        elseif MarketSync.MainFrame.tabs and MarketSync.MainFrame.tabs[4] then
-            MarketSync.MainFrame.tabs[4]:Click()
+            MarketSync.SelectMainFrameTab(3)
+        elseif MarketSync.MainFrame.tabs and MarketSync.MainFrame.tabs[3] then
+            MarketSync.MainFrame.tabs[3]:Click()
         end
     end
 

@@ -1571,63 +1571,58 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(syncAnchor and syncAnchor[1] == "TOPRIGHT" and syncAnchor[5] == -3,
       "Network status must sit within the title strip, clear of its lower border")
     assert(mainFrame.tabs ~= nil, "MainFrame.tabs should exist")
-    assert(#mainFrame.tabs == 7, "MainFrame must have 7 tabs, found: " .. tostring(#mainFrame.tabs))
-    assert(mainFrame.tabs[1]:GetText() == "Personal Scan", "Tab 1 must be Personal Scan")
-    assert(mainFrame.tabs[2]:GetText() == "Guild Sync", "Tab 2 must be Guild Sync")
-    assert(mainFrame.tabs[3]:GetText() == "Neutral AH", "Tab 3 must be Neutral AH")
-    assert(mainFrame.tabs[4]:GetText() == "Analytics", "Tab 4 must be Analytics")
-    assert(mainFrame.tabs[5]:GetText() == "Processing", "Tab 5 must be Processing")
-    assert(mainFrame.tabs[6]:GetText() == "Alerts", "Tab 6 must be Alerts")
-    assert(mainFrame.tabs[7]:GetText() == "Debugging", "Tab 7 must be Debugging")
-    for i = 1, 7 do
+    assert(#mainFrame.tabs == 6, "MainFrame must have 6 tabs, found: " .. tostring(#mainFrame.tabs))
+    assert(mainFrame.tabs[1]:GetText() == "Main", "Tab 1 must be Main (Personal and Guild)")
+    assert(mainFrame.tabs[2]:GetText() == "Neutral AH", "Tab 2 must be Neutral AH")
+    assert(mainFrame.tabs[3]:GetText() == "Analytics", "Tab 3 must be Analytics")
+    assert(mainFrame.tabs[4]:GetText() == "Processing", "Tab 4 must be Processing")
+    assert(mainFrame.tabs[5]:GetText() == "Alerts", "Tab 5 must be Alerts")
+    assert(mainFrame.tabs[6]:GetText() == "Debugging", "Tab 6 must be Debugging")
+    for i = 1, 6 do
       assert(mainFrame.tabs[i].tabIcon == nil, "MainFrame tabs must not have icon overlays")
     end
 
     -- Test SelectMainFrameTab
     assert(type(MarketSync.SelectMainFrameTab) == "function", "SelectMainFrameTab should be exposed")
-    MarketSync.SelectMainFrameTab(4)
-    assert(mainFrame.activeTabID == 4, "Tab 4 should be active")
-    assert(mainFrame.contentFrames[4]:IsShown(), "Analytics contentFrame should be shown")
+    MarketSync.SelectMainFrameTab(3)
+    assert(mainFrame.activeTabID == 3, "Tab 3 (Analytics) should be active")
+    assert(mainFrame.contentFrames[3]:IsShown(), "Analytics contentFrame should be shown")
 
     -- Test uniform tab width and anchoring
     assert(type(mainFrame.RefreshTabVisibility) == "function", "RefreshTabVisibility should be exposed")
-    for i = 1, 7 do
-      assert(mainFrame.tabs[i]:GetWidth() == 104, "Tab " .. i .. " should have uniform width 104, got " .. tostring(mainFrame.tabs[i]:GetWidth()))
+    for i = 1, 6 do
+      assert(mainFrame.tabs[i]:GetWidth() == mainFrame.tabs[1]:GetWidth(), "Tab " .. i .. " should match the uniform tab width")
     end
 
     -- Test dynamic resizing when a tab is hidden
     MarketSyncDB.PassiveSync = false
     mainFrame.RefreshTabVisibility()
-    assert(not mainFrame.tabs[2]:IsShown(), "Tab 2 should be hidden when PassiveSync is false")
-    for i = 1, 7 do
-      if i ~= 2 then
-        assert(mainFrame.tabs[i]:GetWidth() == 112, "Tab " .. i .. " should have resized to 112 with 6 tabs, got " .. tostring(mainFrame.tabs[i]:GetWidth()))
-      end
-    end
+    assert(not mainFrame.sourceButtons.guild:IsShown(), "Guild source must be hidden when PassiveSync is false")
+    assert(mainFrame.tabs[1]:IsShown(), "Main tab stays visible when PassiveSync is false")
     MarketSyncDB.PassiveSync = true
     mainFrame.RefreshTabVisibility()
 
     -- Test Beta toggles hiding Processing and Alerts
     MarketSyncDB.EnableProcessingTab = false
     mainFrame.RefreshTabVisibility()
-    assert(not mainFrame.tabs[5]:IsShown(), "Tab 5 (Processing) should be hidden when EnableProcessingTab is false")
+    assert(not mainFrame.tabs[4]:IsShown(), "Tab 4 (Processing) should be hidden when EnableProcessingTab is false")
     MarketSyncDB.EnableProcessingTab = true
     mainFrame.RefreshTabVisibility()
-    assert(mainFrame.tabs[5]:IsShown(), "Tab 5 (Processing) should be shown when EnableProcessingTab is true")
+    assert(mainFrame.tabs[4]:IsShown(), "Tab 4 (Processing) should be shown when EnableProcessingTab is true")
 
     MarketSyncDB.EnableAlertsTab = false
     mainFrame.RefreshTabVisibility()
-    assert(not mainFrame.tabs[6]:IsShown(), "Tab 6 (Alerts) should be hidden when EnableAlertsTab is false")
+    assert(not mainFrame.tabs[5]:IsShown(), "Tab 5 (Alerts) should be hidden when EnableAlertsTab is false")
     MarketSyncDB.EnableAlertsTab = true
     mainFrame.RefreshTabVisibility()
-    assert(mainFrame.tabs[6]:IsShown(), "Tab 6 (Alerts) should be shown when EnableAlertsTab is true")
+    assert(mainFrame.tabs[5]:IsShown(), "Tab 5 (Alerts) should be shown when EnableAlertsTab is true")
 
     MarketSyncDB.EnableDebuggingTab = false
     mainFrame.RefreshTabVisibility()
-    assert(not mainFrame.tabs[7]:IsShown(), "Debugging tab should be optional")
+    assert(not mainFrame.tabs[6]:IsShown(), "Debugging tab should be optional")
     assert(type(MarketSync.OpenDebuggingWindow) == "function", "Debugging window shortcut should exist")
     MarketSync.OpenDebuggingWindow()
-    assert(mainFrame.tabs[7]:IsShown() and mainFrame.activeTabID == 7,
+    assert(mainFrame.tabs[6]:IsShown() and mainFrame.activeTabID == 6,
       "settings shortcut should open Debugging even while its tab is hidden")
     MarketSyncDB.EnableDebuggingTab = true
     mainFrame.debuggingOpenOverride = nil
@@ -1662,26 +1657,27 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     MarketSync.LoadGuildCache = function() guildLoaded = true end
     MarketSync.LoadNeutralCache = function() neutralLoaded = true end
 
-    -- Switch to Personal tab (tab 1)
+    -- Main tab (tab 1) on the Personal source
     mainFrame.tabs[1]:Click()
-    assert(personalLoaded == false, "Tab 1 click must NOT auto-load Personal cache under LowRamMode")
+    assert(personalLoaded == false, "Main tab click must NOT auto-load Personal cache under LowRamMode")
 
-    -- Switch to Guild tab (tab 2)
+    -- Guild source chosen in the selector
+    MarketSync.ApplyMainSource("guild", true)
+    assert(guildLoaded == false, "Guild source must NOT auto-load under LowRamMode")
+
+    -- Neutral AH (tab 2)
     mainFrame.tabs[2]:Click()
-    assert(guildLoaded == false, "Tab 2 click must NOT auto-load Guild cache under LowRamMode")
-
-    -- Switch to Neutral tab (tab 3)
-    mainFrame.tabs[3]:Click()
-    assert(neutralLoaded == false, "Tab 3 click must NOT auto-load Neutral cache under LowRamMode")
+    assert(neutralLoaded == false, "Neutral tab click must NOT auto-load Neutral cache under LowRamMode")
 
     -- When LowRamMode is disabled, tab switching automatically pre-loads caches
     MarketSyncDB.LowRamMode = false
+    MarketSync.ApplyMainSource("personal")
     mainFrame.tabs[1]:Click()
-    assert(personalLoaded == true, "Tab 1 click must auto-preload Personal cache when LowRamMode is false")
+    assert(personalLoaded == true, "Main tab click must auto-preload Personal cache when LowRamMode is false")
+    MarketSync.ApplyMainSource("guild", true)
+    assert(guildLoaded == true, "Guild source must auto-load when LowRamMode is false")
     mainFrame.tabs[2]:Click()
-    assert(guildLoaded == true, "Tab 2 click must auto-preload Guild cache when LowRamMode is false")
-    mainFrame.tabs[3]:Click()
-    assert(neutralLoaded == true, "Tab 3 click must auto-preload Neutral cache when LowRamMode is false")
+    assert(neutralLoaded == true, "Neutral tab click must auto-preload Neutral cache when LowRamMode is false")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('MainFrame 7-tab check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

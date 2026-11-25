@@ -3,7 +3,7 @@
 -- Window shell, tabs, and settings
 -- =============================================================
 
-local MainFrame, BrowseContent, SyncContent, NeutralContent, ProcessingContent, NotificationsContent, SettingsContent
+local MainFrame, MainHost, BrowseContent, SyncContent, NeutralContent, ProcessingContent, NotificationsContent, SettingsContent
 local ItemHistoryPanel, AnalyticsPanel, ItemDetailPanel
 local activeBrowseTab = 1
 
@@ -451,7 +451,7 @@ local function CreateMainFrame()
     -- ================================================================
     -- BOTTOM TABS
     -- ================================================================
-    local tabNames = {"Personal Scan", "Guild Sync", "Neutral AH", "Analytics", "Processing", "Alerts", "Debugging"}
+    local tabNames = {"Main", "Neutral AH", "Analytics", "Processing", "Alerts", "Debugging"}
     local tabs = {}
     local contentFrames = {}
     MainFrame.contentFrames = contentFrames
@@ -490,11 +490,13 @@ local function CreateMainFrame()
 
         -- Only auto-preload caches on tab change when Low RAM mode is disabled
         if MarketSyncDB and not MarketSyncDB.LowRamMode then
-            if id == 1 and MarketSync.LoadPersonalCache then
-                MarketSync.LoadPersonalCache()
-            elseif id == 2 and MarketSync.LoadGuildCache then
-                MarketSync.LoadGuildCache()
-            elseif id == 3 and MarketSync.LoadNeutralCache then
+            if id == 1 then
+                if MainFrame.mainSource == "guild" and MarketSync.LoadGuildCache then
+                    MarketSync.LoadGuildCache()
+                elseif MarketSync.LoadPersonalCache then
+                    MarketSync.LoadPersonalCache()
+                end
+            elseif id == 2 and MarketSync.LoadNeutralCache then
                 MarketSync.LoadNeutralCache()
             end
         end
@@ -522,16 +524,19 @@ local function CreateMainFrame()
                 if contentFrames[i] then contentFrames[i]:Hide() end
             end
         end
-        -- On Classic/Legacy, Auction House Browse views (Tabs 1-3) use the native
+        -- Main tab: show the source (Personal or Guild) chosen in the selector.
+        if id == 1 and MarketSync.ApplyMainSource then
+            MarketSync.ApplyMainSource(MainFrame.mainSource)
+        end
+        -- On Classic/Legacy, Auction House Browse views (Tabs 1-2) use the native
         -- uncovered UI-AuctionFrame-Browse-* background; custom views (Tabs 4+)
         -- enable the seamless stone canvas fill inside the outer frame border.
         if legacyTheme and MarketSync.Theme and MarketSync.Theme.SetLegacyCanvasVisible then
-            MarketSync.Theme.SetLegacyCanvasVisible(MainFrame, id >= 4)
+            MarketSync.Theme.SetLegacyCanvasVisible(MainFrame, id >= 3)
         end
 
         local titles = {
-            "Personal Scan",
-            "Guild Sync",
+            "Main",
             "Neutral AH",
             "Analytics",
             "Processing",
@@ -540,8 +545,7 @@ local function CreateMainFrame()
         }
         
         local tooltips = {
-            "Browse your natively scanned Auction House data.",
-            "Browse composite Auction House data synced from guild members.",
+            "Browse your personal or guild Auction House data. Use Source to switch.",
             "Browse data from the Neutral Auction House.",
             "Inspect in-depth price trends, historical distribution, and market metrics.",
             "Organized controls on the left, auction-style arbitrage and crafting results on the right.",
@@ -606,20 +610,22 @@ local function CreateMainFrame()
 
     -- Dynamically show/hide tabs, size them uniformly, and anchor visible ones cleanly
     local function RefreshTabVisibility()
+        -- Re-apply the Main tab source so the Guild option follows PassiveSync.
+        if MarketSync.ApplyMainSource and MainFrame.mainSource then
+            MarketSync.ApplyMainSource(MainFrame.mainSource)
+        end
         local visibleTabs = {}
         for i, tab in ipairs(MainFrame.tabs) do
             local shouldHide = false
-            if i == 2 and MarketSyncDB and MarketSyncDB.PassiveSync == false then
+            if i == 2 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
                 shouldHide = true
-            elseif i == 3 and MarketSyncDB and MarketSyncDB.EnableNeutralSync == false then
+            elseif i == 3 and MarketSyncDB and MarketSyncDB.EnableAnalyticsTab == false then
                 shouldHide = true
-            elseif i == 4 and MarketSyncDB and MarketSyncDB.EnableAnalyticsTab == false then
+            elseif i == 4 and MarketSyncDB and not MarketSyncDB.EnableProcessingTab then
                 shouldHide = true
-            elseif i == 5 and MarketSyncDB and not MarketSyncDB.EnableProcessingTab then
+            elseif i == 5 and MarketSyncDB and not MarketSyncDB.EnableAlertsTab then
                 shouldHide = true
-            elseif i == 6 and MarketSyncDB and not MarketSyncDB.EnableAlertsTab then
-                shouldHide = true
-            elseif i == 7 and MarketSyncDB and MarketSyncDB.EnableDebuggingTab == false
+            elseif i == 6 and MarketSyncDB and MarketSyncDB.EnableDebuggingTab == false
                 and not MainFrame.debuggingOpenOverride then
                 shouldHide = true
             end
@@ -720,14 +726,18 @@ local function CreateMainFrame()
     -- ================================================================
     -- TAB 1, 2, 3: BROWSE PANELS (Personal / Guild / Neutral)
     -- ================================================================
-    BrowseContent = MarketSync.CreateBrowsePanel(MainFrame, "personal")
+    -- TAB 1: MAIN. Personal and Guild share one host; the Source selector picks one.
+    MainHost = CreateFrame("Frame", nil, MainFrame)
+    MainHost:SetAllPoints(MainFrame)
+    MainHost:Hide()
+    table.insert(contentFrames, MainHost)
+
+    BrowseContent = MarketSync.CreateBrowsePanel(MainHost, "personal")
     BrowseContent:Hide()
-    table.insert(contentFrames, BrowseContent)
-
-    SyncContent = MarketSync.CreateBrowsePanel(MainFrame, "guild")
+    SyncContent = MarketSync.CreateBrowsePanel(MainHost, "guild")
     SyncContent:Hide()
-    table.insert(contentFrames, SyncContent)
 
+    -- TAB 2: NEUTRAL AH
     NeutralContent = MarketSync.CreateBrowsePanel(MainFrame, "neutral")
     NeutralContent:Hide()
     table.insert(contentFrames, NeutralContent)
@@ -750,6 +760,56 @@ local function CreateMainFrame()
     NotificationsContent:SetAllPoints()
     NotificationsContent:Hide()
     table.insert(contentFrames, NotificationsContent)
+
+    -- ================================================================
+    -- MAIN TAB SOURCE SELECTOR (Personal / Guild)
+    -- Sits in the top-right dead space of the Main tab.
+    -- ================================================================
+    local sourceButtons = {}
+    local function MakeSourceButton(label, source, offsetX)
+        local btn = CreateFrame("Button", nil, MainHost, "UIPanelButtonTemplate")
+        btn:SetSize(84, 22)
+        btn:SetText(label)
+        btn:SetPoint("TOPRIGHT", MainHost, "TOPRIGHT", offsetX, -30)
+        btn:SetScript("OnClick", function() MarketSync.ApplyMainSource(source, true) end)
+        sourceButtons[source] = btn
+        return btn
+    end
+    MakeSourceButton("Guild", "guild", -18)
+    MakeSourceButton("Personal", "personal", -106)
+    MainHost.sourceButtons = sourceButtons
+    MainFrame.sourceButtons = sourceButtons
+
+    -- Shows the chosen source (personal or guild) on the Main tab. The guild
+    -- source is unavailable while PassiveSync is off, so it falls back to personal.
+    function MarketSync.ApplyMainSource(source, userChosen)
+        if source ~= "guild" then source = "personal" end
+        if source == "guild" and MarketSyncDB and MarketSyncDB.PassiveSync == false then
+            source = "personal"
+        end
+        MainFrame.mainSource = source
+        if MarketSyncDB then MarketSyncDB.MainSource = source end
+        local function ShowIf(frame, show)
+            if not frame then return end
+            if show then frame:Show() else frame:Hide() end
+        end
+        ShowIf(BrowseContent, source == "personal")
+        ShowIf(SyncContent, source == "guild")
+        ShowIf(sourceButtons.guild, not (MarketSyncDB and MarketSyncDB.PassiveSync == false))
+        for key, btn in pairs(sourceButtons) do
+            if btn.LockHighlight and btn.UnlockHighlight then
+                if key == source then btn:LockHighlight() else btn:UnlockHighlight() end
+            end
+        end
+        if userChosen and MarketSyncDB and not MarketSyncDB.LowRamMode then
+            if source == "guild" and MarketSync.LoadGuildCache then
+                MarketSync.LoadGuildCache()
+            elseif MarketSync.LoadPersonalCache then
+                MarketSync.LoadPersonalCache()
+            end
+        end
+    end
+    MarketSync.ApplyMainSource(MarketSyncDB and MarketSyncDB.MainSource or "personal")
 
     -- Global function to show item history from any browse panel (redirected to unified modern Analytics)
     function MarketSync.ShowItemHistory(dbKey, itemLink, name, icon, price, sourceTab)
@@ -2182,7 +2242,7 @@ local function CreateMainFrame()
         if not MainFrame:IsShown() then MainFrame:Show() end
         MainFrame.debuggingOpenOverride = true
         RefreshTabVisibility()
-        SelectTab(7)
+        SelectTab(6)
     end
     MainFrame:HookScript("OnHide", function(self)
         if self.debuggingOpenOverride then

@@ -2062,12 +2062,12 @@ function MarketSync.ToggleNotificationsManager()
         if MarketSyncMainFrame and not MarketSyncMainFrame:IsShown() then
             MarketSyncMainFrame:Show()
         end
-        MarketSync.SelectMainFrameTab(6)
-    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
+        MarketSync.SelectMainFrameTab(5)
+    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[5] then
         if not MarketSyncMainFrame:IsShown() then
             MarketSyncMainFrame:Show()
         end
-        MarketSyncMainFrame.tabs[6]:Click()
+        MarketSyncMainFrame.tabs[5]:Click()
     elseif MarketSync_ToggleUI then
         MarketSync_ToggleUI()
     end
@@ -2080,7 +2080,7 @@ function MarketSync.OpenAlertEditorWithItem(itemRef, price)
         if MarketSyncMainFrame and not MarketSyncMainFrame:IsShown() then
             MarketSyncMainFrame:Show()
         end
-        MarketSync.SelectMainFrameTab(6)
+        MarketSync.SelectMainFrameTab(5)
     elseif MarketSync.ToggleNotificationsManager then
         MarketSync.ToggleNotificationsManager()
     end

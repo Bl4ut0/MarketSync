@@ -87,11 +87,11 @@ local function CreateMinimapButton()
             elseif button == "MiddleButton" then
                 if MarketSync_ToggleUI then
                     MarketSync_ToggleUI()
-                    -- Switch to Alerts tab (Tab 6)
+                    -- Switch to Alerts tab (Tab 5)
                     if MarketSync.SelectMainFrameTab then
-                        MarketSync.SelectMainFrameTab(6)
-                    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
-                        MarketSyncMainFrame.tabs[6]:Click()
+                        MarketSync.SelectMainFrameTab(5)
+                    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[5] then
+                        MarketSyncMainFrame.tabs[5]:Click()
                     end
                 end
             else
