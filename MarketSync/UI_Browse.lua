@@ -121,6 +121,36 @@ local PersonalIndexReady = false
 local PersonalIndexBuilding = false
 local GuildIndexReady = false
 local NeutralIndexReady = false
+
+-- Low RAM Latest cache (phase 2c). When Personal and Guild are released, this
+-- merged table is all that stays resident for the Latest source. nil means it
+-- must be rebuilt from both indexes.
+local LatestCache = nil
+local function MarkLatestStale()
+    LatestCache = nil
+end
+local function LatestIsReady()
+    return LatestCache ~= nil or (PersonalIndexReady and GuildIndexReady)
+end
+local function GetLatestIndex()
+    if not LatestCache then
+        LatestCache = MarketSync.MergeLatestIndex(PersonalIndex, GuildIndex)
+    end
+    return LatestCache
+end
+-- Low RAM: keep only the merged Latest index. Personal and Guild are released
+-- and load again on demand when a source needs them. Returns true if released.
+function MarketSync.ReleaseSourceIndexesForLowRam()
+    if not (MarketSyncDB and MarketSyncDB.LowRamMode) then return false end
+    if not (PersonalIndexReady and GuildIndexReady) then return false end
+    GetLatestIndex()
+    wipe(PersonalIndex)
+    wipe(GuildIndex)
+    wipe(PersonalDirtyKeys)
+    PersonalIndexReady = false
+    GuildIndexReady = false
+    return true
+end
 local IndexCallbacks = {}
 
 -- Tracking for background resolution
@@ -441,6 +471,7 @@ end
 
 -- ================================================================
 function MarketSync.InvalidateIndexCache()
+    MarkLatestStale()
     wipe(unresolvedBrowseEntries)
     wipe(loadedBrowseIDs)
     PersonalIndexReady = false
@@ -481,6 +512,7 @@ end
 -- Auctionator provides the exact keys changed by a scan. Refresh only those
 -- personal rows; guild and neutral indices are independent of that source.
 local function ProcessPersonalDirtyKeys()
+    MarkLatestStale()
     if PersonalIndexBuilding then
         personalRefreshScheduled = false
         return
@@ -517,6 +549,7 @@ local function ProcessPersonalDirtyKeys()
 end
 
 function MarketSync.RefreshPersonalBrowseIndexKeys(keys)
+    MarkLatestStale()
     if type(keys) ~= "table" then return false end
     if not PersonalIndexReady and not PersonalIndexBuilding then return true end
     for dbKey in pairs(keys) do PersonalDirtyKeys[dbKey] = true end
@@ -714,6 +747,7 @@ local function BuildSearchIndex(callback)
                 MarketSync.LogCacheEvent(string.format("|cff00ff00[Done]|r Index build complete. Personal: %d items. Guild: %d items. Neutral: %d items.", PersonalResolved, GuildResolved, NeutralResolved))
             end
         end
+        MarkLatestStale()
         for _, cb in ipairs(IndexCallbacks) do cb() end
         wipe(IndexCallbacks)
     end)
@@ -960,6 +994,7 @@ end
 
 -- Called when sync session ends â€” merge incoming buffer into live Guild index
 function MarketSync.CommitGuildSync()
+    MarkLatestStale()
     local merged = 0
     local removed = 0
     for dbKey, entry in pairs(GuildIncomingBuffer) do
@@ -2138,7 +2173,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
         local isGuild = self.dataSource == "guild"
         local isNeutral = self.dataSource == "neutral"
-        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady) or (not isGuild and not isNeutral and PersonalIndexReady)
+        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady)
+            or (self.dataSource == "latest" and LatestIsReady())
+            or (not isGuild and not isNeutral and self.dataSource ~= "latest" and PersonalIndexReady)
 
         if not isReady then
             if MarketSyncDB and MarketSyncDB.LowRamMode then
@@ -2173,8 +2210,11 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         elseif isNeutral then
             index = NeutralIndex
         elseif self.dataSource == "latest" and MarketSync.MergeLatestIndex then
-            -- Newest entry per item across Personal and Guild (phase 2a merge)
-            index = MarketSync.MergeLatestIndex(PersonalIndex, GuildIndex)
+            -- Newest entry per item across Personal and Guild (phases 2a and 2c)
+            index = GetLatestIndex()
+            if MarketSyncDB and MarketSyncDB.LowRamMode then
+                MarketSync.ReleaseSourceIndexesForLowRam()
+            end
         end
 
         local uniqueResults = {}
@@ -2327,7 +2367,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         end
         local isGuild = self.dataSource == "guild"
         local isNeutral = self.dataSource == "neutral"
-        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady) or (not isGuild and not isNeutral and PersonalIndexReady)
+        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady)
+            or (self.dataSource == "latest" and LatestIsReady())
+            or (not isGuild and not isNeutral and self.dataSource ~= "latest" and PersonalIndexReady)
 
         if self.lowRamNotice then
             if not isReady and MarketSyncDB and MarketSyncDB.LowRamMode then
