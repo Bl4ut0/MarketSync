@@ -10,13 +10,13 @@ end
 
 local function SidecarFor(kind)
     if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-        MarketSync.AHSidecar.SetVisibleForAH(kind == "search" or kind == "scanner" or kind == "native")
-        if kind == "native" and MarketSync.AHSidecar.SetMode then
-            local selected = AuctionFrame and PanelTemplates_GetSelectedTab
-                and PanelTemplates_GetSelectedTab(AuctionFrame)
+        local selected = AuctionFrame and PanelTemplates_GetSelectedTab
+            and PanelTemplates_GetSelectedTab(AuctionFrame)
+        local visible = kind == "search" or kind == "scanner" or (kind == "native" and selected ~= 3)
+        MarketSync.AHSidecar.SetVisibleForAH(visible)
+        if visible and kind == "native" and MarketSync.AHSidecar.SetMode then
             local auctionatorSell = _G.AuctionatorTabs_Selling
-            MarketSync.AHSidecar.SetMode((selected == 3
-                or (auctionatorSell and selected == auctionatorSell:GetID())) and "sell" or "lists")
+            MarketSync.AHSidecar.SetMode((auctionatorSell and selected == auctionatorSell:GetID()) and "sell" or "lists")
         end
     end
 end
@@ -40,17 +40,30 @@ function AH.AttachLegacy()
     local interface = GetBuildInfo and select(4, GetBuildInfo())
     local compactChrome = tonumber(interface) ~= 16001
     if compactChrome then
-        -- Cover the unused native action-button wells, leaving the money display
-        -- and outer window border intact. Native tabs retain their original art.
+        -- Cover the unused native action-button wells cleanly in dark stone and
+        -- provide a matching bottom-right Close button like native AH tabs.
         local footer = CreateFrame("Frame", nil, auctionFrame, "BackdropTemplate")
-        footer:SetPoint("BOTTOMLEFT", auctionFrame, "BOTTOMLEFT", 190, 8)
-        footer:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -12, 8)
+        footer:SetPoint("BOTTOMLEFT", auctionFrame, "BOTTOMLEFT", 188, 11)
+        footer:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -8, 11)
         footer:SetHeight(24)
         footer:SetFrameLevel(auctionFrame:GetFrameLevel() + 9)
         footer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
             edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-        footer:SetBackdropColor(0.055, 0.055, 0.06, 1)
-        footer:SetBackdropBorderColor(0.24, 0.24, 0.24, 1)
+        footer:SetBackdropColor(0.085, 0.085, 0.090, 1)
+        footer:SetBackdropBorderColor(0.24, 0.24, 0.26, 0.85)
+        local footerClose = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
+        if footerClose.SetSize then
+            footerClose:SetSize(80, 22)
+        elseif footerClose.SetHeight then
+            footerClose:SetHeight(22)
+        end
+        footerClose:SetPoint("RIGHT", footer, "RIGHT", -1, 0)
+        footerClose:SetText(CLOSE or "Close")
+        footerClose:SetScript("OnClick", function()
+            if CloseAuctionHouse then CloseAuctionHouse() end
+            if HideUIPanel then HideUIPanel(auctionFrame) else auctionFrame:Hide() end
+        end)
+        footer.CloseButton = footerClose
         footer:Hide()
         AH.LegacyFooter = footer
 
@@ -84,9 +97,20 @@ function AH.AttachLegacy()
     end
     local function MakeHost(factory)
         local host = CreateFrame("Frame", nil, auctionFrame)
-        host:SetPoint("TOPLEFT", auctionFrame, "TOPLEFT", 12, -38)
-        host:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -12, 32)
+        host:SetPoint("TOPLEFT", auctionFrame, "TOPLEFT", compactChrome and 18 or 12, -38)
+        host:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -12, compactChrome and 38 or 32)
         host:SetFrameLevel(auctionFrame:GetFrameLevel() + 10)
+        if compactChrome and host.CreateTexture then
+            -- Full seamless dark-stone fill covering native AuctionFrame Browse/Bid
+            -- divider lines strictly inside the silver/iron walls (x=16..-4, y=-36..37).
+            local canvas = host:CreateTexture(nil, "BACKGROUND", nil, -8)
+            canvas:SetPoint("TOPLEFT", auctionFrame, "TOPLEFT", 16, -36)
+            canvas:SetPoint("BOTTOMRIGHT", auctionFrame, "BOTTOMRIGHT", -4, 37)
+            canvas:SetTexture("Interface\\AddOns\\MarketSync\\Media\\LegacyStoneCanvas", "REPEAT", "REPEAT")
+            if canvas.SetHorizTile then canvas:SetHorizTile(true) end
+            if canvas.SetVertTile then canvas:SetVertTile(true) end
+            host.CanvasBackground = canvas
+        end
         host.MarketSyncCompactLegacyLayout = compactChrome
         host.Content = factory(host)
         host:SetScript("OnShow", function()
@@ -189,9 +213,11 @@ function AH.AttachLegacy()
         SidecarFor("native")
     end
     auctionFrame:HookScript("OnShow", function()
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-            MarketSync.AHSidecar.SetVisibleForAH(true)
+        local selected = PanelTemplates_GetSelectedTab and PanelTemplates_GetSelectedTab(auctionFrame)
+        for kind, tab in pairs(tabs) do
+            if tab:GetID() == selected then SidecarFor(kind); return end
         end
+        SidecarFor("native")
     end)
     auctionFrame:HookScript("OnHide", function()
         if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then

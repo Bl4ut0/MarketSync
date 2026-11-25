@@ -53,7 +53,7 @@ function ToggleDropDownMenu(_,_,menu) menuItems={}; menu.callback(menu,1) end
 const source=fs.readFileSync(path.join(__dirname,'../MarketSync/Ledger/UI_CraftManager.lua'),'utf8');
 require('luaparse').parse(source,{luaVersion:'5.1'});run(source);
 run(`
-MarketSync.OpenCraftingTree(jobs[1].recipe,nil,{ledgerID=1})
+MarketSync.OpenLedgerCraftTree(jobs[1].recipe,nil,{ledgerID=1})
 local f=MarketSyncCraftManager
 assert(f.width==832 and f.height==480,'Compact window dimensions')
 assert(f.panes[3].rows[1].selected and not f.panes[3].rows[2].selected,'Active craft highlight')

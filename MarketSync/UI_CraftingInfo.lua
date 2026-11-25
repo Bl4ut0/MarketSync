@@ -27,34 +27,44 @@ local function DependsOnRegion(region, target, visited)
 end
 MarketSync.RefreshCraftingInfoUI = function() end
 
-local function FormatMoney(copper)
-    if not copper or copper == 0 then return "|cff8888880c|r" end
-    if MarketSync.FormatMoneyColored then
-        return MarketSync.FormatMoneyColored(copper)
-    elseif MarketSync.FormatMoney then
-        return MarketSync.FormatMoney(copper)
-    end
+local GOLD_ICON   = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
+local SILVER_ICON = "|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:2:0|t"
+local COPPER_ICON = "|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:2:0|t"
+
+local function FormatMoneyPlain(copper)
+    copper = math.floor(tonumber(copper) or 0)
     local g = math.floor(copper / 10000)
     local s = math.floor((copper % 10000) / 100)
     local c = copper % 100
     local str = ""
-    if g > 0 then str = str .. "|cffffd700" .. g .. "g|r " end
-    if s > 0 or g > 0 then str = str .. "|cffc0c0c0" .. s .. "s|r " end
-    str = str .. "|cffeda55f" .. c .. "c|r"
-    return str
+    if g > 0 then str = str .. g .. GOLD_ICON .. " " end
+    if s > 0 or g > 0 then str = str .. s .. SILVER_ICON .. " " end
+    return str .. c .. COPPER_ICON
 end
 
-local function ApplyBackdrop(frame, bg, edge, edgeSize, insets)
-    if frame.SetBackdrop then
-        frame:SetBackdrop({
-            bgFile = bg or "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = edge or "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = edgeSize or 14,
-            insets = insets or { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-        frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
-        frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+local function FormatMoney(copper)
+    if not copper or copper == 0 then return "|cff8888880" .. COPPER_ICON .. "|r" end
+    return "|cffffffff" .. FormatMoneyPlain(copper) .. "|r"
+end
+
+local function FormatProfessionProfit(profit, cost, outputItemID)
+    local function SaleLine(label, value, margin)
+        local col = value >= 0 and "|cff00ff00" or "|cffff2020"
+        local sign = value >= 0 and "+" or "-"
+        local mSign = margin >= 0 and "+" or ""
+        return string.format("%s: %s%s%s (%s%d%% ROI)|r", label, col, sign, FormatMoneyPlain(math.abs(value)), mSign, margin)
     end
+
+    if not outputItemID then return "|cff888888Profit: No item output|r" end
+    local auction = profit.outputPrice > 0 and not cost.hasMissing
+        and SaleLine("Auction profit", profit.groundUpProfit, profit.groundUpMarginPct)
+        or "|cff888888Auction profit: price missing|r"
+    local vendor = "|cff888888Vendor profit: sell price unavailable|r"
+    if profit.vendorRevenue and profit.vendorRevenue > 0 then
+        vendor = cost.hasMissing and "|cff888888Vendor profit: reagent price missing|r"
+            or SaleLine("Vendor profit", profit.vendorGroundUpProfit, profit.vendorGroundUpMarginPct)
+    end
+    return auction .. "\n" .. vendor
 end
 
 local function BuildCurrentCraftRequest(frame)
@@ -85,53 +95,35 @@ local treeFrame = nil
 local function CreateCraftingTreeFrame()
     if treeFrame then return treeFrame end
 
-    local f = CreateFrame("Frame", "MarketSyncCraftingTreeFrame", UIParent, "BackdropTemplate")
-    f:SetSize(520, 520)
-    f:SetPoint("CENTER")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetClampedToScreen(true)
-    f:SetFrameStrata("DIALOG")
-    f:SetFrameLevel(60)
-    ApplyBackdrop(f)
-    if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(f) end
+    local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+    local width, height = 720, 506
+    local leftMargin = isLegacy and 23 or 18
+    local rightMargin = isLegacy and 14 or 18
+    local bottomBtnY = isLegacy and 15 or 13
+    local summaryBottomY = isLegacy and 46 or 48
+    local bodyWidth = width - leftMargin - rightMargin
+    local f = MarketSync.Theme.CreateStandardWindow("MarketSyncCraftingTreeFrame", "Materials & Crafting Choices",
+        width, height, "Interface\\Icons\\Trade_Engineering")
 
     f.userOverrides = {}
     f.selectedBuys = {}
     f.expandedNodes = {}
     f.allExpanded = false
     f.targetQuantity = 1
-    if MarketSync.Theme and MarketSync.Theme.DecorateWarcraftWindow then
-        MarketSync.Theme.DecorateWarcraftWindow(f, "Interface\\Icons\\Trade_Engineering")
-    end
-
-    -- Header Title
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", 58, -14)
-    title:SetText("|cffffd700MarketSync Materials & Crafting Choices|r")
-    f.title = title
-
-    -- Subtitle / Recipe info
-    local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    subtitle:SetPoint("TOPLEFT", 58, -36)
-    subtitle:SetText("Recipe: Loading...")
-    f.subtitle = subtitle
-
-    -- Close Button
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
-
     -- Quantity Stepper
     local qtyLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    qtyLabel:SetPoint("TOPRIGHT", -120, -36)
-    qtyLabel:SetText("Craft Qty:")
+    qtyLabel:SetText("Craft quantity")
+
+    local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightMedium")
+    subtitle:SetPoint("LEFT", f, "TOPLEFT", isLegacy and 78 or 66, -46)
+    subtitle:SetPoint("RIGHT", qtyLabel, "LEFT", -14, 0)
+    subtitle:SetJustifyH("LEFT")
+    subtitle:SetWordWrap(false)
+    f.subtitle = subtitle
 
     local btnMinus = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnMinus:SetSize(20, 20); btnMinus:SetPoint("LEFT", qtyLabel, "RIGHT", 6, 0); btnMinus:SetText("-")
+    btnMinus:SetSize(24, 22)
+    btnMinus:SetText("-")
     btnMinus:SetScript("OnClick", function()
         if f.targetQuantity > 1 then
             f.targetQuantity = f.targetQuantity - 1
@@ -140,35 +132,39 @@ local function CreateCraftingTreeFrame()
     end)
 
     local qtyValue = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    qtyValue:SetPoint("LEFT", btnMinus, "RIGHT", 6, 0)
+    qtyValue:SetWidth(32)
+    qtyValue:SetJustifyH("CENTER")
     qtyValue:SetText("1")
     f.qtyValue = qtyValue
 
     local btnPlus = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnPlus:SetSize(20, 20); btnPlus:SetPoint("LEFT", qtyValue, "RIGHT", 6, 0); btnPlus:SetText("+")
+    btnPlus:SetSize(24, 22)
+    btnPlus:SetPoint("RIGHT", f, "TOPRIGHT", -rightMargin, -46)
+    btnPlus:SetText("+")
+    qtyValue:SetPoint("RIGHT", btnPlus, "LEFT", -4, 0)
+    btnMinus:SetPoint("RIGHT", qtyValue, "LEFT", -4, 0)
+    qtyLabel:SetPoint("RIGHT", btnMinus, "LEFT", -8, 0)
     btnPlus:SetScript("OnClick", function()
         f.targetQuantity = f.targetQuantity + 1
         f:RefreshTree()
     end)
 
     -- Presets Bar
-    local presetBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    presetBg:SetSize(488, 28)
-    presetBg:SetPoint("TOPLEFT", 16, -60)
-    ApplyBackdrop(presetBg, "Interface\\Buttons\\WHITE8X8", "Interface\\Buttons\\WHITE8X8", 1, { left = 1, right = 1, top = 1, bottom = 1 })
+    local presetBg = MarketSync.CreateModernInset(f, leftMargin, -68, bodyWidth, 34)
+    presetBg._marketSyncThemeRole = "header"
     presetBg:SetBackdropColor(MarketSync.GetThemeColor("header"))
     presetBg:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
 
-    local treeHint = presetBg:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    treeHint:SetPoint("TOPLEFT", presetBg, "BOTTOMLEFT", 2, -5)
-    treeHint:SetText("Checked Buy = purchase; unchecked Buy = provide yourself. Craft expands ingredients.")
+    local treeHint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    treeHint:SetPoint("TOPLEFT", presetBg, "BOTTOMLEFT", 9, -7)
+    treeHint:SetText("Uncheck Buy to provide your own materials. Check Craft to show ingredients.")
 
     local pLabel = presetBg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     pLabel:SetPoint("LEFT", 10, 0)
-    pLabel:SetText("Strategy:")
+    pLabel:SetText("Strategy")
 
     local btnOptimal = CreateFrame("Button", nil, presetBg, "UIPanelButtonTemplate")
-    btnOptimal:SetSize(96, 20); btnOptimal:SetPoint("LEFT", pLabel, "RIGHT", 8, 0); btnOptimal:SetText("Optimal")
+    btnOptimal:SetSize(92, 24); btnOptimal:SetPoint("LEFT", pLabel, "RIGHT", 12, 0); btnOptimal:SetText("Optimal")
     btnOptimal:SetNormalFontObject("GameFontNormalSmall")
     btnOptimal:SetScript("OnClick", function()
         f.userOverrides = {}
@@ -177,7 +173,7 @@ local function CreateCraftingTreeFrame()
     end)
 
     local btnBuyAll = CreateFrame("Button", nil, presetBg, "UIPanelButtonTemplate")
-    btnBuyAll:SetSize(78, 20); btnBuyAll:SetPoint("LEFT", btnOptimal, "RIGHT", 6, 0); btnBuyAll:SetText("Buy Finished")
+    btnBuyAll:SetSize(102, 24); btnBuyAll:SetPoint("LEFT", btnOptimal, "RIGHT", 6, 0); btnBuyAll:SetText("Buy Finished")
     btnBuyAll:SetNormalFontObject("GameFontNormalSmall")
     btnBuyAll:SetScript("OnClick", function()
         -- Force buy on all craftable nodes
@@ -197,7 +193,7 @@ local function CreateCraftingTreeFrame()
     end)
 
     local btnCraftAll = CreateFrame("Button", nil, presetBg, "UIPanelButtonTemplate")
-    btnCraftAll:SetSize(84, 20); btnCraftAll:SetPoint("LEFT", btnBuyAll, "RIGHT", 6, 0); btnCraftAll:SetText("Craft All Raw")
+    btnCraftAll:SetSize(110, 24); btnCraftAll:SetPoint("LEFT", btnBuyAll, "RIGHT", 6, 0); btnCraftAll:SetText("Craft All Raw")
     btnCraftAll:SetNormalFontObject("GameFontNormalSmall")
     btnCraftAll:SetScript("OnClick", function()
         -- Force craft on all craftable nodes
@@ -217,7 +213,7 @@ local function CreateCraftingTreeFrame()
     end)
 
     local btnExpand = CreateFrame("Button", nil, presetBg, "UIPanelButtonTemplate")
-    btnExpand:SetSize(92, 20); btnExpand:SetPoint("LEFT", btnCraftAll, "RIGHT", 6, 0); btnExpand:SetText("Expand Details")
+    btnExpand:SetSize(118, 24); btnExpand:SetPoint("RIGHT", presetBg, "RIGHT", -8, 0); btnExpand:SetText("Expand Details")
     btnExpand:SetNormalFontObject("GameFontNormalSmall")
     btnExpand:SetScript("OnClick", function()
         f.allExpanded = not f.allExpanded
@@ -235,43 +231,47 @@ local function CreateCraftingTreeFrame()
     end)
     f.expandButton = btnExpand
 
-    -- Scroll Frame for Reagent Tree
-    local scrollFrame = CreateFrame("ScrollFrame", "MarketSyncCraftingTreeScroll", f, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 16, -108)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 110)
-
-    local scrollContent = CreateFrame("Frame", nil, scrollFrame)
-    scrollContent:SetSize(468, 400)
-    scrollFrame:SetScrollChild(scrollContent)
-    f.scrollContent = scrollContent
-
     -- Summary Box at Bottom
-    local summaryBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    summaryBox:SetSize(488, 58)
-    summaryBox:SetPoint("BOTTOMLEFT", 16, 42)
-    ApplyBackdrop(summaryBox, "Interface\\Buttons\\WHITE8X8", "Interface\\Buttons\\WHITE8X8", 1, { left = 1, right = 1, top = 1, bottom = 1 })
-    summaryBox:SetBackdropColor(MarketSync.GetThemeColor("inset"))
-    summaryBox:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
+    local summaryBox = MarketSync.CreateModernInset(f, nil, nil, bodyWidth, 62)
+    summaryBox:SetPoint("BOTTOMLEFT", leftMargin, summaryBottomY)
+
+    local treeInset = MarketSync.CreateModernInset(f, leftMargin, -126)
+    treeInset:SetPoint("BOTTOMRIGHT", summaryBox, "TOPRIGHT", 0, 8)
+    local scrollGutter, scrollInset = 29, 7
+    local scrollFrame = CreateFrame("ScrollFrame", "MarketSyncCraftingTreeScroll", treeInset, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", treeInset, "TOPLEFT", scrollInset, -scrollInset)
+    scrollFrame:SetPoint("BOTTOMRIGHT", treeInset, "BOTTOMRIGHT", -scrollGutter, scrollInset)
+    local scrollContent = CreateFrame("Frame", nil, scrollFrame)
+    scrollContent:SetSize(bodyWidth - scrollGutter - scrollInset, 1)
+    scrollFrame:SetScrollChild(scrollContent)
+    f.scrollFrame = scrollFrame
 
     local sumDirect = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sumDirect:SetPoint("TOPLEFT", 12, -8)
+    sumDirect:SetPoint("TOPLEFT", 12, -10)
     f.sumDirect = sumDirect
 
     local sumEffective = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    sumEffective:SetPoint("TOPLEFT", 12, -24)
+    sumEffective:SetPoint("TOPLEFT", 12, -27)
     f.sumEffective = sumEffective
 
     local sumSavings = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    sumSavings:SetPoint("TOPLEFT", 12, -40)
+    sumSavings:SetPoint("TOPLEFT", 12, -44)
     f.sumSavings = sumSavings
 
-    local sumProfit = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightMedium")
-    sumProfit:SetPoint("TOPRIGHT", -12, -16)
+    local sumProfit = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sumProfit:SetPoint("TOPRIGHT", summaryBox, "TOPRIGHT", -12, -13)
+    sumProfit:SetJustifyH("RIGHT")
     f.sumProfit = sumProfit
 
+    local sumVendorProfit = summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sumVendorProfit:SetPoint("TOPRIGHT", summaryBox, "TOPRIGHT", -12, -34)
+    sumVendorProfit:SetJustifyH("RIGHT")
+    f.sumVendorProfit = sumVendorProfit
+
     -- Action Buttons (Bottom Bar)
+    local btnHeight = isLegacy and 20 or 27
     local btnExport = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnExport:SetSize(195, 24); btnExport:SetPoint("BOTTOMLEFT", 16, 12); btnExport:SetText("Export checked to Shopping")
+    btnExport:SetSize(205, btnHeight); btnExport:SetPoint("BOTTOMLEFT", leftMargin, bottomBtnY); btnExport:SetText("Export checked to Shopping")
     btnExport:SetScript("OnClick", function()
         if f.currentRecipe then
             local rName = f.currentRecipe.name or "Craft Mats"
@@ -286,9 +286,9 @@ local function CreateCraftingTreeFrame()
     end)
 
     local btnCraftList = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnCraftList:SetSize(125, 24)
-    btnCraftList:SetPoint("LEFT", btnExport, "RIGHT", 5, 0)
-    btnCraftList:SetText("Save Craft... v")
+    btnCraftList:SetSize(128, btnHeight)
+    btnCraftList:SetPoint("LEFT", btnExport, "RIGHT", 8, 0)
+    btnCraftList:SetText("Save Craft...")
     f.btnCraftList = btnCraftList
     local craftSaveMenu = CreateFrame("Frame", "MarketSyncCraftSaveMenu", f, "UIDropDownMenuTemplate")
     craftSaveMenu:Hide()
@@ -348,7 +348,7 @@ local function CreateCraftingTreeFrame()
     end)
 
     local btnClose = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnClose:SetSize(80, 24); btnClose:SetPoint("BOTTOMRIGHT", -16, 12); btnClose:SetText("Close")
+    btnClose:SetSize(80, btnHeight); btnClose:SetPoint("BOTTOMRIGHT", -rightMargin, bottomBtnY); btnClose:SetText("Close")
     btnClose:SetScript("OnClick", function() f:Hide() end)
 
     f.rowPool = {}
@@ -358,16 +358,13 @@ local function CreateCraftingTreeFrame()
         local row = f.rowPool[index]
         if not row then
             row = CreateFrame("Frame", nil, scrollContent)
-            row:SetSize(460, 26)
-
-            local groupBG = row:CreateTexture(nil, "BACKGROUND")
-            groupBG:SetAllPoints(row)
-            groupBG:SetColorTexture(MarketSync.GetThemeColor("header"))
-            groupBG:Hide()
-            row.groupBG = groupBG
+            local background = row:CreateTexture(nil, "BACKGROUND")
+            background:SetAllPoints(row)
+            row.background = background
 
             local tierText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            tierText:SetPoint("LEFT", row, "LEFT", 10, 0)
+            tierText:SetJustifyH("LEFT")
+            tierText:SetWordWrap(false)
             row.tierText = tierText
 
             local tierCheckText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -389,7 +386,7 @@ local function CreateCraftingTreeFrame()
 
             -- Tree branch icon / bullet
             local icon = row:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(16, 16)
+            icon:SetSize(19, 19)
             row.icon = icon
 
             -- Interactive Craft Checkbox for craftables
@@ -399,20 +396,26 @@ local function CreateCraftingTreeFrame()
             local buyCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
             buyCheck:SetSize(18, 18)
             buyCheck:SetPoint("RIGHT", row, "RIGHT", -3, 0)
+            buyCheck:SetScript("OnEnter", function(button)
+                GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Buy checked; provide yourself when unchecked")
+                GameTooltip:Show()
+            end)
+            buyCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row.buyCheck = buyCheck
 
             -- Main Item Text (Quantity + Name)
             local itemText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            itemText:SetPoint("LEFT", check, "RIGHT", 4, 0)
+            itemText:SetJustifyH("LEFT")
+            itemText:SetWordWrap(false)
             row.itemText = itemText
 
             -- Price & Comparison Details
             local detailText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            detailText:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-            detailText:SetWidth(150)
+            detailText:SetWidth(255)
             detailText:SetJustifyH("RIGHT")
+            detailText:SetWordWrap(false)
             row.detailText = detailText
-            itemText:SetPoint("RIGHT", detailText, "LEFT", -6, 0)
 
             f.rowPool[index] = row
         end
@@ -447,30 +450,54 @@ local function CreateCraftingTreeFrame()
         self.expansionInitialized = true
 
         local rName = self.currentRecipe.name or "Recipe"
-        self.subtitle:SetText(string.format("|cffffd700%s|r (Total Yield: %d)", rName, cost.outputQty))
+        self.subtitle:SetText(string.format("|cffffd700%s|r (Total Yield: %g)", rName, cost.outputQty))
 
         -- Summary Strings
         local outputItemID = tonumber(self.currentRecipe.outputItemID)
         if outputItemID and outputItemID > 0 then
             self.btnCraftList:Enable()
-            self.btnCraftList:SetText("Save Craft... v")
+            self.btnCraftList:SetText("Save Craft...")
         else
             self.btnCraftList:Disable()
             self.btnCraftList:SetText("No item output")
         end
         local plan = MarketSync.BuildCraftPurchasePlan(BuildCurrentCraftRequest(self))
-        self.sumDirect:SetText("Net AH sale: " .. FormatMoney(profitData.netRevenue))
+        if profitData.vendorRevenue and profitData.vendorRevenue > 0 then
+            self.sumDirect:SetText(string.format("Net AH sale: %s  |cff888888·|r  Vendor (0%% cut): %s",
+                FormatMoney(profitData.netRevenue), FormatMoney(profitData.vendorRevenue)))
+        else
+            self.sumDirect:SetText("Net AH sale: " .. FormatMoney(profitData.netRevenue))
+        end
         self.sumEffective:SetText("Material value: " .. FormatMoney(cost.effectiveCost))
         self.sumSavings:SetText(string.format("Buy: %s (%d units)  |  Provide: %d units",
             FormatMoney(plan.estimatedBuyCost), plan.buyUnits, plan.providedUnits))
 
         if profitData.outputPrice > 0 and not cost.hasMissing then
             local pVal = profitData.effectiveProfit
-            local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020-"
-            local pStr = FormatMoney(math.abs(pVal))
-            self.sumProfit:SetText(string.format("Value profit: %s%s|r  ROI %d%%", pCol, pStr, profitData.effectiveMarginPct))
+            local pCol = (pVal >= 0) and "|cff00ff00" or "|cffff2020"
+            local pSign = (pVal >= 0) and "+" or "-"
+            local pStr = FormatMoneyPlain(math.abs(pVal))
+            local mSign = (profitData.effectiveMarginPct >= 0) and "+" or ""
+            self.sumProfit:SetText(string.format("AH profit: %s%s%s (%s%d%% ROI)|r", pCol, pSign, pStr, mSign, profitData.effectiveMarginPct))
         else
-            self.sumProfit:SetText("|cff888888Profit: price missing|r")
+            self.sumProfit:SetText("|cff888888AH profit: price missing|r")
+        end
+
+        if self.sumVendorProfit then
+            if profitData.vendorRevenue and profitData.vendorRevenue > 0 and not cost.hasMissing then
+                local vVal = profitData.vendorEffectiveProfit
+                local vCol = (vVal >= 0) and "|cff00ff00" or "|cffff2020"
+                local vSign = (vVal >= 0) and "+" or "-"
+                local vStr = FormatMoneyPlain(math.abs(vVal))
+                local vmSign = (profitData.vendorEffectiveMarginPct >= 0) and "+" or ""
+                local tag = (vVal > 0) and " |cff40cf78[Shuffle!]|r" or ""
+                self.sumVendorProfit:SetText(string.format("Vendor profit: %s%s%s (%s%d%% ROI)|r%s",
+                    vCol, vSign, vStr, vmSign, profitData.vendorEffectiveMarginPct, tag))
+            elseif profitData.vendorRevenue and profitData.vendorRevenue > 0 then
+                self.sumVendorProfit:SetText("Vendor sale: " .. FormatMoney(profitData.vendorRevenue) .. " |cff888888(mats missing)|r")
+            else
+                self.sumVendorProfit:SetText("|cff666666Vendor: not sellable|r")
+            end
         end
 
     -- Only the active acquisition branch contributes materials. A bought or
@@ -530,12 +557,14 @@ local function CreateCraftingTreeFrame()
             row.itemText:Hide()
             row.detailText:Hide()
             row.buyCheck:Hide()
+            row.background:SetColorTexture(MarketSync.GetThemeColor(
+                rowData.kind == "group" and "header" or (i % 2 == 0 and "rowEven" or "rowOdd")))
 
             if rowData.kind == "group" then
-                row:SetHeight(22)
-                row.groupBG:Show()
+                row:SetHeight(24)
                 row.tierText:ClearAllPoints()
                 row.tierText:SetPoint("LEFT", row, "LEFT", 10 + (rowData.depth * 12), 0)
+                row.tierText:SetPoint("RIGHT", row, "RIGHT", #rowData.craftableNodes > 0 and -154 or -10, 0)
                 row.tierText:SetText("|cffffd75e" .. rowData.title .. "|r")
                 row.tierText:Show()
                 if #rowData.craftableNodes > 0 then
@@ -552,12 +581,12 @@ local function CreateCraftingTreeFrame()
                     end)
                 end
                 row:Show()
-                curY = curY - 22
+                curY = curY - 24
             elseif rowData.kind == "empty" then
                 row:SetHeight(28)
-                row.groupBG:Hide()
                 row.itemText:ClearAllPoints()
                 row.itemText:SetPoint("LEFT", row, "LEFT", 12, 0)
+                row.itemText:SetPoint("RIGHT", row, "RIGHT", -12, 0)
                 row.itemText:SetText("|cffaaaaaa" .. rowData.title .. "|r")
                 row.itemText:Show()
                 row:Show()
@@ -565,8 +594,11 @@ local function CreateCraftingTreeFrame()
             else
             local node = rowData.node
             local depth = rowData.depth
-            row:SetHeight(26)
-            row.groupBG:Hide()
+            row:SetHeight(28)
+            row.check:Show()
+            row.itemText:ClearAllPoints()
+            row.itemText:SetPoint("LEFT", row.check, "RIGHT", 6, 0)
+            row.itemText:SetPoint("RIGHT", row.detailText, "LEFT", -10, 0)
 
             local indentX = depth * 16
             if node.chooseCraft and node.subMats and #node.subMats > 0 then
@@ -599,12 +631,6 @@ local function CreateCraftingTreeFrame()
 
             -- Checkbox logic for craftable intermediate
             if node.canCraft then
-                row.check:Show()
-                row.check:ClearAllPoints()
-                row.check:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
-                row.itemText:ClearAllPoints()
-                row.itemText:SetPoint("LEFT", row.check, "RIGHT", 4, 0)
-
                 row.check:SetChecked(node.chooseCraft == true)
                 row.check:SetScript("OnLeave", function() GameTooltip:Hide() end)
                 row.check:SetScript("OnClick", function(chk)
@@ -647,7 +673,6 @@ local function CreateCraftingTreeFrame()
                     GameTooltip:Show()
                 end)
             else
-                row.check:Show()
                 row.check:SetChecked(self.selectedBuys[node.itemID] ~= false)
                 row.check:SetScript("OnEnter", function(check)
                     GameTooltip:SetOwner(check, "ANCHOR_RIGHT")
@@ -680,11 +705,12 @@ local function CreateCraftingTreeFrame()
             row.detailText:SetPoint("RIGHT", row, "RIGHT", row.buyCheck:IsShown() and -25 or -8, 0)
             row.itemText:Show()
             row:Show()
-            curY = curY - 26
+            curY = curY - 28
             end
         end
 
-        scrollContent:SetHeight(math.max(300, math.abs(curY) + 20))
+        scrollContent:SetHeight(math.max(1, -curY))
+        if scrollFrame.UpdateScrollChildRect then scrollFrame:UpdateScrollChildRect() end
     end
 
     treeFrame = f
@@ -735,8 +761,9 @@ function MarketSync.OpenCraftingTree(recipeOrOutputItemID, anchorFrame, savedCra
         f:SetPoint("CENTER")
     end
 
-    f:Show()
     f:RefreshTree()
+    f.scrollFrame:SetVerticalScroll(0)
+    f:Show()
 end
 
 -- ================================================================
@@ -954,12 +981,20 @@ local function InitClassicTradeSkillHook()
         end
 
         local recipeName = GetTradeSkillInfo and GetTradeSkillInfo(recipeIndex)
-        local numMade = (GetTradeSkillNumMade and select(1, GetTradeSkillNumMade(recipeIndex))) or 1
+        local minMade, maxMade = 1, 1
+        if GetTradeSkillNumMade then
+            local qMin, qMax = GetTradeSkillNumMade(recipeIndex)
+            minMade = math.max(1, tonumber(qMin) or 1)
+            maxMade = math.max(minMade, tonumber(qMax) or minMade)
+        end
+        local numMade = (minMade + maxMade) / 2
 
         local recipe = {
             name = recipeName,
             outputItemID = outputItemID,
             outputQty = numMade,
+            outputQtyMin = minMade,
+            outputQtyMax = maxMade,
             mats = mats,
             recipeIndex = recipeIndex,
         }
@@ -992,61 +1027,81 @@ local function InitClassicTradeSkillHook()
         infoFrame:ClearAllPoints()
 
         if isOneColumn then
-            -- Single-column classic layout (Era/Vanilla/Anniversary)
-            -- Position in the empty upper-right area of TradeSkillDetailScrollFrame next to TradeSkillSkillName.
-            -- This preserves all native reagents, NEVER shifts TradeSkillDescription or TradeSkillReagentLabel,
-            -- and completely prevents anchor cycles with Auctionator or other addons.
-            if infoFrame.SetParent then infoFrame:SetParent(TradeSkillFrame) end
-            if detailScroll and detailScroll.GetFrameLevel and infoFrame.SetFrameLevel then
-                infoFrame:SetFrameLevel(detailScroll:GetFrameLevel() + 5)
+            -- Single-column classic layout (Era/Vanilla/Anniversary/TBC):
+            -- 1. Place [Breakdown] and [+ Craft List] in the empty right half of the
+            --    "Reagents:" header row so they NEVER cover the recipe name, tool
+            --    requirements, cooldowns, descriptions, or reagent icons.
+            -- 2. Place the Cost / Profit summary strip cleanly below the last reagent
+            --    row inside TradeSkillDetailScrollChildFrame (or detailScroll fallback).
+            local scrollChild = (detailScroll and detailScroll.GetScrollChild and detailScroll:GetScrollChild())
+                or _G.TradeSkillDetailScrollChildFrame or detailScroll
+            if infoFrame.SetParent then infoFrame:SetParent(scrollChild) end
+            if scrollChild and scrollChild.GetFrameLevel and infoFrame.SetFrameLevel then
+                infoFrame:SetFrameLevel(scrollChild:GetFrameLevel() + 5)
             end
-            infoFrame:SetPoint("TOPRIGHT", detailScroll, "TOPRIGHT", -24, -2)
-            infoFrame:SetSize(136, 46)
 
-            -- Buttons: compact top row
+            local lastLeftIdx = (numReagents % 2 == 0) and math.max(1, numReagents - 1) or numReagents
+            local bottomAnchor = _G["TradeSkillReagent" .. lastLeftIdx]
+                or TradeSkillReagentLabel or detailScroll
+            if bottomAnchor == detailScroll then
+                infoFrame:SetPoint("BOTTOMLEFT", detailScroll, "BOTTOMLEFT", 8, 4)
+            else
+                infoFrame:SetPoint("TOPLEFT", bottomAnchor, "BOTTOMLEFT", 2, -6)
+            end
+            infoFrame:SetSize(288, 30)
+
+            if btnBreakdown.SetParent then btnBreakdown:SetParent(infoFrame) end
+            if btnCraftList.SetParent then btnCraftList:SetParent(infoFrame) end
             btnBreakdown:ClearAllPoints()
-            btnBreakdown:SetPoint("TOPLEFT", infoFrame, "TOPLEFT", 0, 0)
-            btnBreakdown:SetSize(66, 18)
+            if TradeSkillReagentLabel then
+                btnBreakdown:SetPoint("LEFT", TradeSkillReagentLabel, "RIGHT", 14, 0)
+            else
+                btnBreakdown:SetPoint("TOPRIGHT", infoFrame, "TOPRIGHT", -74, 0)
+            end
+            btnBreakdown:SetSize(74, 18)
             btnBreakdown:SetText("Breakdown")
             btnBreakdown:Show()
 
             btnCraftList:ClearAllPoints()
             btnCraftList:SetPoint("LEFT", btnBreakdown, "RIGHT", 4, 0)
-            btnCraftList:SetSize(66, 18)
+            btnCraftList:SetSize(76, 18)
             btnCraftList:SetText("+ Craft List")
             btnCraftList:Show()
 
-            -- Labels: direct cost and profit margin
+            -- Labels: full-width clean lines below the reagent slots
             infoFrame.costLabel:ClearAllPoints()
-            infoFrame.costLabel:SetPoint("TOPLEFT", btnBreakdown, "BOTTOMLEFT", 0, -3)
-            infoFrame.costLabel:SetWidth(136)
-            infoFrame.costLabel:SetText("Cost: " .. directStr)
+            infoFrame.costLabel:SetPoint("TOPLEFT", infoFrame, "TOPLEFT", 0, 0)
+            infoFrame.costLabel:SetWidth(286)
+            if cost.optimalSavings > 0 then
+                infoFrame.costLabel:SetText(string.format("Cost: %s |cff00ff00(Optimal: %s)|r", directStr, groundUpStr))
+            else
+                infoFrame.costLabel:SetText("Cost: " .. directStr)
+            end
             infoFrame.costLabel:Show()
 
-            infoFrame.groundUpLabel:Hide() -- Available in rich tooltip on hover
+            infoFrame.groundUpLabel:Hide()
 
             infoFrame.profitLabel:ClearAllPoints()
-            infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.costLabel, "BOTTOMLEFT", 0, -1)
-            infoFrame.profitLabel:SetWidth(136)
-            if profitData.outputPrice > 0 then
-                local pVal = profitData.groundUpProfit
-                local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                local pStr = FormatMoney(math.abs(pVal))
-                local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.groundUpMarginPct))
-            else
-                infoFrame.profitLabel:SetText("|cff888888Profit: No AH price|r")
-            end
+            infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.costLabel, "BOTTOMLEFT", 0, -2)
+            infoFrame.profitLabel:SetWidth(286)
+            infoFrame.profitLabel:SetText(FormatProfessionProfit(profitData, cost, outputItemID))
             infoFrame.profitLabel:Show()
 
             if profitData.hasWarnings and #profitData.warnings > 0 then
                 infoFrame.warningLabel:ClearAllPoints()
-                infoFrame.warningLabel:SetPoint("TOPLEFT", infoFrame.profitLabel, "BOTTOMLEFT", 0, -1)
-                infoFrame.warningLabel:SetWidth(136)
-                infoFrame.warningLabel:SetText("|cffff9900! Price warnings|r")
+                infoFrame.warningLabel:SetPoint("TOPLEFT", infoFrame.profitLabel, "BOTTOMLEFT", 0, -2)
+                infoFrame.warningLabel:SetWidth(286)
+                infoFrame.warningLabel:SetText("|cffff9900! Price warnings (hover for details)|r")
                 infoFrame.warningLabel:Show()
             else
                 infoFrame.warningLabel:Hide()
+            end
+
+            local profitHeight = infoFrame.profitLabel.GetStringHeight and infoFrame.profitLabel:GetStringHeight() or 24
+            infoFrame:SetHeight(18 + math.max(12, profitHeight) + (infoFrame.warningLabel:IsShown() and 14 or 0))
+
+            if detailScroll and detailScroll.UpdateScrollChildRect then
+                pcall(detailScroll.UpdateScrollChildRect, detailScroll)
             end
         else
             -- Two-column classic layout (WoW Forever / WotLK / Cata)
@@ -1078,26 +1133,8 @@ local function InitClassicTradeSkillHook()
             infoFrame.profitLabel:ClearAllPoints()
             infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.groundUpLabel, "BOTTOMLEFT", 0, -2)
             infoFrame.profitLabel:SetWidth(width)
-            if profitData.outputPrice > 0 then
-                local pVal = profitData.groundUpProfit
-                local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                local pStr = FormatMoney(math.abs(pVal))
-                local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                local directComp = ""
-                if cost.optimalSavings > 0 then
-                    local dVal = profitData.directProfit
-                    local dStr = FormatMoney(math.abs(dVal))
-                    local dCol = (dVal >= 0) and "+ " or "- "
-                    directComp = string.format(" |cff888888(Direct: %s%s)|r", dCol, dStr)
-                end
-                infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)%s", pCol, pStr, mCol, profitData.groundUpMarginPct, directComp))
-                infoFrame.profitLabel:Show()
-            else
-                infoFrame.profitLabel:SetText(outputItemID and
-                    "|cff888888Profit: No AH price for output item|r" or
-                    "|cff888888Profit: No item output|r")
-                infoFrame.profitLabel:Show()
-            end
+            infoFrame.profitLabel:SetText(FormatProfessionProfit(profitData, cost, outputItemID))
+            infoFrame.profitLabel:Show()
 
             if profitData.hasWarnings and #profitData.warnings > 0 then
                 infoFrame.warningLabel:ClearAllPoints()
@@ -1158,9 +1195,17 @@ local function InitClassicTradeSkillHook()
                 GameTooltip:AddDoubleLine("AH Market Price:", FormatMoney(profitData.outputPrice), 0.9, 0.9, 0.9, 1, 1, 1)
                 local pVal = profitData.groundUpProfit
                 local pCol = (pVal >= 0) and "+ " or "- "
-                GameTooltip:AddDoubleLine("Estimated Profit:", string.format("%s%s (%d%%)", pCol, FormatMoney(math.abs(pVal)), profitData.groundUpMarginPct), 0.9, 0.9, 0.9, pVal >= 0 and 0.2 or 1, pVal >= 0 and 1 or 0.2, 0.2)
+                GameTooltip:AddDoubleLine("Estimated AH Profit:", string.format("%s%s (%d%%)", pCol, FormatMoney(math.abs(pVal)), profitData.groundUpMarginPct), 0.9, 0.9, 0.9, pVal >= 0 and 0.2 or 1, pVal >= 0 and 1 or 0.2, 0.2)
             else
                 GameTooltip:AddDoubleLine("AH Market Price:", "No data", 0.9, 0.9, 0.9, 0.6, 0.6, 0.6)
+            end
+            if profitData.vendorRevenue and profitData.vendorRevenue > 0 then
+                GameTooltip:AddDoubleLine("Vendor Sell (0% cut):", FormatMoney(profitData.vendorRevenue), 0.9, 0.9, 0.9, 1, 1, 1)
+                if not cost.hasMissing then
+                    local vVal = profitData.vendorGroundUpProfit
+                    local vSign = (vVal >= 0) and "+ " or "- "
+                    GameTooltip:AddDoubleLine("Bulk Vendor Profit:", string.format("%s%s (%d%%)", vSign, FormatMoney(math.abs(vVal)), profitData.vendorGroundUpMarginPct), 0.9, 0.9, 0.9, vVal >= 0 and 0.2 or 1, vVal >= 0 and 1 or 0.35, 0.35)
+                end
             end
             if profitData.hasWarnings and #profitData.warnings > 0 then
                 GameTooltip:AddLine(" ")
@@ -1213,22 +1258,22 @@ local function InitModernProfessionsHook()
 
     local schematicForm = ProfessionsFrame.CraftingPage.SchematicForm
     local infoFrame = CreateFrame("Frame", "MarketSyncCraftingInfoProfessionsFrame", schematicForm)
-    infoFrame:SetSize(300, 54)
+    infoFrame:SetSize(330, 74)
     -- The default +1 child layer leaves native reagent selectors in front.
     infoFrame:SetFrameLevel(schematicForm:GetFrameLevel() + 1)
     infoFrame:EnableMouse(false)
 
-    infoFrame.costLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    infoFrame.costLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     infoFrame.costLabel:SetPoint("TOPLEFT", infoFrame, "TOPLEFT", 0, 0)
-    infoFrame.costLabel:SetWidth(192)
+    infoFrame.costLabel:SetWidth(225)
     infoFrame.costLabel:SetJustifyH("LEFT")
 
-    infoFrame.groundUpLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    infoFrame.groundUpLabel:SetPoint("TOPLEFT", infoFrame.costLabel, "BOTTOMLEFT", 0, -2)
+    infoFrame.groundUpLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    infoFrame.groundUpLabel:SetPoint("TOPLEFT", infoFrame.costLabel, "BOTTOMLEFT", 0, -3)
     infoFrame.groundUpLabel:SetJustifyH("LEFT")
 
-    infoFrame.profitLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.groundUpLabel, "BOTTOMLEFT", 0, -2)
+    infoFrame.profitLabel = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    infoFrame.profitLabel:SetPoint("TOPLEFT", infoFrame.groundUpLabel, "BOTTOMLEFT", 0, -3)
     infoFrame.profitLabel:SetJustifyH("LEFT")
 
     local btnBreakdown = CreateFrame("Button", nil, infoFrame, "UIPanelButtonTemplate")
@@ -1305,12 +1350,25 @@ local function InitModernProfessionsHook()
         end
 
         local outputItemID = tonumber(schematic.outputItemID) or tonumber(recipeInfo.productID)
-        local numMade = tonumber(schematic.quantityMin) or 1
+        local qMin = tonumber(schematic.quantityMin) or tonumber(recipeInfo.minMade)
+        local qMax = tonumber(schematic.quantityMax) or tonumber(recipeInfo.maxMade)
+        if (not qMin) and C_TradeSkillUI and C_TradeSkillUI.GetRecipeNumMade then
+            local okMade, mMin, mMax = pcall(C_TradeSkillUI.GetRecipeNumMade, recipeID)
+            if okMade and mMin then
+                qMin = tonumber(mMin)
+                qMax = tonumber(mMax) or qMin
+            end
+        end
+        qMin = math.max(1, math.floor(qMin or 1))
+        qMax = math.max(qMin, math.floor(qMax or qMin))
+        local numMade = (qMin + qMax) / 2
 
         local recipe = {
             name = recipeInfo.name,
             outputItemID = outputItemID,
             outputQty = numMade,
+            outputQtyMin = qMin,
+            outputQtyMax = qMax,
             mats = mats,
             recipeIndex = recipeID,
         }
@@ -1338,19 +1396,11 @@ local function InitModernProfessionsHook()
         else
             infoFrame.groundUpLabel:SetText("Ground-Up: " .. groundUpStr)
         end
-        if profitData.outputPrice > 0 then
-            local pVal = profitData.groundUpProfit
-            local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-            local pStr = FormatMoney(math.abs(pVal))
-            local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-            infoFrame.profitLabel:SetText(string.format("Profit: %s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.groundUpMarginPct))
-            infoFrame.profitLabel:Show()
-        else
-            infoFrame.profitLabel:SetText(outputItemID and
-                "|cff888888Profit: No AH price for output item|r" or
-                "|cff888888Profit: No item output|r")
-            infoFrame.profitLabel:Show()
-        end
+        infoFrame.profitLabel:SetWidth(300)
+        infoFrame.profitLabel:SetText(FormatProfessionProfit(profitData, cost, outputItemID))
+        infoFrame.profitLabel:Show()
+        local profitHeight = infoFrame.profitLabel.GetStringHeight and infoFrame.profitLabel:GetStringHeight() or 24
+        infoFrame:SetHeight(math.max(54, 32 + profitHeight))
 
         infoFrame:ClearAllPoints()
         local reagents = schematicForm.Reagents

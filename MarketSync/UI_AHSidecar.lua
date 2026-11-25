@@ -285,65 +285,18 @@ function MarketSync.CreateAHSidecar(parent)
         })
     end
 
-    -- 2. Breakout Sidecar Frame -- aligned neatly with AH frame inset
-    local frame = CreateFrame("Frame", "MarketSyncAHSidecarFrame", ahFrame, "BackdropTemplate")
-    if MarketSync.Theme then MarketSync.Theme.Register(frame) end
-    frame:SetWidth(SIDECAR_WIDTH)
+    local frame = MarketSync.Theme.CreateStandardWindow("MarketSyncAHSidecarFrame", "MarketSync Sidecar",
+        SIDECAR_WIDTH, 400, "Interface\\Icons\\INV_Misc_Book_09", true)
+    frame:ClearAllPoints()
+    frame:SetHeight(0)
     frame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", -2, -28)
     frame:SetPoint("BOTTOMLEFT", ahFrame, "BOTTOMRIGHT", -2, 28)
     frame:SetFrameStrata(ahFrame:GetFrameStrata())
     frame:SetFrameLevel(ahFrame:GetFrameLevel() + (legacyAH and 30 or 1))
-    frame:SetClampedToScreen(true)
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    if legacyAH then
-        frame:RegisterForDrag("LeftButton")
-        frame:SetScript("OnDragStart", frame.StartMoving)
-        frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    end
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    frame._marketSyncThemeRole = "dialog"
-    frame:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
-    frame:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
-    frame:SetParent(UIParent)
-    frame:Hide()
     Sidecar.Frame = frame
     Sidecar.host = "ah"
 
-    -- Top Header Container
-    local header = CreateFrame("Frame", nil, frame)
-    header:SetPoint("TOPLEFT", 6, -6)
-    header:SetPoint("TOPRIGHT", -6, -6)
-    header:SetHeight(28)
-    header:EnableMouse(true)
-    header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart", function() frame:StartMoving() end)
-    header:SetScript("OnDragStop", function() frame:StopMovingOrSizing() end)
-
-    local headerBg = header:CreateTexture(nil, "BORDER")
-    headerBg:SetPoint("TOPLEFT", 0, 0)
-    headerBg:SetPoint("BOTTOMRIGHT", 0, 0)
-    headerBg:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight2")
-    headerBg:SetVertexColor(0.50, 0.42, 0.28, 0.35)
-
-    local headerIcon = header:CreateTexture(nil, "ARTWORK")
-    headerIcon:SetSize(18, 18)
-    headerIcon:SetPoint("LEFT", 6, 0)
-    headerIcon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
-    if headerIcon.SetTexCoord then headerIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
-
-    local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("LEFT", headerIcon, "RIGHT", 6, 0)
-    title:SetText("|cFFFFD100MarketSync Sidecar|r")
-
-    local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
-    closeBtn:SetSize(24, 24)
-    closeBtn:SetPoint("TOPRIGHT", 2, 2)
+    local closeBtn = frame.CloseButton
     closeBtn:SetScript("OnClick", function()
         if Sidecar.host == "main" and Sidecar.HideForMain then
             Sidecar.HideForMain()
@@ -359,17 +312,13 @@ function MarketSync.CreateAHSidecar(parent)
         })
     end
 
-    -- Separator line under header
-    local headerSep = frame:CreateTexture(nil, "ARTWORK")
-    headerSep:SetHeight(1)
-    headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 4, -2)
-    headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -4, -2)
-    headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
 
     -- Mode Switcher Tabs: [ Shopping ] [ Craft ] [ Bags ]
+    local compactLegacy = frame._marketSyncCompactLegacyArt ~= nil
+    local tabHeight, tabTop, tabGap = 24, compactLegacy and 39 or 33, 4
+    local tabRight = compactLegacy and 12 or 10
     local tabLists = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabLists:SetSize(99, 24)
-    tabLists:SetPoint("TOPLEFT", headerSep, "BOTTOMLEFT", 2, -6)
+    tabLists:SetHeight(tabHeight)
     tabLists:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -384,7 +333,7 @@ function MarketSync.CreateAHSidecar(parent)
     tabLists.icon = tabLists:CreateTexture(nil, "ARTWORK")
     if tabLists.icon then
         if tabLists.icon.SetSize then tabLists.icon:SetSize(12, 12) end
-        if tabLists.icon.SetPoint then tabLists.icon:SetPoint("LEFT", 10, 0) end
+        if tabLists.icon.SetPoint then tabLists.icon:SetPoint("LEFT", 7, 0) end
         if tabLists.icon.SetTexture then tabLists.icon:SetTexture("Interface\\Icons\\INV_Misc_Note_01") end
         if tabLists.icon.SetTexCoord then tabLists.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
     end
@@ -393,8 +342,8 @@ function MarketSync.CreateAHSidecar(parent)
     tabLists.label:SetText("Shopping")
 
     local tabCraft = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabCraft:SetSize(99, 24)
-    tabCraft:SetPoint("LEFT", tabLists, "RIGHT", 4, 0)
+    tabCraft:SetHeight(tabHeight)
+    tabCraft:SetPoint("LEFT", tabLists, "RIGHT", tabGap, 0)
     tabCraft:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -409,7 +358,7 @@ function MarketSync.CreateAHSidecar(parent)
     tabCraft.icon = tabCraft:CreateTexture(nil, "ARTWORK")
     if tabCraft.icon then
         if tabCraft.icon.SetSize then tabCraft.icon:SetSize(12, 12) end
-        if tabCraft.icon.SetPoint then tabCraft.icon:SetPoint("LEFT", 14, 0) end
+        if tabCraft.icon.SetPoint then tabCraft.icon:SetPoint("LEFT", 7, 0) end
         if tabCraft.icon.SetTexture then tabCraft.icon:SetTexture("Interface\\Icons\\Trade_BlackSmithing") end
         if tabCraft.icon.SetTexCoord then tabCraft.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
     end
@@ -418,8 +367,8 @@ function MarketSync.CreateAHSidecar(parent)
     tabCraft.label:SetText("Craft")
 
     local tabBags = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    tabBags:SetSize(99, 24)
-    tabBags:SetPoint("LEFT", tabCraft, "RIGHT", 4, 0)
+    tabBags:SetHeight(tabHeight)
+    tabBags:SetPoint("LEFT", tabCraft, "RIGHT", tabGap, 0)
     tabBags:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -434,13 +383,28 @@ function MarketSync.CreateAHSidecar(parent)
     tabBags.icon = tabBags:CreateTexture(nil, "ARTWORK")
     if tabBags.icon then
         if tabBags.icon.SetSize then tabBags.icon:SetSize(12, 12) end
-        if tabBags.icon.SetPoint then tabBags.icon:SetPoint("LEFT", 16, 0) end
+        if tabBags.icon.SetPoint then tabBags.icon:SetPoint("LEFT", 7, 0) end
         if tabBags.icon.SetTexture then tabBags.icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_08") end
         if tabBags.icon.SetTexCoord then tabBags.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
     end
     tabBags.label = tabBags:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tabBags.label:SetPoint("CENTER", 6, 0)
     tabBags.label:SetText("Bags")
+
+    local function LayoutModeTabs()
+        local portrait = frame.warcraftRing or frame.PortraitContainer or frame.portrait
+        local portraitWidth = portrait and portrait.GetWidth and portrait:GetWidth() or 0
+        local tabLeft = math.max(62, portraitWidth + 8)
+        local tabWidth = math.floor((frame:GetWidth() - tabLeft - tabRight - 2 * tabGap) / 3)
+        tabLists:ClearAllPoints()
+        tabLists:SetPoint("TOPLEFT", frame, "TOPLEFT", tabLeft, -tabTop)
+        for _, tab in ipairs({ tabLists, tabCraft, tabBags }) do
+            tab:SetWidth(math.max(1, tabWidth))
+        end
+    end
+    frame:HookScript("OnSizeChanged", LayoutModeTabs)
+    frame:HookScript("OnShow", LayoutModeTabs)
+    LayoutModeTabs()
 
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(tabLists, {
@@ -463,48 +427,24 @@ function MarketSync.CreateAHSidecar(parent)
     end
 
     -- Content Containers
+    local contentTop = -(tabTop + tabHeight + 6)
+    local contentBottom = compactLegacy and 8 or 6
+    local contentRight = compactLegacy and -8 or -6
     local listsContainer = CreateFrame("Frame", nil, frame)
-    listsContainer:SetPoint("TOPLEFT", tabLists, "BOTTOMLEFT", -2, -6)
-    listsContainer:SetPoint("BOTTOMRIGHT", -6, 6)
+    listsContainer:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, contentTop)
+    listsContainer:SetPoint("BOTTOMRIGHT", contentRight, contentBottom)
 
     local sellContainer = CreateFrame("Frame", nil, frame)
-    sellContainer:SetPoint("TOPLEFT", tabLists, "BOTTOMLEFT", -2, -6)
-    sellContainer:SetPoint("BOTTOMRIGHT", -6, 6)
+    sellContainer:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, contentTop)
+    sellContainer:SetPoint("BOTTOMRIGHT", contentRight, contentBottom)
     sellContainer:Hide()
 
     local craftContainer = CreateFrame("Frame", nil, frame)
-    craftContainer:SetPoint("TOPLEFT", tabLists, "BOTTOMLEFT", -2, -6)
-    craftContainer:SetPoint("BOTTOMRIGHT", -6, 6)
+    craftContainer:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, contentTop)
+    craftContainer:SetPoint("BOTTOMRIGHT", contentRight, contentBottom)
     craftContainer:Hide()
 
     local activeMode = "lists"
-    local function ApplySidecarTheme()
-        local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
-        if isLegacy then
-            frame:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-                tile = true, tileSize = 32, edgeSize = 14,
-                insets = { left = 3, right = 3, top = 3, bottom = 3 },
-            })
-            frame:SetBackdropColor(0.08, 0.08, 0.09, 0.98)
-            frame:SetBackdropBorderColor(0.55, 0.55, 0.60, 0.98)
-            headerBg:SetVertexColor(0.40, 0.42, 0.45, 0.35)
-        else
-            frame:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-                tile = true, tileSize = 16, edgeSize = 14,
-                insets = { left = 3, right = 3, top = 3, bottom = 3 },
-            })
-            frame:SetBackdropColor(0.065, 0.055, 0.045, 0.98)
-            frame:SetBackdropBorderColor(0.60, 0.50, 0.35, 1.0)
-            headerBg:SetVertexColor(0.60, 0.50, 0.30, 0.45)
-        end
-        headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
-    end
-    frame:HookScript("OnShow", ApplySidecarTheme)
-    ApplySidecarTheme()
 
     local function SetMode(mode)
         if mode ~= "craft" and mode ~= "sell" then mode = "lists" end
@@ -513,7 +453,6 @@ function MarketSync.CreateAHSidecar(parent)
         listsContainer:SetShown(mode == "lists")
         craftContainer:SetShown(mode == "craft")
         sellContainer:SetShown(mode == "sell")
-        local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
         for _, tab in ipairs({ tabLists, tabCraft, tabBags }) do
             local selected = (tab == tabLists and mode == "lists")
                 or (tab == tabCraft and mode == "craft") or (tab == tabBags and mode == "sell")
@@ -522,11 +461,7 @@ function MarketSync.CreateAHSidecar(parent)
                 tab:SetBackdropBorderColor(1, 0.82, 0, 0.95)
             else
                 tab:SetBackdropColor(MarketSync.GetThemeColor("header"))
-                if isLegacy then
-                    tab:SetBackdropBorderColor(0.40, 0.42, 0.45, 0.85)
-                else
-                    tab:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.85)
-                end
+                tab:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder", 0.85))
             end
         end
         tabLists.label:SetText(mode == "lists" and "|cFFFFD100Shopping|r" or "|cFFB0A080Shopping|r")
@@ -544,6 +479,7 @@ function MarketSync.CreateAHSidecar(parent)
 
     -- Toggle Expand / Collapse
     function Sidecar.SetExpanded(expanded)
+        if Sidecar.host == "ah" and Sidecar.AHVisible == false then return end
         MarketSyncDB = MarketSyncDB or {}
         MarketSyncDB.AHSidecarExpanded = (expanded == true)
         if expanded then
@@ -810,45 +746,6 @@ function MarketSync.CreateAHSidecar(parent)
         return rows
     end
     function Sidecar.UpdateCraftView()
-        if MarketSync.CraftLedger then
-            craftLabel:SetText("Pending crafts")
-            craftDropdown:Hide(); craftNew:Hide(); craftDelete:Hide(); craftAdd:Hide()
-            craftSearch:SetText("Materials & Crafting...")
-            craftSearch:SetSize(290, 23)
-            craftSearch:SetScript("OnClick", function() MarketSync.OpenCraftingTree() end)
-            craftExport:Hide()
-            craftHint:SetText("Select a craft to manage materials and recorded costs.")
-            craftInset:ClearAllPoints()
-            craftInset:SetPoint("TOPLEFT", craftContainer, "TOPLEFT", 2, -100)
-            craftInset:SetPoint("BOTTOMRIGHT", craftContainer, "BOTTOMRIGHT", 0, 0)
-            for _, row in ipairs(craftRows) do row:Hide() end
-            Sidecar.ledgerRows = Sidecar.ledgerRows or {}
-            for _, row in ipairs(Sidecar.ledgerRows) do row:Hide() end
-            local index = 0
-            local function AddLine(text, click)
-                index = index + 1
-                local row = Sidecar.ledgerRows[index]
-                if not row then
-                    row = CreateFrame("Button", nil, craftRowsFrame)
-                    row:SetSize(270, 28)
-                    row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                    row.label:SetPoint("LEFT", 4, 0); row.label:SetWidth(260); row.label:SetJustifyH("LEFT")
-                    Sidecar.ledgerRows[index] = row
-                end
-                row:SetPoint("TOPLEFT", 0, -(index-1)*28); row.label:SetText(text)
-                row:SetScript("OnClick", click); row:Show()
-            end
-            for _, job in ipairs(MarketSync.CraftLedger.List()) do
-                local remaining, count = MarketSync.CraftLedger.Remaining(job), 0
-                for _ in pairs(remaining) do count = count + 1 end
-                local function Open() MarketSync.OpenCraftingTree(job.recipe, nil, { ledgerID = job.id }) end
-                AddLine("|cffffd700" .. job.name .. " x" .. job.quantity .. "|r · " .. (count > 0 and count .. " to buy" or job.status), Open)
-                for id, buy in pairs(remaining) do AddLine("  " .. CraftItemName(id) .. " x" .. buy.qty, Open) end
-            end
-            if index == 0 then AddLine("No pending crafts. Open Materials & Crafting.") end
-            craftRowsFrame:SetHeight(math.max(1,index*28))
-            return
-        end
         RefreshCraftDropdown()
         local list = GetCraftList()
         local entries = BuildCraftRows(list)
@@ -973,13 +870,6 @@ function MarketSync.CreateAHSidecar(parent)
         craftRowsFrame:SetHeight(math.max(1, #entries * 24))
     end
     function Sidecar.AddCraftRecipe(itemOrLink, listName, options)
-        if MarketSync.CraftLedger then
-            local recipe = type(itemOrLink) == "table" and itemOrLink
-                or MarketSync.GetRecipeForOutput(tonumber(itemOrLink) or (type(itemOrLink)=="string" and tonumber(itemOrLink:match("item:(%d+)"))))
-            if not recipe then return false, "No known recipe. Open its profession first." end
-            MarketSync.OpenCraftingTree(recipe)
-            return true
-        end
         local suppliedRecipe = type(itemOrLink) == "table" and itemOrLink.mats and itemOrLink or nil
         local id = suppliedRecipe and tonumber(suppliedRecipe.outputItemID)
             or tonumber(itemOrLink) or (type(itemOrLink) == "string"
@@ -1057,17 +947,28 @@ function MarketSync.CreateAHSidecar(parent)
     local listControlBar = CreateFrame("Frame", nil, listsContainer)
     listControlBar:SetPoint("TOPLEFT", 0, 0)
     listControlBar:SetPoint("TOPRIGHT", 0, 0)
-    listControlBar:SetHeight(48)
+    listControlBar:SetHeight(27)
 
-    local listLabel = listControlBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    listLabel:SetPoint("TOPLEFT", 4, -2)
-    listLabel:SetText("List:")
+    local actionsBtn = CreateFrame("Button", "MarketSyncSidecarListActions", listControlBar, "UIPanelButtonTemplate")
+    actionsBtn:SetSize(84, 25)
+    actionsBtn:SetPoint("RIGHT", listControlBar, "RIGHT", -1, 0)
+    actionsBtn:SetText("Actions v")
 
-    -- Custom styled Dropdown Button
-    local dropdownBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
-    dropdownBtn:SetSize(160, 22)
-    dropdownBtn:SetPoint("TOPLEFT", 4, -18)
+    local searchAllBtn = CreateFrame("Button", "MarketSyncSidecarListScan", listControlBar, "UIPanelButtonTemplate")
+    searchAllBtn:SetSize(58, 25)
+    searchAllBtn:SetPoint("RIGHT", actionsBtn, "LEFT", -6, 0)
+    searchAllBtn:SetText("Scan")
+
+    local dropdownBtn = CreateFrame("Button", "MarketSyncSidecarListPicker", listControlBar, "UIPanelButtonTemplate")
+    dropdownBtn:SetHeight(25)
+    dropdownBtn:SetPoint("LEFT", listControlBar, "LEFT", 1, 0)
+    dropdownBtn:SetPoint("RIGHT", searchAllBtn, "LEFT", -6, 0)
     dropdownBtn:SetText(currentListName .. "  |cFFFFD100v|r")
+    local pickerText = dropdownBtn.GetFontString and dropdownBtn:GetFontString()
+    if pickerText then
+        pickerText:SetWidth(SIDECAR_WIDTH - 182)
+        pickerText:SetWordWrap(false)
+    end
     function Sidecar.SelectShoppingList(name)
         currentListName = name
         dropdownBtn:SetText(name .. "  |cFFFFD100v|r")
@@ -1104,79 +1005,111 @@ function MarketSync.CreateAHSidecar(parent)
         })
     end
 
-    -- New List Button
-    local newListBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
-    newListBtn:SetSize(62, 22)
-    newListBtn:SetPoint("LEFT", dropdownBtn, "RIGHT", 4, 0)
-    newListBtn:SetText("+ New")
-    newListBtn:SetScript("OnClick", function()
-        StaticPopupDialogs["MARKETSYNC_SIDECAR_NEW_LIST"] = {
-            text = "Enter name for new Shopping List:",
-            button1 = "Create",
-            button2 = "Cancel",
-            hasEditBox = true,
-            OnAccept = function(self)
-                local eb = self.editBox or self.EditBox or (self.GetName and _G[self:GetName().."EditBox"])
-                local text = eb and eb:GetText()
-                if text and text ~= "" and MarketSync.Favorites then
-                    local ok = MarketSync.Favorites.CreateList(text)
-                    if ok then
-                        currentListName = text
-                        dropdownBtn:SetText(text .. "  |cFFFFD100v|r")
-                        if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
-                    end
-                end
+    local function PromptListText(dialogKey, text, action, onAccept)
+        StaticPopupDialogs[dialogKey] = {
+            text = text, button1 = action, button2 = "Cancel", hasEditBox = true,
+            timeout = 0, whileDead = true, hideOnEscape = true,
+            OnAccept = function(popup)
+                local input = popup.editBox or popup.EditBox or (popup.GetName and _G[popup:GetName() .. "EditBox"])
+                local value = input and input:GetText()
+                value = value and value:match("^%s*(.-)%s*$")
+                if not value or value == "" then return end
+                local ok, reason = onAccept(value)
+                if not ok and reason then print("|cffff4444[MarketSync]|r " .. reason) end
             end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
         }
-        StaticPopup_Show("MARKETSYNC_SIDECAR_NEW_LIST")
-    end)
-    if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(newListBtn, {
-            name = "New Shopping List",
-            context = "Button",
-            description = "Create a new shopping list",
-        })
+        StaticPopup_Show(dialogKey)
     end
 
-    -- Delete List Button
-    local delListBtn = CreateFrame("Button", nil, listControlBar, "UIPanelButtonTemplate")
-    delListBtn:SetSize(52, 22)
-    delListBtn:SetPoint("LEFT", newListBtn, "RIGHT", 4, 0)
-    delListBtn:SetText("Delete")
-    delListBtn:SetScript("OnClick", function()
-        local job = MarketSync.CraftLedger and MarketSync.CraftLedger.FindShoppingList(currentListName)
-        if job then
-            MarketSync.OpenCraftingTree(job.recipe, nil, { ledgerID = job.id })
-            print("|cffffcc00[MarketSync]|r This shopping list belongs to a tracked craft. Update or remove the craft to change it.")
-            return
+    local function RemoveListItem(listName, value)
+        local favorites = MarketSync.Favorites
+        local match, ambiguous
+        local name = value:lower()
+        local key = value:find("item:", 1, true) and MarketSync.Scanner and MarketSync.Scanner.ToItemKey
+            and MarketSync.Scanner.ToItemKey(value)
+        if key and key.itemSuffix and key.itemSuffix > 0 then
+            return favorites.RemoveFromList(listName, string.format("p:%d:%d", key.itemID, key.itemSuffix))
         end
-        if currentListName == "Favorites" then
-            print("|cFFFF4444[MarketSync]|r Cannot delete the default Favorites list.")
-            return
+        for _, item in ipairs(favorites.GetListItems(listName)) do
+            if value == item.dbKey then
+                return favorites.RemoveFromList(listName, item.dbKey)
+            end
+            if value == item.link or tonumber(value) == item.itemID or (item.name and item.name:lower() == name) then
+                ambiguous = ambiguous or match ~= nil
+                match = match or item.dbKey or item.itemID
+            end
         end
-        if MarketSync.Favorites then
-            MarketSync.Favorites.DeleteList(currentListName)
-            currentListName = "Favorites"
-            dropdownBtn:SetText("Favorites  |cFFFFD100v|r")
-            if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
-        end
-    end)
-    if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(delListBtn, {
-            name = "Delete Shopping List",
-            context = "Button",
-            description = function() return "Delete shopping list " .. (currentListName or "") end,
-        })
+        if ambiguous then return false, "More than one item matches. Enter the exact item key or link." end
+        if not match then return false, "Item not found in " .. listName .. "." end
+        return favorites.RemoveFromList(listName, match)
     end
 
-    -- Search Entire List Button
-    local searchAllBtn = CreateFrame("Button", nil, listsContainer, "UIPanelButtonTemplate")
-    searchAllBtn:SetSize(298, 24)
-    searchAllBtn:SetPoint("TOPLEFT", listControlBar, "BOTTOMLEFT", 4, -2)
-    searchAllBtn:SetText("Scan Entire List")
+    local actionsMenu = CreateFrame("Frame", "MarketSyncSidecarListActionsMenu", listControlBar, "UIDropDownMenuTemplate")
+    actionsMenu:Hide()
+    UIDropDownMenu_Initialize(actionsMenu, function(_, level)
+        if level ~= 1 then return end
+        local listName = currentListName
+        local favorites = MarketSync.Favorites
+        local tracked = MarketSync.CraftLedger and MarketSync.CraftLedger.FindShoppingList(listName)
+        local canRemoveItems = favorites and not tracked and #favorites.GetList(listName) > 0
+        local function AddAction(label, callback, disabled)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label
+            info.notCheckable = true
+            info.disabled = disabled
+            info.func = function()
+                if disabled then return end
+                if CloseDropDownMenus then CloseDropDownMenus() end
+                callback()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+
+        AddAction("Add Item...", function()
+            PromptListText("MARKETSYNC_SIDECAR_ADD_ITEM", "Add an item by name, ID, or link.", "Add", function(value)
+                return favorites.AddToList(listName, value)
+            end)
+        end, not favorites)
+        AddAction("Remove Item...", function()
+            PromptListText("MARKETSYNC_SIDECAR_REMOVE_ITEM", "Remove an item by name, ID, or link.", "Remove", function(value)
+                return RemoveListItem(listName, value)
+            end)
+        end, not canRemoveItems)
+        AddAction("New List...", function()
+            PromptListText("MARKETSYNC_SIDECAR_NEW_LIST", "Name the new shopping list.", "Create", function(name)
+                local ok, reason = favorites.CreateList(name)
+                if ok then Sidecar.SelectShoppingList(name) end
+                return ok, reason
+            end)
+        end, not favorites)
+        AddAction("Delete List", function()
+            if tracked then
+                if MarketSync.OpenCraftManager then MarketSync.OpenCraftManager(tracked.id) end
+                print("|cffffcc00[MarketSync]|r Update or remove the tracked craft to change its shopping list.")
+            elseif favorites.DeleteList(listName) then
+                Sidecar.SelectShoppingList("Favorites")
+            end
+        end, not favorites or listName == "Favorites")
+        AddAction("Import List...", function()
+            MarketSync.ShowListImportDialog({ onSuccess = function(result)
+                if result and result.listName then Sidecar.SelectShoppingList(result.listName) end
+            end })
+        end, not MarketSync.ShowListImportDialog)
+        AddAction("Export List...", function()
+            MarketSync.ShowListExportDialog(listName)
+        end, not MarketSync.ShowListExportDialog)
+    end, "MENU")
+    actionsBtn:SetScript("OnClick", function()
+        ToggleDropDownMenu(1, nil, actionsMenu, actionsBtn, 0, 0)
+    end)
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(actionsBtn, {
+            name = "Shopping list actions",
+            context = "Button",
+            tooltipTitle = "List Actions",
+            tooltipText = "Add or remove items, manage lists, and import or export.",
+        })
+    end
     searchAllBtn:SetScript("OnClick", function()
         if MarketSync.Scanner then
             if MarketSync.Scanner.Active then
@@ -1184,7 +1117,7 @@ function MarketSync.CreateAHSidecar(parent)
             else
                 local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(currentListName) or {}
                 if #items == 0 then
-                    print(string.format("|cFFFF4444[MarketSync]|r List '%s' has no items to scan. Drag an item or type its name to add items.", currentListName))
+                    print(string.format("|cFFFF4444[MarketSync]|r List '%s' has no items to scan. Drop an item here or use Actions > Add Item.", currentListName))
                     return
                 end
                 if legacyAH and MarketSync.OpenLegacySearch then
@@ -1200,6 +1133,14 @@ function MarketSync.CreateAHSidecar(parent)
             name = function() return (MarketSync.Scanner and MarketSync.Scanner.Active) and "Stop Scan" or "Scan Entire List" end,
             context = "Button",
             description = function() return "Scan all items in " .. (currentListName or "") .. " on the Auction House" end,
+            tooltipText = function()
+                local scanner = MarketSync.Scanner
+                if scanner and scanner.Active then
+                    local progress = scanner.Progress or {}
+                    return string.format("Scanning %d of %d. Click to stop.", progress.current or 0, progress.total or 0)
+                end
+                return "Scan all items in " .. currentListName .. "."
+            end,
         })
     end
 
@@ -1207,7 +1148,7 @@ function MarketSync.CreateAHSidecar(parent)
     local function HandleSidecarItemDrop()
         local infoType, itemID, itemLink = GetCursorInfo()
         if infoType == "item" and MarketSync.Favorites then
-            MarketSync.Favorites.AddToList(currentListName, itemID or itemLink)
+            MarketSync.Favorites.AddToList(currentListName, itemLink or itemID)
             ClearCursor()
             if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
             return true
@@ -1215,63 +1156,9 @@ function MarketSync.CreateAHSidecar(parent)
         return false
     end
 
-    -- Quick Add Bar (EditBox + Drag & Drop Target)
-    local addBox = CreateFrame("EditBox", nil, listsContainer, "InputBoxTemplate")
-    addBox:SetSize(296, 20)
-    addBox:SetPoint("TOPLEFT", searchAllBtn, "BOTTOMLEFT", 6, -8)
-    addBox:SetAutoFocus(false)
-    addBox:SetText("Drop item or enter name/ID...")
-    addBox:SetFontObject("GameFontHighlightSmall")
-
-    addBox:SetScript("OnEditFocusGained", function(self)
-        if self:GetText() == "Drop item or enter name/ID..." then
-            self:SetText("")
-        end
-    end)
-    addBox:SetScript("OnEditFocusLost", function(self)
-        if self:GetText() == "" then
-            self:SetText("Drop item or enter name/ID...")
-        end
-    end)
-    addBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    addBox:SetScript("OnEnterPressed", function(self)
-        local text = self:GetText()
-        if text and text ~= "" and text ~= "Drop item or enter name/ID..." and MarketSync.Favorites then
-            MarketSync.Favorites.AddToList(currentListName, text)
-            self:SetText("")
-            self:ClearFocus()
-            if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
-        end
-    end)
-    addBox:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
-    addBox:SetScript("OnMouseUp", function(self, button)
-        if HandleSidecarItemDrop() then
-            self:ClearFocus()
-        end
-    end)
-    if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(addBox, {
-            name = "Add Item",
-            context = "Edit Box",
-            description = "Drop an item or type name or ID to add to current shopping list",
-        })
-    end
-
-    -- Recessed Inset for List Items
-    local listInset = CreateFrame("Frame", nil, listsContainer, "BackdropTemplate")
-    listInset:SetPoint("TOPLEFT", addBox, "BOTTOMLEFT", -6, -6)
+    local listInset = MarketSync.CreateModernInset(listsContainer)
+    listInset:SetPoint("TOPLEFT", listControlBar, "BOTTOMLEFT", 0, -5)
     listInset:SetPoint("BOTTOMRIGHT", 0, 0)
-    listInset:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    listInset._marketSyncThemeRole = "inset"
-    listInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
-    listInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     listInset:EnableMouse(true)
     listInset:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
     listInset:SetScript("OnMouseUp", function(self, button)
@@ -1280,8 +1167,8 @@ function MarketSync.CreateAHSidecar(parent)
 
     -- Scrollable List Items Table
     local listScroll = CreateFrame("ScrollFrame", "MarketSyncSidecarListScroll", listInset, "UIPanelScrollFrameTemplate")
-    listScroll:SetPoint("TOPLEFT", 2, -3)
-    listScroll:SetPoint("BOTTOMRIGHT", -14, 3)
+    listScroll:SetPoint("TOPLEFT", 4, -5)
+    listScroll:SetPoint("BOTTOMRIGHT", -22, 5)
     if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(listScroll) end
     listScroll:EnableMouse(true)
     listScroll:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
@@ -1290,8 +1177,11 @@ function MarketSync.CreateAHSidecar(parent)
     end)
 
     local listScrollContent = CreateFrame("Frame", nil, listScroll)
-    listScrollContent:SetSize(280, 1)
+    listScrollContent:SetSize(SIDECAR_WIDTH - 38, 1)
     listScroll:SetScrollChild(listScrollContent)
+    listScroll:HookScript("OnSizeChanged", function(_, width)
+        if width and width > 0 then listScrollContent:SetWidth(width) end
+    end)
     listScrollContent:EnableMouse(true)
     listScrollContent:SetScript("OnReceiveDrag", HandleSidecarItemDrop)
     listScrollContent:SetScript("OnMouseUp", function(self, button)
@@ -1299,13 +1189,14 @@ function MarketSync.CreateAHSidecar(parent)
     end)
 
     local listEmptyText = listInset:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    listEmptyText:SetPoint("CENTER", 0, 20)
-    listEmptyText:SetText("No items in this list.\n\nDrag an item here or type\nits name above to add.")
+    listEmptyText:SetPoint("CENTER")
+    listEmptyText:SetText("No items in this list.\nDrop an item here or use Actions > Add Item.")
 
     local listRows = {}
     local function UpdateListsView()
         local items = MarketSync.Favorites and MarketSync.Favorites.GetListItems(currentListName) or {}
         local rowH = 26
+        searchAllBtn:SetText(MarketSync.Scanner and MarketSync.Scanner.Active and "Stop" or "Scan")
 
         if #items == 0 then
             listEmptyText:Show()
@@ -1342,11 +1233,12 @@ function MarketSync.CreateAHSidecar(parent)
 
                     row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                     row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-                    row.name:SetPoint("RIGHT", -76, 0)
                     row.name:SetJustifyH("LEFT")
+                    row.name:SetWordWrap(false)
 
                     row.price = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                     row.price:SetPoint("RIGHT", -20, 0)
+                    row.name:SetPoint("RIGHT", row.price, "LEFT", -6, 0)
 
                     row.delBtn = CreateFrame("Button", nil, row)
                     row.delBtn:SetSize(16, 16)
@@ -1369,16 +1261,40 @@ function MarketSync.CreateAHSidecar(parent)
                 row:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
                 row.icon:SetTexture(item.icon)
-                local quantity = MarketSync.Favorites.GetQuantity and MarketSync.Favorites.GetQuantity(currentListName, item.itemID) or 1
-                local displayName = MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(item.name, item.quality) or item.name
-                row.name:SetText(displayName .. (quantity > 1 and (" x" .. quantity) or ""))
-                row.price:SetText(GetPriceText(item.itemID))
+                local quantity = item.quantity or (MarketSync.Favorites.GetQuantity and MarketSync.Favorites.GetQuantity(currentListName, item.itemID)) or 1
+                local itemMeta = MarketSync.Favorites.GetItemMeta and MarketSync.Favorites.GetItemMeta(currentListName, item.dbKey or item.itemID)
+                local suffix = tonumber(item.suffix or (itemMeta and itemMeta.suffix)) or 0
+                local priceKey = (suffix > 0 and item.dbKey) or item.itemID
+                local isDone = (item.done == true) or (itemMeta and itemMeta.done == true) or false
+                local maxPrice = tonumber(item.maxPrice or (itemMeta and itemMeta.maxPrice))
+                local itemNote = item.note or (itemMeta and itemMeta.note)
+
+                local baseName = item.name or ("Item #" .. tostring(item.itemID))
+                if suffix > 0 and not baseName:find("%+" .. suffix) then
+                    baseName = baseName .. " (+" .. suffix .. ")"
+                end
+                local displayName = MarketSync.FormatColoredItemName and MarketSync.FormatColoredItemName(baseName, item.quality) or baseName
+                local prefix = isDone and "|cff66cc66[Done]|r " or ""
+                row.name:SetText(prefix .. displayName .. (quantity > 1 and (" x" .. quantity) or ""))
+                if row.SetAlpha then row:SetAlpha(isDone and 0.60 or 1.0) end
+
+                local priceText = GetPriceText(priceKey)
+                local marketPrice = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(priceKey) or nil
+                if marketPrice and marketPrice > 0 and maxPrice and maxPrice > 0 then
+                    if marketPrice <= maxPrice then
+                        priceText = "|cff44ff44" .. priceText .. "|r"
+                    else
+                        priceText = "|cffffaa44" .. priceText .. "|r"
+                    end
+                end
+                row.price:SetText(priceText)
 
                 row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                 row:SetScript("OnClick", function(self, mouseButton)
                     if mouseButton == "RightButton" then
                         if MarketSync.ShowAnalytics and item.itemID then
-                            MarketSync.ShowAnalytics(tostring(item.itemID), item.link, item.name, item.icon, MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(item.itemID))
+                            local analyticsKey = (suffix > 0 and item.dbKey) or tostring(item.itemID)
+                            MarketSync.ShowAnalytics(analyticsKey, item.link, item.name, item.icon, MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(priceKey))
                         end
                     else
                         MarketSync.SearchInAuctionHouse(item.name or item.itemID)
@@ -1392,6 +1308,16 @@ function MarketSync.CreateAHSidecar(parent)
                         pcall(GameTooltip.SetHyperlink, GameTooltip, item.link)
                     else
                         GameTooltip:SetText(item.name, 1, 1, 1)
+                    end
+                    if maxPrice and maxPrice > 0 then
+                        local fmtMax = MarketSync.FormatMoney and MarketSync.FormatMoney(maxPrice) or (tostring(maxPrice) .. "c")
+                        GameTooltip:AddLine("Target Max: " .. fmtMax, 0.9, 0.85, 0.3)
+                    end
+                    if type(itemNote) == "string" and itemNote ~= "" then
+                        GameTooltip:AddLine("Note: " .. itemNote, 0.85, 0.85, 0.85, true)
+                    end
+                    if isDone then
+                        GameTooltip:AddLine("Status: Done", 0.4, 0.9, 0.4)
                     end
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddLine("|cFF00FF00Left-Click|r: Search in Auction House", 0.8, 0.8, 0.8)
@@ -1414,7 +1340,7 @@ function MarketSync.CreateAHSidecar(parent)
                         return
                     end
                     if MarketSync.Favorites then
-                        MarketSync.Favorites.RemoveFromList(currentListName, item.itemID)
+                        MarketSync.Favorites.RemoveFromList(currentListName, item.dbKey or item.itemID)
                         UpdateListsView()
                     end
                 end)
@@ -1599,18 +1525,13 @@ function MarketSync.CreateAHSidecar(parent)
                             edgeSize = 8,
                             insets = { left = 1, right = 1, top = 1, bottom = 1 },
                         })
-                        btn:SetBackdropColor(0.04, 0.035, 0.03, 0.8)
+                        btn:SetBackdropColor(MarketSync.GetThemeColor("inset", 0.8))
                         btn:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
                         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
                         btn.icon = btn:CreateTexture(nil, "ARTWORK")
                         btn.icon:SetSize(36, 36)
                         btn.icon:SetPoint("CENTER", 0, 0)
-
-                        local slotBorder = btn:CreateTexture(nil, "OVERLAY")
-                        slotBorder:SetAllPoints(btn)
-                        slotBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-                        btn.slotBorder = slotBorder
 
                         btn.count = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
                         btn.count:SetPoint("BOTTOMRIGHT", -2, 2)
@@ -1756,21 +1677,11 @@ function MarketSync.CreateAHSidecar(parent)
         end)
     end
 
-    -- Register with Scanner callbacks for live progress & prices
+    -- Refresh prices and the Scan button after scanner state changes.
     if MarketSync.Scanner then
         MarketSync.Scanner.RegisterCallback(function()
-            if not frame:IsShown() then return end
-            if activeMode == "lists" then
-                if MarketSync.Scanner.Active then
-                    local cur = (MarketSync.Scanner.Progress and MarketSync.Scanner.Progress.current) or 0
-                    local tot = (MarketSync.Scanner.Progress and MarketSync.Scanner.Progress.total) or 0
-                    searchAllBtn:SetText(string.format("Scanning (%d/%d)... Stop", cur, tot))
-                else
-                    searchAllBtn:SetText("Scan Entire List")
-                end
-                if Sidecar.UpdateListsView then
-                    Sidecar.UpdateListsView()
-                end
+            if frame:IsShown() and activeMode == "lists" then
+                UpdateListsView()
             end
         end)
     end

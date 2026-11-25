@@ -1,12 +1,12 @@
 # Item and customer-craft tracking
 
-> **Beta Status**: The Transactional Item Ledger is an experimental beta module and is **auto-disabled by default** (`MarketSyncDB.EnableLedgerBeta = false`). To enable it, navigate to **Game Menu → Options → AddOns → MarketSync → Beta & Experimental Features → Enable Transactional Item Ledger**. When disabled, all Ledger UI buttons (MainFrame title bar, Craft Manager header, item context menus, and minimap shortcuts) are dimmed and disabled. Lightweight multi-character inventory tracking continues running in the background for tooltip counts with zero ledger overhead.
+Install **MarketSyncLedger** alongside **MarketSync** for transactions, FIFO costs, and craft jobs. Its controls are under **Options → AddOns → MarketSync Ledger**. Existing Ledger history and craft jobs are copied into `MarketSyncLedgerDB` on first load. MarketSync keeps its own character inventory counts.
 
-This local preview adds a persistent local ledger alongside craft orders, organized in a dedicated modular subsystem (`MarketSync/Ledger/`). When enabled, open the Ledger directly via **Minimap Right-Click**, the **Ledger** button in the MarketSync header bar, the optional **2nd Ledger Minimap Icon** (`Settings → Show dedicated Ledger Minimap Icon`), `/ledger`, `/msledger`, or **Materials & Crafting Choices → Item Ledger** to inspect inventory, exchanges, cost lots, and unresolved movements. Nothing is sent through guild sync.
+When enabled, open the Ledger from the MarketSync minimap right-click, the **Ledger** header button, the optional Ledger minimap icon, or `/msledger`. Build the companion with `python tools/package.py --ledger --output dist/MarketSyncLedger.zip`. Ledger records stay local.
 
 ## Ledger Architecture & Design C Interface (`MarketSync/Ledger/`)
 
-The Ledger subsystem is structured under `MarketSync/Ledger/` (`CraftLedger.lua`, `PurchaseList.lua`, `ItemLedger.lua`, `InventoryTracking.lua`, `UI_CraftManager.lua`, `UI_ItemLedger.lua`, and `UI_PurchaseList.lua`) and uses **Design C (Progressive Hybrid)**:
+The optional Ledger addon subscribes to MarketSync's inventory snapshots when transactional tracking is enabled. It uses **Design C (Progressive Hybrid)**:
 - **4 Top-Level KPI Cards**: Realized Net Profit, Active Character Stock & FIFO Value, Pending Craft Orders & Auto-Tagged Materials, and Needs Review / Unresolved count.
 - **3 Progressive View Modes**:
   1. **In / Out Activity**: Chronological transaction stream with quick **Flow Filter (`Flow: In & Out`, `+In Only`, `-Out Only`)** and source filters.
@@ -17,14 +17,11 @@ The Ledger subsystem is structured under `MarketSync/Ledger/` (`CraftLedger.lua`
 ## Ownership and availability
 
 Bags, equipped items, bank contents, and mailbox attachments are saved separately
-for each observed character and client/market partition. Bank/mail counts update
+for each observed character on the current game installation. Bank and mail counts update
 when that storage is accessible. Offline characters show last recorded counts,
 not live counts. Mailbox snapshots identify partial inbox loads.
 
-Enter an item ID or link in Item Ledger to list characters, quantities, storage,
-and snapshot ages. Item tooltips and craft materials also show other characters'
-stock. **Settings → Show items on other characters** hides these extra displays
-when a bag addon already provides them. The setting leaves bookkeeping active.
+Item tooltips show quantities across characters. **Track Character Inventory and Show Tooltip Counts** in MarketSync settings stops inventory scanning and hides inventory lines together. This also pauses the snapshots used for Ledger's inventory reconciliation.
 
 ## Tooltip Presentation & Modifier Controls
 
@@ -55,7 +52,7 @@ re-hovering (`MODIFIER_STATE_CHANGED`), revealing:
 - **Ground-Up Craft Breakdown**: Full tree of intermediate components and farm vs. buy options.
 
 ### Settings Configuration
-- **Show items on other characters**: Toggles character holdings display on tooltips.
+- **Track Character Inventory and Show Tooltip Counts** turns inventory scans and tooltip counts on or off together.
 - **Show Pending Craft Demand on Tooltips**: Toggles active job requirement lines.
 - **Details Modifier Key**: Configures the key used to expand tooltips (`Shift`, `Ctrl`, or `Alt`).
 
@@ -133,7 +130,7 @@ If an outgoing item could belong to the user or a customer and does not match an
 ## Tiered Ledger Compaction (`I.TrimLedger`)
 
 To prevent `SavedVariables` bloat over months of trading and crafting while preserving long-term financial history:
-- **Hot Granular Window**: Full transaction records, evidence trails, and audit metadata are kept for the configured retention period (`MarketSyncDB.LedgerRetentionDays`, default **30 days**, configurable to **14 / 30 / 60 / 90 days** in Settings).
+- **Hot Granular Window**: Full transaction records, evidence trails, and audit metadata are kept for **30 days** by default. Choose **14, 30, 60, or 90 days** in MarketSync Ledger settings.
 - **Primary `+/-` Rollup Archive (`store.rollups`)**: Records older than the retention window are compacted by `MarketSync.ItemLedger.TrimLedger()` into lightweight per-item (`qtyIn`, `qtyOut`, `goldSpent`, `goldEarned`, `guildCraftCount`) and overall gold `+/-` rollup summaries (`I.GetRollupSummary()`).
 - **Safety Preservation**: Active unconsumed FIFO cost lots, reserved stock, active craft job links, and unresolved records are never trimmed until settled.
 

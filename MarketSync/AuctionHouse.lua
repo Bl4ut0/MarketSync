@@ -120,11 +120,24 @@ function AH.Attach()
     end
     if AH.Attached then return true end
 
+    local function CreateTabPanel(name)
+        local panel = CreateFrame("Frame", name, frame)
+        panel:Hide()
+        local footer = frame.MoneyFrameBorder
+        if footer then
+            -- Blizzard anchors Sell and Auctions two pixels above the money border.
+            panel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -34)
+            panel:SetPoint("BOTTOMLEFT", footer, "TOPLEFT", 7, 2)
+            panel.MarketSyncNativeAuctionFooter = true
+        else
+            panel:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
+            panel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+        end
+        return panel
+    end
+
     -- 1. Scanner Panel Container
-    local panelScanner = CreateFrame("Frame", "MarketSyncAHScannerPanel", frame)
-    panelScanner:Hide()
-    panelScanner:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
-    panelScanner:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    local panelScanner = CreateTabPanel("MarketSyncAHScannerPanel")
     AH.ScannerPanel = panelScanner
 
     if MarketSync.CreateAHScannerPanel then
@@ -134,8 +147,8 @@ function AH.Attach()
         if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Hide()
         end
-        if AH.Sidecar and (MarketSyncDB == nil or MarketSyncDB.AHSidecarExpanded ~= false) then
-            AH.Sidecar:Show()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(true)
         end
         if panelScanner.Content then
             if panelScanner.Content.Show then panelScanner.Content:Show() end
@@ -152,10 +165,7 @@ function AH.Attach()
     end)
 
     -- 2. Processing Panel Container
-    local panelProcessing = CreateFrame("Frame", "MarketSyncAHProcessingPanel", frame)
-    panelProcessing:Hide()
-    panelProcessing:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
-    panelProcessing:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    local panelProcessing = CreateTabPanel("MarketSyncAHProcessingPanel")
     AH.ProcessingPanel = panelProcessing
 
     if MarketSync.CreateProcessingPanel then
@@ -165,8 +175,8 @@ function AH.Attach()
         if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Hide()
         end
-        if AH.Sidecar and AH.Sidecar.Hide then
-            AH.Sidecar:Hide()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(false)
         end
         if panelProcessing.Content then
             if panelProcessing.Content.Show then panelProcessing.Content:Show() end
@@ -183,10 +193,7 @@ function AH.Attach()
     end)
 
     -- 3. Alerts Panel Container
-    local panelAlerts = CreateFrame("Frame", "MarketSyncAHAlertsPanel", frame)
-    panelAlerts:Hide()
-    panelAlerts:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
-    panelAlerts:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    local panelAlerts = CreateTabPanel("MarketSyncAHAlertsPanel")
     AH.AlertsPanel = panelAlerts
 
     if MarketSync.CreateNotificationsPanel then
@@ -196,8 +203,8 @@ function AH.Attach()
         if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Hide()
         end
-        if AH.Sidecar and AH.Sidecar.Hide then
-            AH.Sidecar:Hide()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(false)
         end
         if panelAlerts.Content then
             if panelAlerts.Content.Show then panelAlerts.Content:Show() end
@@ -214,10 +221,7 @@ function AH.Attach()
     end)
 
     -- 4. Analytics Panel Container
-    local panelAnalytics = CreateFrame("Frame", "MarketSyncAHAnalyticsPanel", frame)
-    panelAnalytics:Hide()
-    panelAnalytics:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
-    panelAnalytics:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    local panelAnalytics = CreateTabPanel("MarketSyncAHAnalyticsPanel")
     AH.AnalyticsPanel = panelAnalytics
 
     if MarketSync.CreateAnalyticsPanel then
@@ -227,8 +231,8 @@ function AH.Attach()
         if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Hide()
         end
-        if AH.Sidecar and AH.Sidecar.Hide then
-            AH.Sidecar:Hide()
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(false)
         end
         if panelAnalytics.Content then
             if panelAnalytics.Content.Show then panelAnalytics.Content:Show() end
@@ -379,9 +383,14 @@ function AH.Attach()
         AttachBuyAnalyticsButton(frame.ItemBuyFrame, "MarketSyncItemAnalyticsBtn")
     end
 
-    -- Hook display mode switching
-    hooksecurefunc(frame, "SetDisplayMode", function()
+    local function UpdateNativeSidecar()
         local currentMode = frame:GetDisplayMode()
+        local sidecar = MarketSync.AHSidecar
+        local auctionsMode = frame.AuctionsTab.displayMode or (AuctionHouseFrameDisplayMode and AuctionHouseFrameDisplayMode.Auctions)
+        if auctionsMode and currentMode == auctionsMode then
+            if sidecar and sidecar.SetVisibleForAH then sidecar.SetVisibleForAH(false) end
+            return
+        end
         local isBlizzardBuy = frame.Tabs and frame.Tabs[1] and currentMode == frame.Tabs[1].displayMode
         local isBlizzardSell = frame.Tabs and frame.Tabs[2] and currentMode == frame.Tabs[2].displayMode
 
@@ -389,16 +398,8 @@ function AH.Attach()
             if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
                 MarketSync.MainFrame:Hide()
             end
-            if AH.Sidecar and (MarketSyncDB == nil or MarketSyncDB.AHSidecarExpanded ~= false) then
-                AH.Sidecar:Show()
-            end
-            if MarketSync.AHSidecar and MarketSync.AHSidecar.SetMode then
-                if isBlizzardSell then
-                    MarketSync.AHSidecar.SetMode("sell")
-                else
-                    MarketSync.AHSidecar.SetMode("lists")
-                end
-            end
+            if sidecar and sidecar.SetVisibleForAH then sidecar.SetVisibleForAH(frame:IsShown()) end
+            if sidecar and sidecar.SetMode then sidecar.SetMode(isBlizzardSell and "sell" or "lists") end
             if frame.CommoditiesBuyFrame then
                 AttachBuyAnalyticsButton(frame.CommoditiesBuyFrame, "MarketSyncCommoditiesAnalyticsBtn")
             end
@@ -406,13 +407,12 @@ function AH.Attach()
                 AttachBuyAnalyticsButton(frame.ItemBuyFrame, "MarketSyncItemAnalyticsBtn")
             end
         end
-    end)
+    end
+    hooksecurefunc(frame, "SetDisplayMode", UpdateNativeSidecar)
+    if frame:IsShown() then UpdateNativeSidecar() end
 
     frame:HookScript("OnShow", function()
         MarketSync.IsAuctionHouseOpen = true
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-            MarketSync.AHSidecar.SetVisibleForAH(true)
-        end
         if AH.RefreshTabVisibility then
             AH.RefreshTabVisibility()
         end
@@ -425,10 +425,7 @@ function AH.Attach()
         if frame.ItemBuyFrame then
             AttachBuyAnalyticsButton(frame.ItemBuyFrame, "MarketSyncItemAnalyticsBtn")
         end
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetExpanded then
-            local expanded = (MarketSyncDB and MarketSyncDB.AHSidecarExpanded ~= nil) and MarketSyncDB.AHSidecarExpanded or true
-            MarketSync.AHSidecar.SetExpanded(expanded)
-        end
+        UpdateNativeSidecar()
     end)
 
     frame:HookScript("OnHide", function()

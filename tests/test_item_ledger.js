@@ -13,6 +13,10 @@ function UnitName(unit) return unit=='NPC' and 'Customer' or who end
 function GetRealmName() return 'PvP2' end; function GetNormalizedRealmName() return 'PvP2' end
 function UnitFactionGroup() return faction end; function GetBuildInfo() return '', '', '', interface end
 function GetMoney() return wallet end
+function MarketSyncDetailsKeyDown()
+ if MarketSyncDB.TooltipModifier == 'CTRL' then return IsControlKeyDown and IsControlKeyDown() end
+ return IsShiftKeyDown and IsShiftKeyDown()
+end
 counts={}; function GetItemCount(id) return counts[id] or 0 end
 UIParent={}; StaticPopupDialogs={}; function StaticPopup_Show() end
 function widget()
@@ -32,6 +36,7 @@ function CreateFrame(_,name) local w=widget(); if name then _G[name]=w end; retu
 hooks={}; function hooksecurefunc(name,fn) hooks[name]=fn end
 MarketSyncDB={Favorites={},FavoriteQuantities={}}
 MarketSync={GetRealmDB=function() return MarketSyncDB end,
+ IsDetailsKeyDown=MarketSyncDetailsKeyDown,
  NormalizeSyncRealm=function(r) return interface==16001 and r:gsub('%d+$','') or r end,
  GetItemInfo=function(id) return 'Item '..id end}
 function MarketSync.BuildCraftPurchasePlan(request)
@@ -41,7 +46,8 @@ function MarketSync.BuildCraftPurchasePlan(request)
  return {buys=buys,provided=provided,recipes={{outputQty=request.quantity}},buyCount=1}
 end
 `);
-for (const file of ['Favorites.lua', 'Ledger/CraftLedger.lua', 'Ledger/ItemLedger.lua', 'Ledger/InventoryTracking.lua', 'Ledger/UI_ItemLedger.lua']) {
+for (const file of ['Favorites.lua', 'Ledger/CraftLedger.lua', 'Ledger/ItemLedger.lua', 'InventoryTracking.lua',
+  'Ledger/TransactionTracking.lua', 'Ledger/UI_ItemLedger.lua']) {
   const code = fs.readFileSync(path.join(__dirname, '../MarketSync', file), 'utf8');
   luaparse.parse(code, { luaVersion: '5.1' }); run(code);
 }
@@ -154,7 +160,7 @@ local view=MarketSync.OpenItemLedger(job.id);assert(view.jobID==job.id)
 `);
 run(`
 -- Client observer confirmations; cancelled/repeated events cannot commit facts.
-local I,T=MarketSync.ItemLedger,MarketSync.InventoryTracking
+local I,T=MarketSync.ItemLedger,MarketSync.LedgerTracking
 local function Count(kind) local n=0;for _,tx in ipairs(I.List()) do if tx.kind==kind then n=n+1 end end;return n end
 function GetTradePlayerItemInfo() return 'Ore',1,1 end
 function GetTradePlayerItemLink() return 'item:10' end
@@ -209,6 +215,7 @@ local sent=Count('mail sent');T.eventFrame.scripts.OnEvent(nil,'MAIL_FAILED');T.
 assert(Count('mail sent')==sent)
 hooks.SendMail('Other','Supplies');T.eventFrame.scripts.OnEvent(nil,'MAIL_SEND_SUCCESS')
 assert(Count('mail sent')==sent+1);T.eventFrame.scripts.OnEvent(nil,'MAIL_SEND_SUCCESS');assert(Count('mail sent')==sent+1)
+T = MarketSync.InventoryTracking
 -- Modern character bank tabs are scanned only when their contents are available.
 Enum={BankType={Character=0}}
 C_Bank={CanViewBank=function() return true end,FetchPurchasedBankTabIDs=function() return {6} end}
@@ -217,7 +224,7 @@ C_Container={GetContainerNumSlots=function(bag) return bag==6 and 2 or 0 end,
 T.bankOpen=true;T.CaptureBank();assert(I.Holdings(777)[1].qty==3)
 C_Bank.CanViewBank=function() return false end
 T.CaptureBank();assert(I.Holdings(777)[1].qty==3,'Unavailable bank contents must not overwrite known counts with zero')
--- Display-only setting leaves inventory tracking untouched.
+-- Inventory and Ledger are displayed together when enabled.
 GameTooltip=widget();GameTooltip.lines={}
 function GameTooltip:GetItem() return 'Ore','item:10' end
 function GameTooltip:AddLine(line) self.lines[#self.lines+1]=line end
@@ -225,7 +232,7 @@ function GameTooltip:AddDoubleLine(left,right) self.lines[#self.lines+1]=tostrin
 T.InstallTooltips();GameTooltip.scripts.OnTooltipSetItem(GameTooltip)
 assert(#GameTooltip.lines>0)
 local compactLines = table.concat(GameTooltip.lines, ' ')
-assert(compactLines:find('Inventory:'), 'Compact tooltip must show Inventory header')
+assert(compactLines:find('Inventory|r', 1, true), 'Compact tooltip must show Inventory header')
 assert(compactLines:find('Total'), 'Compact tooltip must show total item count')
 assert(compactLines:find('Hold Shift'), 'Compact tooltip must include shift hint when extra details exist')
 
@@ -236,7 +243,7 @@ GameTooltip.lines = {}
 GameTooltip.scripts.OnTooltipCleared(GameTooltip)
 GameTooltip.scripts.OnTooltipSetItem(GameTooltip)
 local shiftLines = table.concat(GameTooltip.lines, ' ')
-assert(shiftLines:find('Inventory Details:'), 'Shift tooltip must show Inventory Details')
+assert(shiftLines:find('Inventory Details|r', 1, true), 'Shift tooltip must show Inventory Details')
 assert(shiftLines:find('Cost Basis'), 'Shift tooltip must display FIFO cost basis')
 shiftActive = false
 
@@ -273,13 +280,13 @@ GameTooltip.lines = {}
 GameTooltip.scripts.OnTooltipCleared(GameTooltip)
 GameTooltip.scripts.OnTooltipSetItem(GameTooltip)
 local ctrlDetailLines = table.concat(GameTooltip.lines, ' ')
-assert(ctrlDetailLines:find('Inventory Details:'), 'Custom CTRL modifier must expand tooltip details')
+assert(ctrlDetailLines:find('Inventory Details|r', 1, true), 'Custom CTRL modifier must expand tooltip details')
 ctrlActive = false
 MarketSyncDB.TooltipModifier = "SHIFT"
 
 MarketSyncDB.ShowItemsOnOtherCharacters=false;GameTooltip.lines={}
 GameTooltip.scripts.OnTooltipCleared(GameTooltip);GameTooltip.scripts.OnTooltipSetItem(GameTooltip)
-assert(#GameTooltip.lines==0 and #I.Holdings(10)>0)
+assert(not table.concat(GameTooltip.lines, ' '):find('Inventory|r', 1, true) and #I.Holdings(10)>0)
 MarketSyncDB.ShowItemsOnOtherCharacters=true
 
 -- MODIFIER_STATE_CHANGED safely triggers active tooltip refresh

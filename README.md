@@ -13,7 +13,7 @@ Auctionator is optional: MarketSync includes its own native, frame-sliced auctio
 * **Browse Offline**: Search your personal scans, guild-synced prices, and neutral-AH data in separate views away from the auctioneer.
 * **Authentic Warcraft Interface Styling**:
   * Main window, Crafting Manager, and Item Ledger are built on Blizzard's authentic `PortraitFrameTemplate` with native NineSlice borders, round portrait emblems, title bars, and docked bottom tabs.
-  * Dual-theme support: Dark bronze on Forever/Retail (`UI-DialogBox-Background-Dark`) and parchment/slate on Classic Era (`UI-DialogBox-Background`).
+  * Dual-theme support: Dark bronze on Forever/Retail and the original Classic Auction House artwork, portrait surround, and brown/gold styling in Legacy.
 * **Auction House Breakout Sidecar**: Dockable drawer beside the AH window with three synchronized tabs:
   * **Shopping**: Create custom shopping lists, add items, search individual entries, and scan lists.
   * **Craft**: Manage pending crafting requests, inspect recipe breakdowns, and choose whether components are bought, crafted, or provided.
@@ -49,9 +49,10 @@ MarketSync integrates directly into World of Warcraft's native AddOn Settings (`
 6. **Beta & Experimental Features**:
    * **Processing Tab**: Production-ready module near general release for recursive crafting solver, vendor arbitrage, and batch shopping lists.
    * **Price Alerts Tab**: Production-ready module near general release for threshold price triggers, watchlist monitoring, and raid alert delivery.
-   * **Transactional Item Ledger (Auto-Disabled by Default)**: Experimental FIFO cost tracking, vendor/trade/mail auditing, and inventory reconciliation. Auto-disabled (`EnableLedgerBeta = false`) to ensure zero memory or CPU overhead. When disabled, all ledger UI buttons and shortcuts are gracefully dimmed, while lightweight multi-character inventory tooltips continue functioning.
+   * **Character Inventory** tracks bags, bank, equipped items, and mailbox attachments. Use **Track Character Inventory and Show Tooltip Counts** in MarketSync's Auction House settings to turn scanning and counts off together.
+   * **MarketSync Ledger** is a separate optional addon for FIFO costs, transactions, and craft jobs. The Ledger shortcut appears when the addon is loaded and transactional tracking is enabled.
 7. **Window Theme**:
-   * Dynamic switching between `Auto` (client version), `Forever` (dark bronze), and `Legacy` (parchment/slate).
+   * Choose `Auto` (client version), `Forever` (dark bronze), or `Legacy` (original Classic Auction House artwork). Type `/reload` after changing themes.
 8. **Debugging & Diagnostics**:
    * Network Monitor, Swarm activity, task execution diagnostics, and debug log output.
 
@@ -64,7 +65,8 @@ MarketSync integrates directly into World of Warcraft's native AddOn Settings (`
 | `/ms` or `/marketsync` | Toggle the main MarketSync window |
 | `/ms craft` (or `/mscraft`, `/craftmanager`, `/crafts`) | Open Crafting & Materials Manager |
 | `/ms sidecar` (or `/sidecar`, `/mssidecar`) | Toggle the AH Shopping & Bag Selling drawer |
-| `/ms ledger` (or `/ledger`, `/msledger`) | Open Item Ledger (when Beta is enabled) |
+| `/ms ledger` (or `/ledger`, `/msledger`) | Open the optional Item Ledger when enabled |
+| `/msdata` | Review the MarketSyncData connection and active price records |
 | `/ms search` or `/ms browse` | Open the offline market browser |
 | `/ms theme [forever\|legacy\|auto]` | Switch UI window styling |
 | `/ms config` (or `/ms settings`, `/ms options`) | Open AddOn settings panel |

@@ -339,7 +339,7 @@ local function RecordScanObservation(itemKey, unitPrice, available, isCommodity,
     entry.vh[dayStr] = MarketSync.UpsertScanBucket(entry.vh[dayStr], bucketOffset,
         unitPrice, math.max(1, available or 1))
 
-    realmDB.PersonalScanTime = now
+    MarketSync.RecordPersonalScan(realmDB, now)
     realmDB.SwarmTSF = now
     if isFullScan then
         realmDB.FullScanTime = now
@@ -953,7 +953,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             local realmDB = MarketSync.GetRealmDB()
             if realmDB and scope ~= "neutral" then
                 realmDB.FullScanTime = finishTime
-                realmDB.PersonalScanTime = finishTime
+                MarketSync.RecordPersonalScan(realmDB, finishTime)
                 realmDB.SwarmTSF = finishTime
             end
             S.Active = false

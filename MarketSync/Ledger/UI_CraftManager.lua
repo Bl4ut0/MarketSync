@@ -134,7 +134,11 @@ local function Create()
             tile = true, tileSize = 32, edgeSize = 32,
             insets = { left = 10, right = 10, top = 10, bottom = 10 },
         })
-        f:SetBackdropColor(0.08, 0.08, 0.09, 1)
+        f:SetBackdropColor(0.80, 0.70, 0.50, 0.97)
+        f:SetBackdropBorderColor(1, 0.82, 0.50, 0.95)
+        if MarketSync.Theme and MarketSync.Theme.ApplyLegacyAuctionFrame then
+            MarketSync.Theme.ApplyLegacyAuctionFrame(f)
+        end
     end
     if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(f) end
 
@@ -193,7 +197,7 @@ local function Create()
     local closeIcon = (type(f.CloseButton) == "table" and f.CloseButton) or _G["MarketSyncCraftManagerCloseButton"]
     if not closeIcon then
         closeIcon = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-        closeIcon:SetPoint("TOPRIGHT", -4, -4)
+        closeIcon:SetPoint("TOPRIGHT", legacyTheme and 3 or -4, legacyTheme and -8 or -4)
     end
     closeIcon:SetScript("OnClick", Close)
     f.CloseButton = closeIcon
@@ -260,11 +264,9 @@ local function Create()
         end)
     end)
     local ledgerBtn = Button(strategy, 546, -4, 96, "Item Ledger", function()
-        if not MarketSync.IsLedgerEnabled or not MarketSync.IsLedgerEnabled() then
-            print("|cffffbb44[MarketSync]|r The Item Ledger is currently disabled. Enable it under AddOn Settings > Beta Features.")
-            return
+        if MarketSync.IsLedgerEnabled and MarketSync.IsLedgerEnabled() and MarketSync.OpenItemLedger then
+            MarketSync.OpenItemLedger(f.jobID)
         end
-        if MarketSync.OpenItemLedger then MarketSync.OpenItemLedger(f.jobID) end
     end)
     ledgerBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -273,7 +275,7 @@ local function Create()
             GameTooltip:AddLine("Open the Item & Gold Ledger window.", 0.8, 0.8, 0.8)
         else
             GameTooltip:SetText("MarketSync Item Ledger |cffff4444(Disabled)|r", 1, 0.82, 0)
-            GameTooltip:AddLine("Enable the Transactional Item Ledger in AddOn Settings > Beta Features to access this feature.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Enable transactional tracking in the MarketSync Ledger addon settings.", 0.8, 0.8, 0.8, true)
         end
         GameTooltip:Show()
     end)
@@ -309,7 +311,7 @@ local function Create()
         local paneHdrBg = pane:CreateTexture(nil, "BORDER")
         paneHdrBg:SetPoint("TOPLEFT", 3, -3); paneHdrBg:SetPoint("TOPRIGHT", -3, -3); paneHdrBg:SetHeight(24)
         paneHdrBg:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight2")
-        paneHdrBg:SetVertexColor(0.50, 0.42, 0.28, 0.35)
+        paneHdrBg:SetVertexColor(ThemeColor("headerTint",0.50,0.42,0.28,0.35))
 
         pane.heading = Text(pane, 8, -6, spec[2] - 16, "|cffffd700" .. spec[3] .. "|r", "GameFontNormal")
         if MarketSync.CreateAHColumnHeader then
@@ -786,11 +788,11 @@ local function Create()
     end
     return f
 end
-function MarketSync.OpenCraftingTree(recipeOrItemID, anchor, saved)
+function MarketSync.OpenLedgerCraftTree(recipeOrItemID, anchor, saved)
     local f=Create()
     if f.dirty and (recipeOrItemID or (saved and saved.ledgerID)) then
         if saved and saved.ledgerID==f.jobID then f:Show(); return end
-        DiscardOrRun(f,function() MarketSync.OpenCraftingTree(recipeOrItemID,anchor,saved) end)
+        DiscardOrRun(f,function() MarketSync.OpenLedgerCraftTree(recipeOrItemID,anchor,saved) end)
         return
     end
     local recipe=type(recipeOrItemID)=="table" and recipeOrItemID or (recipeOrItemID and MarketSync.GetRecipeForOutput(recipeOrItemID))
@@ -810,10 +812,10 @@ function MarketSync.OpenCraftManager(jobID)
     if jobID then
         local job = MarketSync.CraftLedger and MarketSync.CraftLedger.Get and MarketSync.CraftLedger.Get(jobID)
         if job then
-            return MarketSync.OpenCraftingTree(job.recipe, nil, { ledgerID = jobID })
+            return MarketSync.OpenLedgerCraftTree(job.recipe, nil, { ledgerID = jobID })
         end
     end
-    return MarketSync.OpenCraftingTree()
+    return MarketSync.OpenLedgerCraftTree()
 end
 
 function MarketSync.ToggleCraftManager(jobID)

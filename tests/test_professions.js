@@ -979,9 +979,12 @@ test('classic Era 1-column layout preserves reagent contents and positions break
   execLua(L, `
     onSelection()
     assert(MarketSyncCraftingInfo:IsShown(), "Crafting info must be shown")
-    local point, relTo, relPoint, x, y = MarketSyncCraftingInfo:GetPoint(1)
-    assert(relTo == TradeSkillDetailScrollFrame, "Crafting info in Era 1-column layout must anchor to TradeSkillDetailScrollFrame")
-    assert(point == "TOPRIGHT" and relPoint == "TOPRIGHT", "Crafting info must anchor to TOPRIGHT of detail frame")
+    local point, relTo, relPoint = MarketSyncCraftingInfo:GetPoint(1)
+    assert(relTo == TradeSkillReagentLabel and point == "TOPLEFT" and relPoint == "BOTTOMLEFT",
+      "Crafting info in Era 1-column layout must anchor below reagents/label, never over the item name")
+    local bPoint, bRel, bRelPoint = MarketSyncCraftingInfo.btnBreakdown:GetPoint(1)
+    assert(bRel == TradeSkillReagentLabel and bPoint == "LEFT" and bRelPoint == "RIGHT",
+      "Breakdown button must sit cleanly to the right of Reagents: label without covering recipe details")
     -- Ensure native Blizzard frames are 100% untouched
     local _, reagentRel = TradeSkillReagentLabel:GetPoint(1)
     assert(reagentRel == TradeSkillSkillName, "Native Blizzard TradeSkillReagentLabel must remain anchored to TradeSkillSkillName")
@@ -1179,6 +1182,68 @@ test('craft lifecycle only registers CRAFT_SHOW on clients that support it', () 
   execLua(L, `craftSupported = true; GetCraftInfo = function() end; GetCraftItemLink = function() end; registered = {}`);
   execLua(L, uiCraftingInfoLua);
   execLua(L, `assert(registered.CRAFT_SHOW)`);
+});
+
+test('calculates bulk vendor shuffle profit and reagent break-even caps even without output AH price', () => {
+  const L = createLuaState();
+  execLua(L, `
+    -- Mock Heavy Runecloth Bandage (14530): 2x Runecloth (14047) -> 1x Bandage (vendor sell 1000c = 10s)
+    -- Runecloth AH price = 350c (3s 50c), Bandage has NO AH price (0).
+    GetItemInfo = function(id)
+      local n = tonumber(id)
+      if n == 14530 then
+        return "Heavy Runecloth Bandage", "item:14530", 1, 60, 0, "Consumable", "Bandage", 20, "", 133685, 1000
+      elseif n == 14047 then
+        return "Runecloth", "item:14047", 1, 50, 0, "Trade Goods", "Cloth", 20, "", 132903, 400
+      end
+      return nil
+    end
+    MarketSync.GetAuctionPrice = function(id)
+      if tonumber(id) == 14047 then return 350 end
+      return nil
+    end
+    MarketSync.GetAuctionAge = function(id)
+      if tonumber(id) == 14047 then return 0 end
+      return nil
+    end
+
+    local recipe = {
+      name = "Heavy Runecloth Bandage",
+      outputItemID = 14530,
+      outputQty = 1,
+      mats = { { itemID = 14047, qty = 2 } },
+    }
+
+    -- Single craft: cost = 700c, vendorRevenue = 1000c, vendorProfit = +300c (+42%)
+    local p1 = MarketSync.CalculateRecipeProfit(recipe, nil, 1)
+    assert(p1.vendorUnitPrice == 1000, "Expected 1000c vendor sell price")
+    assert(p1.vendorRevenue == 1000, "Expected 1000c vendor revenue")
+    assert(p1.vendorEffectiveProfit == 300, "Expected +300c vendor profit, got " .. tostring(p1.vendorEffectiveProfit))
+    assert(p1.vendorEffectiveMarginPct == 42, "Expected 42% vendor ROI")
+    assert(p1.isVendorShuffle == true and p1.vendorBeatsAH == true)
+
+    -- Bulk 50x batch: cost = 35000c (3g 50s), vendorRevenue = 50000c (5g), vendorProfit = +15000c (1g 50s)
+    local p50 = MarketSync.CalculateRecipeProfit(recipe, nil, 50)
+    assert(p50.vendorRevenue == 50000 and p50.vendorEffectiveProfit == 15000)
+
+    -- FindProfitableCrafts computes vendorMargin and per-reagent vendorCapPrice (500c max per Runecloth)
+    MarketSyncDB.KnownCraftingRecipesByCharacter = {
+      ["TestChar-Faerlina"] = {
+        __cacheVersion = 2,
+        ["First Aid"] = {
+          cacheVersion = 2,
+          recipes = {
+            { name = "Heavy Runecloth Bandage", outputItemID = 14530, outputQty = 1, vendorSellPrice = 1000, mats = { { itemID = 14047, qty = 2 } } }
+          }
+        }
+      }
+    }
+    local crafts = MarketSync.FindProfitableCrafts("First Aid", 0, "TestChar-Faerlina")
+    assert(#crafts == 1)
+    assert(crafts[1].hasMissingPrice == true and crafts[1].hasMissingMatPrice == false)
+    assert(crafts[1].vendorRevenue == 1000 and crafts[1].vendorMargin == 300 and crafts[1].vendorMeetsMargin == true)
+    assert(crafts[1].matsDetailed[1].vendorCapPrice == 500, "Break-even cap for 2x Runecloth into 10s bandage should be 500c/ea")
+  `);
 });
 
 console.log(`\nAll ${passed} profession tests passed successfully!`);

@@ -1,27 +1,36 @@
 -- Local inventory and transaction facts. Market quotes are never acquisition costs.
 MarketSync = MarketSync or {}
+local _, companion = ...
 local I = { recentTransactions = {}, recentObservations = {} }
 MarketSync.ItemLedger = I
 
-if not MarketSync.IsLedgerEnabled then
-    function MarketSync.IsLedgerEnabled()
-        return (MarketSyncDB and MarketSyncDB.EnableLedgerBeta == true) or false
-    end
+function MarketSync.IsLedgerEnabled()
+    if companion then return companion.GetDB().enabled == true end
+    return (MarketSyncDB and MarketSyncDB.EnableLedgerBeta == true) or false
 end
 
-if not MarketSync.SetLedgerEnabled then
-    function MarketSync.SetLedgerEnabled(enabled)
-        if not MarketSyncDB then return end
-        MarketSyncDB.EnableLedgerBeta = enabled and true or false
-        if enabled then
-            local t = MarketSync.InventoryTracking
-            if t and t.CaptureBags then t.CaptureBags() end
-            if I.SeedObservedStock then I.SeedObservedStock() end
-        end
-        if I.Refresh then I.Refresh() end
-        local w = MarketSyncItemLedger
-        if w and w.Refresh then w:Refresh() end
+function MarketSync.SetLedgerEnabled(enabled)
+    if companion then
+        companion.GetDB().enabled = enabled == true
+    elseif MarketSyncDB then
+        MarketSyncDB.EnableLedgerBeta = enabled == true
     end
+    local observer = MarketSync.LedgerTracking
+    if observer then
+        observer.Reset()
+        if enabled then observer.InstallHooks() end
+    end
+    local inventory = MarketSync.InventoryTracking
+    if enabled and inventory and inventory.IsEnabled() then
+        inventory.CaptureBags()
+        I.SeedObservedStock()
+    end
+    if I.Refresh then I.Refresh() end
+    local window = MarketSyncItemLedger
+    if window and window:IsShown() then
+        if enabled then window:Refresh() else window:Hide() end
+    end
+    if MarketSync.UpdateLedgerUIState then MarketSync.UpdateLedgerUIState() end
 end
 local function Copy(value)
     if type(value) ~= "table" then return value end
@@ -41,14 +50,21 @@ function I.Partition()
     return tostring(interface) .. ":" .. tostring(realm) .. ":" .. tostring(UnitFactionGroup and UnitFactionGroup("player") or "Unknown")
 end
 function I.Store()
-    MarketSyncDB = MarketSyncDB or {}
-    MarketSyncDB.ItemLedger = MarketSyncDB.ItemLedger or { version = 1, nextID = 0, characters = {}, transactions = {}, seen = {}, lots = {}, reservations = {} }
-    return MarketSyncDB.ItemLedger
+    local db, key
+    if companion then
+        db, key = companion.GetDB(), "items"
+    else
+        MarketSyncDB = MarketSyncDB or {}
+        db, key = MarketSyncDB, "ItemLedger"
+    end
+    db[key] = db[key] or { version = 1, nextID = 0, characters = {}, transactions = {}, seen = {}, lots = {}, reservations = {} }
+    return db[key]
 end
 local function ID()
     local s = I.Store(); s.nextID = s.nextID + 1; return s.nextID
 end
 function I.Key(link)
+    if MarketSync.IsSecretValue and MarketSync.IsSecretValue(link) then return nil end
     local id = tonumber(link) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
     if not id then return nil end
     local suffix = type(link) == "string" and tonumber(link:match("item:%d+:[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:([^:|]+)")) or 0
@@ -940,7 +956,8 @@ end
 -- (default 30 days) and compacts older settled records into lightweight +/- primary rollups.
 -- Active FIFO stock lots and unresolved records needing review are never trimmed.
 function I.TrimLedger(retentionDays)
-    local days = tonumber(retentionDays) or (MarketSyncDB and tonumber(MarketSyncDB.LedgerRetentionDays)) or 30
+    local savedDays = companion and companion.GetDB().retentionDays or (MarketSyncDB and MarketSyncDB.LedgerRetentionDays)
+    local days = tonumber(retentionDays) or tonumber(savedDays) or 30
     if days <= 0 then return 0 end
     local cutoff = time() - (days * 86400)
     local s = I.Store()

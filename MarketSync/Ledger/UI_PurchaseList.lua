@@ -37,8 +37,10 @@ local function Create()
     if MarketSync.Theme and MarketSync.Theme.DecorateWarcraftWindow then
         MarketSync.Theme.DecorateWarcraftWindow(f, "Interface\\Icons\\INV_Misc_Bag_10", "|cffffd100Crafting Purchase Confirmations|r")
     end
-    local closeTop = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeTop:SetPoint("TOPRIGHT", 2, 2)
+    local closeTop = (type(f.CloseButton) == "table" and f.CloseButton) or CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeTop:ClearAllPoints()
+    local legacyArt = f._marketSyncLegacyAuctionArt and f._marketSyncLegacyAuctionArt.active
+    closeTop:SetPoint("TOPRIGHT", legacyArt and 3 or 2, legacyArt and -8 or 2)
     closeTop:SetScript("OnClick", function() f:Hide() end)
     f.CloseButton = closeTop
     f.title=Text(f,60,-36,530)

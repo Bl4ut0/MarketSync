@@ -23,7 +23,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
     background:SetColorTexture(MarketSync.GetThemeColor("dialog"))
 
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -10)
+    title:SetPoint("TOPLEFT", panel, "TOPLEFT", 56, -8)
     title:SetText("Search Auctions")
     local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("LEFT", title, "RIGHT", 10, 0)
@@ -39,11 +39,12 @@ function MarketSync.CreateLegacySearchPanel(parent)
         if MarketSync.PurchaseList and MarketSync.PurchaseList.ShowTooltip then MarketSync.PurchaseList.ShowTooltip(self) end
     end)
     purchaseList:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    purchaseList:Hide()
     panel.PurchaseListButton = purchaseList
 
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     search:SetHeight(24)
-    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -31)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 56, -31)
     search:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -133, -31)
     search:SetAutoFocus(false)
     search:SetMaxLetters(80)
@@ -67,7 +68,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
     progress:SetMinMaxValues(0, 1)
     local progressBackground = progress:CreateTexture(nil, "BACKGROUND")
     progressBackground:SetAllPoints(progress)
-    progressBackground:SetColorTexture(0.12, 0.12, 0.12, 1)
+    progressBackground:SetColorTexture(MarketSync.GetThemeColor("scrollTrack", 1))
     local progressText = progress:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     progressText:SetPoint("CENTER", progress, "CENTER", 0, 0)
     local stopButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -79,6 +80,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
     header:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -113)
     header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -34, -113)
     header:SetHeight(24)
+    header._marketSyncThemeRole = "header"
     header:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
     header:SetBackdropColor(MarketSync.GetThemeColor("header"))
@@ -119,6 +121,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
     buyButton:SetText("Buy 1 Stack")
 
     local resultsArea = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    resultsArea._marketSyncThemeRole = "dialog"
     resultsArea:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     resultsArea:SetPoint("BOTTOMRIGHT", selectionBar, "TOPRIGHT", 0, 5)
     resultsArea:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -147,6 +150,11 @@ function MarketSync.CreateLegacySearchPanel(parent)
 
     local function Refresh()
         if not panel:IsShown() then return end
+        if MarketSync.PurchaseList and MarketSync.PurchaseList.Show then
+            purchaseList:Show()
+        else
+            purchaseList:Hide()
+        end
         local results = scanner and scanner.LiveSearchResults or {}
         local disabled = scanner and scanner.IsDisabledByAuctionator and scanner.IsDisabledByAuctionator()
         searchButton:SetEnabled(not disabled and scanner and scanner.IsAvailable and scanner.IsAvailable())
@@ -224,9 +232,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 4, -(index - 1) * rowHeight)
             row.data = data
             if data then
-                row.background:SetColorTexture(data == selected and 0.20 or (index % 2 == 0 and 0.075 or 0.045),
-                    data == selected and 0.17 or (index % 2 == 0 and 0.072 or 0.043),
-                    data == selected and 0.09 or (index % 2 == 0 and 0.066 or 0.04), 0.98)
+                row.background:SetColorTexture(MarketSync.GetThemeColor(data == selected and "hover" or (index % 2 == 0 and "rowEven" or "rowOdd")))
                 row.icon:SetTexture(data.icon or 134400)
                 row.name:SetText((data.group and (expanded[data.group.key] and "[-] " or "[+] ") or "    ")
                     .. (data.name or ("Item #" .. data.itemID)))
@@ -259,7 +265,7 @@ function MarketSync.CreateLegacySearchPanel(parent)
         separator:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
         separator:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
         separator:SetHeight(1)
-        separator:SetColorTexture(0.18, 0.18, 0.18, 0.65)
+        separator:SetColorTexture(MarketSync.GetThemeColor("headerBorder", 0.65))
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(24, 24)
         row.icon:SetPoint("LEFT", row, "LEFT", 7, 0)

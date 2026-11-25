@@ -28,7 +28,7 @@ MarketSync features pixel-perfect, native Blizzard interface design:
 - **Docked Bottom Tabs**: Windows feature Blizzard's docked bottom tabs (`AuctionHouseFrameDisplayModeTabTemplate`), matching the authentic appearance of `AuctionFrame` and `TradeSkillFrame`.
 - **Dual-Theme Support**:
   - **Forever / Modern (`_forever_`, `_retail_`)**: Styled in dark bronze dialog textures (`UI-DialogBox-Background-Dark`), amber-gold banners, and bronze tab borders.
-  - **Legacy / Classic Era (`_classic_`, `_classic_era_`)**: Styled in authentic parchment (`UI-DialogBox-Background`), silver/slate framing, and muted accents.
+  - **Legacy / Classic Era (`_classic_`, `_classic_era_`)**: Restores MarketSync's original Classic Auction House artwork, illustrated portrait surround, brown/gold trim, and bottom tabs. Smaller dialogs use matching textured Warcraft frames.
 - Change themes anytime using **`/ms theme [forever|legacy|auto]`** or under **Settings → Window Theme**.
 
 ---
@@ -126,9 +126,9 @@ MarketSync features an 8-card categorized settings interface under WoW's native 
 6. **Beta & Experimental Features**:
    - **Processing Tab**: Production-ready module near general release for recursive crafting solver, vendor arbitrage, and batch shopping lists.
    - **Price Alerts Tab**: Production-ready module near general release for price threshold monitoring, watchlists, and raid warnings.
-   - **Transactional Item Ledger (Auto-Disabled by Default)**: Experimental FIFO cost tracking, inventory reconciliation, and ledger logs. Kept auto-disabled (`EnableLedgerBeta = false`) to avoid overhead for non-testers. All UI buttons are dimmed/disabled until toggled on.
+   - **Track Character Inventory and Show Tooltip Counts**: Tracks quantities in bags, bank, equipment, and mail across characters. Turn this off when Syndicator or Baganator provides your inventory counts.
 7. **Window Theme**:
-   - Auto (client version), Forever (dark bronze), or Legacy (parchment/slate).
+   - Auto (client version), Forever (dark bronze), or Legacy (original Classic Auction House artwork). Type `/reload` after changing themes.
 8. **Debugging & Diagnostics**:
    - Network Monitor and diagnostic chat output.
 
@@ -151,7 +151,7 @@ MarketSync automatically strips trailing numeric shard suffixes (`%d+$`) across 
 | `/ms` or `/marketsync` | Toggle the main MarketSync window |
 | `/ms craft` (or `/mscraft`, `/craftmanager`, `/crafts`) | Open Crafting & Materials Manager |
 | `/ms sidecar` (or `/sidecar`, `/mssidecar`) | Toggle AH Shopping & Bag Selling drawer |
-| `/ms ledger` (or `/ledger`, `/msledger`) | Open Item Ledger (when Beta is enabled) |
+| `/ms ledger` (or `/ledger`, `/msledger`) | Open the optional Item Ledger when enabled |
 | `/ms search` or `/ms browse` | Open the offline market browser |
 | `/ms theme [forever\|legacy\|auto]` | Switch UI window styling |
 | `/ms config` (or `/ms settings`, `/ms options`) | Open AddOn settings panel |

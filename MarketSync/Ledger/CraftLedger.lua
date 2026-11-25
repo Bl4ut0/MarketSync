@@ -1,5 +1,6 @@
 -- Character-owned craft jobs. Receipts are immutable facts, separate from plans.
 MarketSync = MarketSync or {}
+local _, companion = ...
 local L = {}
 MarketSync.CraftLedger = L
 local function Copy(t)
@@ -8,6 +9,12 @@ local function Copy(t)
 end
 local function Owner() return (UnitName("player") or "Player") .. "-" .. (GetRealmName() or "Realm") end
 local function Store()
+    if companion then
+        local realm = MarketSync.GetFactionRealmKey()
+        local crafts = companion.GetDB().crafts
+        crafts[realm] = crafts[realm] or { nextID = 0, jobs = {} }
+        return crafts[realm]
+    end
     local db = MarketSync.GetRealmDB()
     db.CraftLedger = db.CraftLedger or { nextID = 0, jobs = {} }
     return db.CraftLedger
@@ -289,7 +296,9 @@ function L.BeginCraft(id, count)
         remaining = math.max(1, tonumber(count) or 1) * math.max(1, recipe and recipe.outputQty or 1) }
 end
 function L.ParseReceipt(message, formats)
-    if type(message) ~= "string" then return nil end
+    local isSafe = type(message) == "string"
+    if MarketSync.IsSafeString then isSafe = MarketSync.IsSafeString(message) end
+    if not isSafe then return nil end
     local function Escape(text) return (text:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")) end
     for _, format in pairs(formats or {}) do
         local pattern, kinds, cursor = "^", {}, 1
@@ -365,7 +374,8 @@ events:SetScript("OnEvent", function(_, event, message, total)
         if p and p.commodity and GetTime()<=p.expires then L.pendingPurchase=nil; L.RecordPurchase(p.itemID,p.qty,p.paid) end
     end
     if event == "CHAT_MSG_SYSTEM" then
-        local isSafe = MarketSync.IsSafeString and MarketSync.IsSafeString(message) or (type(message) == "string")
+        local isSafe = type(message) == "string"
+        if MarketSync.IsSafeString then isSafe = MarketSync.IsSafeString(message) end
         if isSafe then
             local p = L.pendingPurchase
             if p and not p.commodity and GetTime() <= p.expires and ERR_AUCTION_BID_PLACED and message == ERR_AUCTION_BID_PLACED then
@@ -373,7 +383,8 @@ events:SetScript("OnEvent", function(_, event, message, total)
             end
         end
     elseif event == "CHAT_MSG_LOOT" and L.expectedCraft and GetTime() <= L.expectedCraft.expires then
-        local isSafe = MarketSync.IsSafeString and MarketSync.IsSafeString(message) or (type(message) == "string")
+        local isSafe = type(message) == "string"
+        if MarketSync.IsSafeString then isSafe = MarketSync.IsSafeString(message) end
         if isSafe then
             local id, qty = L.ParseReceipt(message, { LOOT_ITEM_CREATED_SELF, LOOT_ITEM_CREATED_SELF_MULTIPLE })
             if id == L.expectedCraft.itemID then L.ConfirmCraftOutput(id, qty) end

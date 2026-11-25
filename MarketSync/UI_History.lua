@@ -82,7 +82,7 @@ local function CreateGraph(parent, width, height)
 
     -- Background
     local bg = graph:CreateTexture(nil, "BACKGROUND", nil, 2)
-    bg:SetColorTexture(0, 0, 0, 0.35)
+    bg:SetColorTexture(MarketSync.GetThemeColor("chart"))
     bg:SetAllPoints()
     graph.bg = bg
 
@@ -159,7 +159,7 @@ local function CreateGraph(parent, width, height)
             gl = self:CreateTexture(nil, "BACKGROUND", nil, 3)
             self.gridLines[self.gridCursor] = gl
         end
-        gl:SetColorTexture(0.5, 0.5, 0.5, alpha or 0.15)
+        gl:SetColorTexture(MarketSync.GetThemeColor("grid", alpha))
         gl:SetSize(self.plotWidth - 2, 1)
         gl:ClearAllPoints()
         gl:SetPoint("LEFT", self, "BOTTOMLEFT", 1, y)
@@ -416,7 +416,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
         -- Alternating row background
         if i % 2 == 0 then
             local rowBg = row:CreateTexture(nil, "BACKGROUND", nil, 3)
-            rowBg:SetColorTexture(1, 1, 1, 0.03)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("stripe", 0.03))
             rowBg:SetAllPoints()
         end
 
@@ -456,7 +456,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     scanPrevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     scanPrevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
     local spnt = scanPrevBtn.GetNormalTexture and scanPrevBtn:GetNormalTexture()
-    if spnt and spnt.SetVertexColor then spnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if spnt and spnt.SetVertexColor then spnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
     scanPrevBtn:SetScript("OnClick", function()
         if panel.scanPage > 0 then
             panel.scanPage = panel.scanPage - 1
@@ -472,7 +472,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     scanNextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
     scanNextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
     local snnt = scanNextBtn.GetNormalTexture and scanNextBtn:GetNormalTexture()
-    if snnt and snnt.SetVertexColor then snnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if snnt and snnt.SetVertexColor then snnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
     scanNextBtn:SetScript("OnClick", function()
         local maxPage = math.max(0, math.ceil(#panel.historyData / SCANS_PER_PAGE) - 1)
         if panel.scanPage < maxPage then
@@ -579,7 +579,7 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
 
         if i % 2 == 0 then
             local rowBg = row:CreateTexture(nil, "BACKGROUND", nil, 3)
-            rowBg:SetColorTexture(1, 1, 1, 0.03)
+            rowBg:SetColorTexture(MarketSync.GetThemeColor("stripe", 0.03))
             rowBg:SetAllPoints()
         end
 
@@ -597,50 +597,23 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
     -- ================================================================
 
     function panel:UpdateStatusBar()
+        local status, label = MarketSync.FormatAuctionScanStatus(self.sourceTab)
+        self.statusText:SetText(status)
+        self.syncLabel:SetText(label)
         if self.sourceTab == "personal" then
-            local personalTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime or 0
             local totalItems = 0
             if Auctionator and Auctionator.Database and Auctionator.Database.db then
                 for _ in pairs(Auctionator.Database.db) do totalItems = totalItems + 1 end
             end
 
-            if personalTime > 0 then
-                local timeStr = MarketSync.FormatRealmTime(personalTime)
-                local myName = UnitName("player") or "You"
-                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. myName .. "|r")
-            else
-                self.statusText:SetText("|cffff8800No personal scan data|r")
-            end
             self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
-            self.syncLabel:SetText("|cff00ff00Last Personal Scan|r")
         elseif self.sourceTab == "guild" then
-            local latestUser, latestTime = nil, 0
             local totalItems = 0
-            if MarketSync.GetLatestSyncContributor then
-                latestUser, latestTime = MarketSync.GetLatestSyncContributor(false)
-            end
-            latestTime = tonumber(latestTime) or 0
             -- Count items from the live Auctionator DB (same source as Guild Sync browse tab)
             if Auctionator and Auctionator.Database and Auctionator.Database.db then
                 for _ in pairs(Auctionator.Database.db) do totalItems = totalItems + 1 end
             end
             
-            -- Check if our personal scan is newer than the latest guild sync
-            local personalTime = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime or 0
-            if personalTime > latestTime then
-                local timeStr = MarketSync.FormatRealmTime(personalTime)
-                local myName = UnitName("player") or "You"
-                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. myName .. "|r")
-                self.syncLabel:SetText("|cff00ff00Latest Data|r")
-            elseif latestUser then
-                local timeStr = MarketSync.FormatRealmTime(latestTime)
-                local shortName = latestUser:match("^([^%-]+)") or latestUser
-                self.statusText:SetText("|cffffd700" .. timeStr .. " " .. shortName .. "|r")
-                self.syncLabel:SetText("|cff00ff00Last Guild Sync|r")
-            else
-                self.statusText:SetText("|cffff8800No sync data yet|r")
-                self.syncLabel:SetText("")
-            end
             self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
         end
     end
@@ -679,11 +652,11 @@ function MarketSync.CreateItemHistoryPanel(parentFrame)
         self.scanNextBtn:SetEnabled(hasNext)
         local pnt = self.scanPrevBtn.GetNormalTexture and self.scanPrevBtn:GetNormalTexture()
         if pnt and pnt.SetVertexColor then
-            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasPrev then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else pnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         local nnt = self.scanNextBtn.GetNormalTexture and self.scanNextBtn:GetNormalTexture()
         if nnt and nnt.SetVertexColor then
-            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasNext then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else nnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
 
         if total == 0 then

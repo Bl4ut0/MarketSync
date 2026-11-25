@@ -76,11 +76,11 @@ L.ExpectPurchase(10,2,200); L.eventFrame.scripts.OnEvent(nil,'CHAT_MSG_SYSTEM','
 -- FIFO: remaining demand in b receives one, then d receives one.
 assert(b.status=='Purchased' and d.purchased[10].qty==1)
 assert(L.Remove(d.id)); assert(not MarketSyncDB.Favorites[target])
-MarketSync.OpenCraftingTree(recipe); assert(MarketSyncCraftManager.recipe==recipe)
+MarketSync.OpenLedgerCraftTree(recipe); assert(MarketSyncCraftManager.recipe==recipe)
 assert(MarketSyncCraftManager.save.text=='Add to Craft List')
 MarketSyncCraftManager.save.scripts.OnClick(); assert(MarketSyncCraftManager.jobID)
 assert(MarketSyncCraftManager.save.text=='Update Craft')
-MarketSync.OpenCraftingTree(recipe,nil,{ledgerID=a.id}); assert(MarketSyncCraftManager.history)
+MarketSync.OpenLedgerCraftTree(recipe,nil,{ledgerID=a.id}); assert(MarketSyncCraftManager.history)
 assert(MarketSyncCraftManager.panes[2].heading.text:find('Recorded costs'))
 local craft=assert(L.Save({outputItemID=101,name='Created Widget',mats={{itemID=10,qty=2}}},{quantity=2,selectedBuys={[10]=false}}))
 hooks.DoTradeSkill(1,2)

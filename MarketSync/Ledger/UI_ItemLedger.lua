@@ -319,7 +319,11 @@ function MarketSync.OpenItemLedger(jobID)
                 tile = true, tileSize = 32, edgeSize = 32,
                 insets = { left = 10, right = 10, top = 10, bottom = 10 },
             })
-            f:SetBackdropColor(0.08, 0.08, 0.09, 1)
+            f:SetBackdropColor(0.80, 0.70, 0.50, 0.97)
+            f:SetBackdropBorderColor(1, 0.82, 0.50, 0.95)
+            if MarketSync.Theme and MarketSync.Theme.ApplyLegacyAuctionFrame then
+                MarketSync.Theme.ApplyLegacyAuctionFrame(f)
+            end
         end
 
         local portrait = (f.GetPortrait and f:GetPortrait())
@@ -368,7 +372,7 @@ function MarketSync.OpenItemLedger(jobID)
         local close = (type(f.CloseButton) == "table" and f.CloseButton) or _G["MarketSyncItemLedgerCloseButton"]
         if not close then
             close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-            close:SetPoint("TOPRIGHT", -4, -4)
+            close:SetPoint("TOPRIGHT", legacyTheme and 3 or -4, legacyTheme and -8 or -4)
         end
         close:SetScript("OnClick", function() f:Hide() end)
         f.CloseButton = close
@@ -384,11 +388,11 @@ function MarketSync.OpenItemLedger(jobID)
         end)
         f.betaToggleBtn = betaToggleBtn
 
-        -- Beta notice banner shown when transactional tracking is disabled
+        -- Notice shown when transactional tracking is disabled
         local betaNotice = Panel(f, 18, -68, 1024, 52)
-        Label(betaNotice, 16, -8, 800, "|cffffaa00Transactional Item Ledger is currently disabled (Beta Feature)|r")
-        Label(betaNotice, 16, -26, 800, "Lightweight inventory observation is active for tooltips. Enable the Beta to record purchases/sales, trade, mail, and FIFO material costs.")
-        Button(betaNotice, 836, -14, 172, "|cff00ff00Enable Ledger Beta|r", function()
+        Label(betaNotice, 16, -8, 800, "|cffffaa00Transactional tracking is disabled|r")
+        Label(betaNotice, 16, -26, 800, "Enable tracking to record purchases, sales, trades, mail, and FIFO material costs.")
+        Button(betaNotice, 836, -14, 172, "|cff00ff00Enable Tracking|r", function()
             if MarketSync.SetLedgerEnabled then MarketSync.SetLedgerEnabled(true) end
         end)
         f.betaNotice = betaNotice
@@ -899,7 +903,7 @@ function MarketSync.OpenItemLedger(jobID)
                 if enabled then self.betaNotice:Hide() else self.betaNotice:Show() end
             end
             if self.betaToggleBtn then
-                self.betaToggleBtn:SetText(enabled and "|cff77ddbbBeta: Active|r" or "|cff00ff00Enable Beta|r")
+                self.betaToggleBtn:SetText(enabled and "|cff77ddbbTracking Active|r" or "|cff00ff00Enable Tracking|r")
             end
             for n = 1, 4 do
                 if self.cards[n] then

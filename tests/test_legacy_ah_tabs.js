@@ -61,6 +61,7 @@ run(`
   }
   sidecarVisible = nil
   MarketSync = {
+    GetThemeColor = function(_, alpha) return 0.65, 0.51, 0.31, alpha or 1 end,
     AuctionHouse = {},
     Scanner = { IsLegacyAH = true, Active = false },
     AHSidecar = {
@@ -93,9 +94,10 @@ run(`
   ah.LegacyTabs.processing.scripts.OnClick()
   assert(ah.LegacyHosts.processing:IsShown() and sidecarVisible == false)
   AuctionFrameTab_OnClick(_G.AuctionFrameTab3)
-  assert(not ah.LegacyHosts.processing:IsShown() and sidecarVisible == true)
+  assert(not ah.LegacyHosts.processing:IsShown() and sidecarVisible == false)
   assert(not ah.LegacyFooter:IsShown(), 'Native tabs restore the original footer')
-  assert(sidecarMode == 'sell')
+  AuctionFrameTab_OnClick(_G.AuctionFrameTab1)
+  assert(sidecarVisible == true and sidecarMode == 'lists', 'Leaving Auctions restores the sidecar')
   MarketSyncDB.EnableProcessingTab = false
   ah.RefreshTabVisibility()
   assert(not ah.LegacyTabs.processing:IsShown())

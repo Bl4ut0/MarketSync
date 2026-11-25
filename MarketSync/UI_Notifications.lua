@@ -107,9 +107,9 @@ local function FormatRelativeTime(epochTime, fallbackDays)
     return "Today"
 end
 
-local function CreateBox(parent, x, y, width, height)
+local function CreateBox(parent, x, y, width, height, auctionSurface)
     if MarketSync and MarketSync.CreateModernInset then
-        return MarketSync.CreateModernInset(parent, x, y, width, height)
+        return MarketSync.CreateModernInset(parent, x, y, width, height, auctionSurface)
     end
     local box = CreateFrame("Frame", nil, parent)
     box:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
@@ -171,6 +171,17 @@ end
 
 local function StyleModernSubTab(btn, isActive, text)
     if not btn then return end
+    if btn._marketSyncNativeSubTab then
+        btn:SetText(text)
+        if btn.SetSelected then
+            btn:SetSelected(isActive)
+        elseif isActive and PanelTemplates_SelectTab then
+            PanelTemplates_SelectTab(btn)
+        elseif not isActive and PanelTemplates_DeselectTab then
+            PanelTemplates_DeselectTab(btn)
+        end
+        return
+    end
     StripBlizzardTextures(btn)
     if btn.SetBackdrop then
         btn:SetBackdrop({
@@ -263,9 +274,14 @@ local function ShowBulkImportPopup(listLabel, candidates, onSaved)
         local close = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -5, -5)
         close:SetScript("OnClick", function() popup:Hide() end)
+        if MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+            and MarketSync.Theme and MarketSync.Theme.DecorateWarcraftWindow then
+            popup.TitleText, popup.CloseButton = title, close
+            MarketSync.Theme.DecorateWarcraftWindow(popup, "Interface\\Icons\\INV_Misc_Book_09", "Mass Import Price Alerts")
+        end
 
         popup.listText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        popup.listText:SetPoint("TOPLEFT", 18, -38)
+        popup.listText:SetPoint("TOPLEFT", popup.portrait and 70 or 18, -38)
         popup.listText:SetPoint("RIGHT", popup, "RIGHT", -215, 0)
         popup.listText:SetJustifyH("LEFT")
 
@@ -309,7 +325,7 @@ local function ShowBulkImportPopup(listLabel, candidates, onSaved)
             if i % 2 == 0 then
                 local stripe = row:CreateTexture(nil, "BACKGROUND")
                 stripe:SetAllPoints()
-                stripe:SetColorTexture(1, 1, 1, 0.035)
+                stripe:SetColorTexture(MarketSync.GetThemeColor("stripe", 0.035))
             end
 
             row.select = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
@@ -446,7 +462,7 @@ local function ShowBulkImportPopup(listLabel, candidates, onSaved)
                     displayName = item.displayName,
                     thresholdCopper = item.thresholdCopper,
                     scope = item.scope,
-                    variantMode = "any_suffix",
+                    variantMode = item.variantMode or "any_suffix",
                     cooldownSec = 3600,
                     urgent = item.urgent,
                     enabled = item.enabled,
@@ -509,10 +525,12 @@ MarketSync.ShowBulkAlertImportPopup = ShowBulkImportPopup
 
 function MarketSync.CreateNotificationsPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
-    local LEFT_X = isEmbedded and 12 or 20
-    local LEFT_W = isEmbedded and 180 or 196
+    local isLegacyMain = not isEmbedded and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+    local LEFT_X = isEmbedded and 12 or (isLegacyMain and 25 or 20)
+    local LEFT_W = isEmbedded and 180 or (isLegacyMain and 191 or 196)
     local RESULTS_X = isEmbedded and 198 or 224
     local ROW_WIDTH = isEmbedded and 550 or 584
+    local bottomPadding = parent.MarketSyncNativeAuctionFooter and 0 or 8
     local numRowsPerPage = isEmbedded and 12 or 9
 
     local panel = CreateFrame("Frame", nil, parent)
@@ -543,12 +561,22 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     -- TOP SUB-TAB HEADER (Clearing portrait at X >= 76 on MainFrame)
     -- =========================================================
-    local btnTabWatchlist = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    local function CreateAlertTab()
+        local tab = MarketSync.CreateForeverAuctionControl
+            and MarketSync.CreateForeverAuctionControl("Button", panel, "PanelTopTabButtonTemplate")
+        if tab then
+            tab._marketSyncNativeSubTab = true
+            return tab
+        end
+        return CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    end
+
+    local btnTabWatchlist = CreateAlertTab()
     btnTabWatchlist:SetSize(134, 24)
     btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, isEmbedded and -8 or -34)
     btnTabWatchlist:SetText("Tracked Watchlist")
 
-    local btnTabHistory = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    local btnTabHistory = CreateAlertTab()
     btnTabHistory:SetSize(134, 24)
     btnTabHistory:SetPoint("LEFT", btnTabWatchlist, "RIGHT", 6, 0)
     btnTabHistory:SetText("Alert History")
@@ -640,9 +668,9 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local editorBox
     if isEmbedded then
-        editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 252)
+        editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 252, "controls")
     else
-        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 252)
+        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 252, "controls")
     end
 
     local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -913,11 +941,11 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local importBox
     if isEmbedded then
-        importBox = CreateBox(panel, LEFT_X, -292, LEFT_W, 178)
+        importBox = CreateBox(panel, LEFT_X, -292, LEFT_W, 178, "controls")
         importBox:SetWidth(LEFT_W)
-        importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, 8)
+        importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, bottomPadding)
     else
-        importBox = CreateBox(panel, LEFT_X, TOP_Y - 258, LEFT_W, 118)
+        importBox = CreateBox(panel, LEFT_X, TOP_Y - 258, LEFT_W, 118, "controls")
     end
 
     local importTitle = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -962,11 +990,11 @@ function MarketSync.CreateNotificationsPanel(parent)
     -- =========================================================
     local rightBox
     if isEmbedded then
-        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, 440)
+        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, 440, "results")
         rightBox:SetWidth(ROW_WIDTH)
-        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
+        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, bottomPadding)
     else
-        rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H)
+        rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H, "results")
     end
 
     local tableScrollBar
@@ -1056,9 +1084,17 @@ function MarketSync.CreateNotificationsPanel(parent)
         RefreshHistoryTable()
     end)
 
+    local btnImportString = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate,BackdropTemplate")
+    btnImportString:SetSize(116, 22)
+    btnImportString:SetPoint("TOPRIGHT", rightBox, "TOPRIGHT", -8, -5)
+    btnImportString:SetText("Import String...")
+    StyleModernPillButton(btnImportString, "Import String...")
+
     -- Shared Status label
     local statusText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     statusText:SetPoint("LEFT", searchBox, "RIGHT", 14, 0)
+    statusText:SetPoint("RIGHT", btnImportString, "LEFT", -8, 0)
+    statusText:SetJustifyH("LEFT")
     statusText:SetText("")
 
     local function SetStatus(msg, isError)
@@ -1071,6 +1107,29 @@ function MarketSync.CreateNotificationsPanel(parent)
             if statusText:GetText() == msg then statusText:SetText("") end
         end)
     end
+
+    btnImportString:SetScript("OnClick", function()
+        if not MarketSync.ShowListImportDialog then
+            SetStatus("Import codec unavailable.", true)
+            return
+        end
+        MarketSync.ShowListImportDialog({
+            mode = "alerts",
+            onImportAlerts = function(decoded)
+                local candidates = MarketSync.BuildNotificationCandidatesFromDecodedList
+                    and MarketSync.BuildNotificationCandidatesFromDecodedList(decoded) or {}
+                if #candidates == 0 then
+                    SetStatus("No items found in string.", true)
+                    return
+                end
+                ShowBulkImportPopup(decoded.n or "Imported List", candidates, function(count)
+                    SetStatus(string.format("Imported %d alert(s) from %s.", count, tostring(decoded.n or "string")), false)
+                    UpdateSubTabButtons()
+                    RefreshView()
+                end)
+            end,
+        })
+    end)
 
     -- Horizontal separator bar above headers
     local headerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
@@ -1169,7 +1228,9 @@ function MarketSync.CreateNotificationsPanel(parent)
 
         local hl = row:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
-        hl:SetColorTexture(MarketSync.GetThemeColor("hover"))
+        hl:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight")
+        if hl.SetBlendMode then hl:SetBlendMode("ADD") end
+        if hl.SetAlpha then hl:SetAlpha(0.28) end
 
         local accent = row:CreateTexture(nil, "OVERLAY")
         accent:SetSize(3, ROW_HEIGHT)
@@ -1390,7 +1451,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     btnPrev:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     btnPrev:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
     local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
-    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     local btnNext = CreateFrame("Button", nil, rightBox)
     btnNext:SetSize(20, 20)
@@ -1399,7 +1460,7 @@ function MarketSync.CreateNotificationsPanel(parent)
     btnNext:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
     btnNext:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
     local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
-    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     local pageText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     pageText:SetPoint("RIGHT", btnPrev, "LEFT", -8, 0)
@@ -1710,11 +1771,11 @@ function MarketSync.CreateNotificationsPanel(parent)
         btnNext:SetEnabled(hasNext)
         local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
         if pnt and pnt.SetVertexColor then
-            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasPrev then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else pnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
         if nnt and nnt.SetVertexColor then
-            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasNext then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else nnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         pageText:SetText(string.format("%d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
         if tableScrollBar then
@@ -1861,11 +1922,11 @@ function MarketSync.CreateNotificationsPanel(parent)
         btnNext:SetEnabled(hasNext)
         local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
         if pnt and pnt.SetVertexColor then
-            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasPrev then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else pnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
         if nnt and nnt.SetVertexColor then
-            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasNext then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else nnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         pageText:SetText(string.format("%d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
         if tableScrollBar then
@@ -2001,12 +2062,12 @@ function MarketSync.ToggleNotificationsManager()
         if MarketSyncMainFrame and not MarketSyncMainFrame:IsShown() then
             MarketSyncMainFrame:Show()
         end
-        MarketSync.SelectMainFrameTab(6)
-    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
+        MarketSync.SelectMainFrameTab(5)
+    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[5] then
         if not MarketSyncMainFrame:IsShown() then
             MarketSyncMainFrame:Show()
         end
-        MarketSyncMainFrame.tabs[6]:Click()
+        MarketSyncMainFrame.tabs[5]:Click()
     elseif MarketSync_ToggleUI then
         MarketSync_ToggleUI()
     end
@@ -2025,7 +2086,7 @@ function MarketSync.OpenAlertEditorWithItem(itemRef, price)
         if MarketSyncMainFrame and not MarketSyncMainFrame:IsShown() then
             MarketSyncMainFrame:Show()
         end
-        MarketSync.SelectMainFrameTab(6)
+        MarketSync.SelectMainFrameTab(5)
     elseif MarketSync.ToggleNotificationsManager then
         MarketSync.ToggleNotificationsManager()
     end

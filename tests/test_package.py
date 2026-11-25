@@ -31,10 +31,14 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("MarketSync/Favorites.lua", names)
                 self.assertIn("MarketSync/AuctionHouse.lua", names)
                 self.assertIn("MarketSync/UI_AHScanner.lua", names)
+                self.assertIn("MarketSync/InventoryTracking.lua", names)
+                self.assertFalse(any(name.startswith("MarketSync/Ledger/") for name in names))
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
                 self.assertIn("## AllowLoadGameType: camelot, classic, tbc", toc)
                 self.assertIn("LegacyScanner.lua", toc)
                 self.assertIn("MarketSync/LegacyScanner.lua", names)
+                self.assertIn("PostingWarning.lua", toc)
+                self.assertIn("MarketSync/PostingWarning.lua", names)
                 self.assertIn("## Version: " + expected_version, toc)
             self.assertEqual(manifest["auctionHouseEntry"], "embedded-tab")
             self.assertTrue(manifest["embeddedAuctionHousePanel"])
@@ -49,6 +53,22 @@ class PackageTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
                 self.assertIn("## Interface: 11509", toc)
+
+    def test_ledger_has_its_own_load_manifest(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "MarketSyncLedger.zip"
+            manifest = module.build(output, ledger=True)
+            self.assertEqual(manifest["dependency"], "MarketSync")
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
+                self.assertTrue(all(name.startswith("MarketSyncLedger/") for name in names))
+                self.assertNotIn("MarketSyncLedger/InventoryTracking.lua", names)
+                toc = archive.read("MarketSyncLedger/MarketSyncLedger.toc").decode()
+                self.assertIn("## Dependencies: MarketSync", toc)
+                self.assertIn("## SavedVariables: MarketSyncLedgerDB", toc)
+                for entry in toc.splitlines():
+                    if entry.endswith(".lua"):
+                        self.assertIn(f"MarketSyncLedger/{entry}", names)
 
     def test_legacy_flavor_package(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -85,6 +105,11 @@ class PackageTests(unittest.TestCase):
                         names = set(archive.namelist())
                         self.assertTrue(all(name.startswith("MarketSync/") for name in names))
                         self.assertFalse(any(".Examples" in name or name.startswith("tests/") for name in names))
+                        self.assertFalse(any(name.startswith("MarketSync/Ledger/") for name in names))
+                        self.assertEqual(
+                            archive.read("MarketSync/InventoryTracking.lua"),
+                            (module.ROOT / "MarketSync" / "InventoryTracking.lua").read_bytes(),
+                        )
                         toc = archive.read("MarketSync/MarketSync.toc").decode()
                         self.assertIn(f"## Interface: {interface}", toc)
                         self.assertIn(f"## AllowLoadGameType: {game_type}", toc)

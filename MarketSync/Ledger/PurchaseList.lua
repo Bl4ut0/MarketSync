@@ -124,7 +124,8 @@ local events=CreateFrame("Frame"); P.eventFrame=events
 events:RegisterEvent("CHAT_MSG_SYSTEM"); events:RegisterEvent("UI_ERROR_MESSAGE"); events:RegisterEvent("AUCTION_HOUSE_CLOSED")
 events:SetScript("OnEvent",function(_,event,message)
     if event=="CHAT_MSG_SYSTEM" then
-        local isSafe = MarketSync.IsSafeString and MarketSync.IsSafeString(message) or (type(message) == "string")
+        local isSafe = type(message) == "string"
+        if MarketSync.IsSafeString then isSafe = MarketSync.IsSafeString(message) end
         if isSafe and ERR_AUCTION_BID_PLACED and message==ERR_AUCTION_BID_PLACED then
             -- The craft ledger registered first and handles the receipt. Defer to
             -- the next update so event-frame dispatch order cannot change routing.

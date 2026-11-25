@@ -80,7 +80,7 @@ local function CreateGraph(parent, width, height)
     graph.plotHeight = height
 
     local bg = graph:CreateTexture(nil, "BACKGROUND", nil, 2)
-    bg:SetColorTexture(0, 0, 0, 0.35)
+    bg:SetColorTexture(MarketSync.GetThemeColor("chart"))
     bg:SetAllPoints()
 
     graph.lineCursor = 0
@@ -123,7 +123,7 @@ local function CreateGraph(parent, width, height)
         self.gridCursor = self.gridCursor + 1
         local gl = self.gridLines[self.gridCursor]
         if not gl then gl = self:CreateTexture(nil, "BACKGROUND", nil, 3); table.insert(self.gridLines, gl) end
-        gl:SetColorTexture(0.5, 0.5, 0.5, 0.15); gl:SetSize(self.plotWidth - 2, 1)
+        gl:SetColorTexture(MarketSync.GetThemeColor("grid")); gl:SetSize(self.plotWidth - 2, 1)
         gl:ClearAllPoints(); gl:SetPoint("LEFT", self, "BOTTOMLEFT", 1, y); gl:Show()
     end
 
@@ -213,7 +213,7 @@ function MarketSync.CreateItemDetailPanel(parent)
                 tile = true, tileSize = 16, edgeSize = 16,
                 insets = { left = 4, right = 4, top = 4, bottom = 4 }
             })
-            f:SetBackdropColor(0, 0, 0, 0.45)
+            f:SetBackdropColor(MarketSync.GetThemeColor("chart", 0.45))
         end
         local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         t:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 5, 2)
@@ -512,5 +512,10 @@ end
 function MarketSync.ShowItemDetail(itemID, requestID)
     if not ItemDetailPanel then return end
     if MarketSync.HideAllTabContent then MarketSync.HideAllTabContent() end
+    local parent = ItemDetailPanel.GetParent and ItemDetailPanel:GetParent()
+    if parent and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+        and MarketSync.Theme and MarketSync.Theme.SetLegacyCanvasVisible then
+        MarketSync.Theme.SetLegacyCanvasVisible(parent, true)
+    end
     ItemDetailPanel:RefreshItem(tonumber(itemID), requestID)
 end

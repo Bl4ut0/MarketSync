@@ -65,6 +65,7 @@ local function Finish()
     if mode == "search" then
         if S.LiveSearchProgress then S.LiveSearchProgress.state = "complete" end
         S.LiveSearchAt = GetTime()
+        S.LiveSearchScope = scope
         table.sort(S.LiveSearchResults, function(a, b)
             if a.unitPrice ~= b.unitPrice then return a.unitPrice < b.unitPrice end
             if a.itemID ~= b.itemID then return a.itemID < b.itemID end
@@ -97,12 +98,13 @@ end
 
 local function ReadSearchRow(index)
     local name, texture, count, quality, _, level, _, _, _, buyout,
-        bidAmount, _, _, owner, _, _, itemID = GetAuctionItemInfo("list", index)
+        bidAmount, _, _, owner, _, saleStatus, itemID = GetAuctionItemInfo("list", index)
     local link = GetAuctionItemLink and GetAuctionItemLink("list", index) or nil
     itemID = tonumber(itemID) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
     count, buyout = tonumber(count), tonumber(buyout)
     if not itemID or not count or count < 1 or not buyout or buyout < 1 then return end
-    if (UnitName and owner==UnitName("player")) or tonumber(bidAmount)==buyout then return end
+    if (UnitName and owner==UnitName("player")) or tonumber(bidAmount)==buyout
+        or (saleStatus and saleStatus ~= 0) then return end
     local suffix = Suffix(link)
     -- Group only identical variants, stack sizes and exact buyout amounts.
     local identity = table.concat({itemID, suffix, count, buyout}, ":")
@@ -496,7 +498,9 @@ frame:SetScript("OnEvent", function(_, event)
                 if MarketSyncDB then MarketSyncDB.LastFullScanAt = now end
                 local db = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
                 if db and S.ScanScope ~= "neutral" then
-                    db.FullScanTime, db.PersonalScanTime, db.SwarmTSF = now, now, now
+                    db.FullScanTime, db.SwarmTSF = now, now
+                    if MarketSync.RecordPersonalScan then MarketSync.RecordPersonalScan(db, now)
+                    else db.PersonalScanTime = now end
                 end
                 Finish()
             else

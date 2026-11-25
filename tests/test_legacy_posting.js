@@ -25,11 +25,14 @@ assert(MarketSync.LegacyPosting.SuggestBuyout(nil) == nil)
 run(`
 MarketSync.GetAuctionPrice = function() return 1000 end
 MarketSync.Print = function() end
-AuctionFrameAuctions = { priceType = 1 }
+AuctionFrameAuctions = { priceType = 1, HookScript = function(self, script, handler) self[script] = handler end }
+AuctionsItemButton = { HookScript = function(self, script, handler) self[script] = handler end }
 StartPrice = {}
 BuyoutPrice = {}
 AuctionsStackSizeEntry = { GetNumber = function() return 5 end }
-GetAuctionSellItemInfo = function() return nil,nil,nil,nil,nil,nil,nil,nil,nil,123 end
+local sellItemID = 123
+GetAuctionSellItemInfo = function() return nil,nil,nil,nil,nil,nil,nil,nil,nil,sellItemID end
+SetSellItemID = function(id) sellItemID = id end
 MoneyInputFrame_SetCopper = function(frame, amount) frame.value = amount end
 MoneyInputFrame_GetCopper = function(frame) return frame.value or 0 end
 CreateFrame = function()
@@ -37,8 +40,10 @@ CreateFrame = function()
   function frame:SetSize() end
   function frame:SetPoint() end
   function frame:SetText() end
-  function frame:RegisterEvent() end
+  function frame:RegisterEvent(event) assert(event == "AUCTION_HOUSE_SHOW", "unknown event " .. event) end
   function frame:SetScript(event, fn) frame[event] = fn end
+  function frame:Show() frame.shown = true end
+  function frame:Hide() frame.shown = false end
   return frame
 end
 ` + source + `
@@ -64,7 +69,18 @@ assert(BuyoutPrice.value == 999 and StartPrice.value == 1, tostring(BuyoutPrice.
 AuctionFrameAuctions.priceType = 2
 MarketSync.LegacyPosting.button.OnClick()
 assert(BuyoutPrice.value == 4995, tostring(BuyoutPrice.value))
+assert(MarketSync.LegacyPosting.button.shown)
+SetSellItemID(nil)
+AuctionsItemButton:OnEvent("NEW_AUCTION_UPDATE")
+assert(not MarketSync.LegacyPosting.button.shown, "Removing a sell item hides the suggestion")
+SetSellItemID(123)
+AuctionFrameAuctions:OnShow()
+assert(MarketSync.LegacyPosting.button.shown, "Showing the sell tab restores the suggestion")
 `);
+run(`
+C_AuctionHouse = { SendSearchQuery = function() end }
+CreateFrame = function() error("Modern clients must not create the legacy posting watcher") end
+` + source);
 assert(source.includes('GetAuctionSellItemInfo()'));
 assert(source.includes('MoneyInputFrame_SetCopper(_G.BuyoutPrice, displayPrice)'));
 assert(!source.includes('StartAuction('));

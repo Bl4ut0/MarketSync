@@ -37,6 +37,13 @@ local function CreateCustomCheckBox(parent, onClick)
     cb:SetBackdropColor(MarketSync.GetThemeColor("header"))
     cb:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
 
+    if MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme() then
+        cb:SetBackdrop(nil)
+        cb:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+        cb:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+        cb:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+    end
+
     cb.checkTex = cb:CreateTexture(nil, "OVERLAY")
     cb.checkTex:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     cb.checkTex:SetSize(18, 18)
@@ -74,12 +81,13 @@ function MarketSync.CreateAHScannerPanel(parent)
     if MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme() then
         local background = panel:CreateTexture(nil, "BACKGROUND")
         background:SetAllPoints(panel)
-        background:SetColorTexture(0.045, 0.048, 0.055, 0.99)
+        background:SetColorTexture(MarketSync.GetThemeColor("dialog"))
     end
 
     -- Left Pane: Scan Lists Management (260px wide)
     local leftWidth = legacyAH and 205 or 260
-    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, leftWidth, nil)
+    local bottomPadding = parent.MarketSyncNativeAuctionFooter and 0 or 6
+    local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, 6, -6, leftWidth, nil, "controls")
     if not leftInset then
         leftInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
         leftInset:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -6)
@@ -92,11 +100,11 @@ function MarketSync.CreateAHScannerPanel(parent)
         leftInset:SetBackdropColor(MarketSync.GetThemeColor("inset"))
         leftInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     end
-    leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, 6)
+    leftInset:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 6, bottomPadding)
     leftInset:SetWidth(leftWidth)
 
     -- Right Pane: Scan Operations & Results Feed
-    local rightInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel)
+    local rightInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, nil, nil, nil, nil, "results")
     if not rightInset then
         rightInset = CreateFrame("Frame", nil, panel, "BackdropTemplate")
         rightInset:SetBackdrop({
@@ -109,7 +117,7 @@ function MarketSync.CreateAHScannerPanel(parent)
         rightInset:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
     end
     rightInset:SetPoint("TOPLEFT", leftInset, "TOPRIGHT", 6, 0)
-    rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, 6)
+    rightInset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -6, bottomPadding)
 
     -- ================================================================
     -- LEFT PANE: MULTI-LIST CHECKLIST & SELECTION
@@ -117,27 +125,38 @@ function MarketSync.CreateAHScannerPanel(parent)
     local leftHeader = CreateFrame("Frame", nil, leftInset)
     leftHeader:SetPoint("TOPLEFT", 6, -6)
     leftHeader:SetPoint("TOPRIGHT", -6, -6)
-    leftHeader:SetHeight(26)
+    leftHeader:SetHeight(52)
 
     local listTitle = leftHeader:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    listTitle:SetPoint("LEFT", 4, 0)
+    listTitle:SetPoint("TOPLEFT", legacyAH and 40 or 4, -4)
     listTitle:SetText("|cFFFFD100Scan Lists|r")
-
-    local newListBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
-    newListBtn:SetSize(58, 22)
-    newListBtn:SetPoint("RIGHT", -54, 0)
-    newListBtn:SetText("+ New")
 
     local delListBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
     delListBtn:SetSize(50, 22)
-    delListBtn:SetPoint("RIGHT", 0, 0)
+    delListBtn:SetPoint("TOPRIGHT", 0, -2)
     delListBtn:SetText("Delete")
+
+    local newListBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
+    newListBtn:SetSize(58, 22)
+    newListBtn:SetPoint("RIGHT", delListBtn, "LEFT", -4, 0)
+    newListBtn:SetText("+ New")
+
+    local ioBtnWidth = legacyAH and 90 or 118
+    local importListBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
+    importListBtn:SetSize(ioBtnWidth, 22)
+    importListBtn:SetPoint("TOPLEFT", 0, -28)
+    importListBtn:SetText("Import...")
+
+    local exportListBtn = CreateFrame("Button", nil, leftHeader, "UIPanelButtonTemplate")
+    exportListBtn:SetSize(ioBtnWidth, 22)
+    exportListBtn:SetPoint("LEFT", importListBtn, "RIGHT", 4, 0)
+    exportListBtn:SetText("Export...")
 
     -- Multi-list checklist scroll area
     local listScroll = CreateFrame("ScrollFrame", nil, leftInset, "UIPanelScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", leftHeader, "BOTTOMLEFT", 0, -4)
     listScroll:SetPoint("RIGHT", -14, 0)
-    listScroll:SetHeight(130)
+    listScroll:SetHeight(106)
     if MarketSync.SkinModernScrollBar then MarketSync.SkinModernScrollBar(listScroll) end
 
     local listScrollContent = CreateFrame("Frame", nil, listScroll)
@@ -292,6 +311,27 @@ function MarketSync.CreateAHScannerPanel(parent)
             selectedListName = "Favorites"
             RefreshListsView()
             RefreshActiveItemsView()
+        end
+    end)
+
+    importListBtn:SetScript("OnClick", function()
+        if MarketSync.ShowListImportDialog then
+            MarketSync.ShowListImportDialog({
+                onSuccess = function(res)
+                    if res and res.listName then
+                        selectedListName = res.listName
+                        checkedLists[res.listName] = true
+                    end
+                    RefreshListsView()
+                    RefreshActiveItemsView()
+                end,
+            })
+        end
+    end)
+
+    exportListBtn:SetScript("OnClick", function()
+        if MarketSync.ShowListExportDialog then
+            MarketSync.ShowListExportDialog(selectedListName)
         end
     end)
 
@@ -684,7 +724,7 @@ function MarketSync.CreateAHScannerPanel(parent)
 
     local startX = 2
     for _, col in ipairs(colHeaders) do
-        local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(colContainer, col.width, 20, col.name, col.sortKey)
+        local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(colContainer, col.width, 20, col.name, col.sortKey, true)
         if not hdr then
             hdr = CreateFrame("Button", nil, colContainer, "BackdropTemplate")
             hdr:SetSize(col.width, 20)
@@ -730,6 +770,8 @@ function MarketSync.CreateAHScannerPanel(parent)
                     row:SetPoint("RIGHT", -2, 0)
                     row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
                     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    row.nativeHover = MarketSync.CreateForeverAuctionRowHighlight
+                        and MarketSync.CreateForeverAuctionRowHighlight(row)
 
                     row.icon = row:CreateTexture(nil, "ARTWORK")
                     row.icon:SetSize(20, 20)
@@ -804,7 +846,9 @@ function MarketSync.CreateAHScannerPanel(parent)
                 row.time:SetText(date("%H:%M:%S", data.time))
 
                 row:SetScript("OnEnter", function(self)
-                    self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
+                    if not self.nativeHover then
+                        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
+                    end
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                     if data.itemKey and data.itemKey.itemID then
                         local link = select(2, SafeGetItemInfo(data.itemKey.itemID))
@@ -838,10 +882,8 @@ function MarketSync.CreateAHScannerPanel(parent)
                 end)
 
                 row:SetScript("OnLeave", function(self)
-                    if i % 2 == 0 then
-                        self:SetBackdropColor(MarketSync.GetThemeColor("rowEven"))
-                    else
-                        self:SetBackdropColor(MarketSync.GetThemeColor("rowOdd"))
+                    if not self.nativeHover then
+                        self:SetBackdropColor(MarketSync.GetThemeColor(i % 2 == 0 and "rowEven" or "rowOdd"))
                     end
                     GameTooltip:Hide()
                 end)

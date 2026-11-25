@@ -110,6 +110,12 @@ function testForeverSurnameLoopbackAndSwarmQueueLifecycle() {
     assert(MarketSync.IsLocalSyncIdentity("Blauto-Theblind"), "Hyphenated surname must be recognized as local player")
     assert(MarketSync.IsLocalSyncIdentity("Blauto Theblind"), "Space-separated surname must be recognized as local player")
     assert(MarketSync.IsLocalSyncIdentity("Blauto Theblind-ClassicBetaPvP2"), "Wire sender with surname+realm must be recognized as local player")
+    local normalized, originalRealm = GetNormalizedRealmName, GetRealmName
+    GetNormalizedRealmName = function() return "" end
+    GetRealmName = GetNormalizedRealmName
+    assert(MarketSync.GetLocalPlayerDisplayName() == "Blauto Theblind")
+    assert(MarketSync.GetLocalSyncIdentity() == "Blauto Theblind", "A hidden realm must not duplicate the surname")
+    GetNormalizedRealmName, GetRealmName = normalized, originalRealm
 
     -- Open the Network Monitor window so RenderSwarmUI runs when timers tick
     MarketSync.ToggleNetworkMonitor()
@@ -187,7 +193,7 @@ function testBagObservationAndRightClickResolution() {
   sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'CraftLedger.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'PurchaseList.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'ItemLedger.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'InventoryTracking.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, 'InventoryTracking.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'UI_ItemLedger.lua'));
 
   sim.run(`
@@ -246,7 +252,9 @@ function testTaintedSecretStringImmunity() {
   sim.loadLuaFile(path.join(ADDON_DIR, 'ObservationAPI.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'CraftLedger.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'PurchaseList.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'InventoryTracking.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'ItemLedger.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, 'InventoryTracking.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'TransactionTracking.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Sync.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Chat.lua'));
 

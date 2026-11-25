@@ -3,6 +3,10 @@ MarketSync = MarketSync or {}
 MarketSync.LegacyPosting = MarketSync.LegacyPosting or {}
 local Posting = MarketSync.LegacyPosting
 
+local function UsesModernAuctionHouse()
+    return C_AuctionHouse and type(C_AuctionHouse.SendSearchQuery) == "function"
+end
+
 function Posting.SuggestBuyout(marketPrice)
     local price = tonumber(marketPrice)
     if not price or price < 2 then return nil end
@@ -15,7 +19,7 @@ local function HasLegacySellFrame()
         and _G.AuctionFrameAuctions ~= nil
         and _G.StartPrice ~= nil
         and _G.BuyoutPrice ~= nil
-        and not (C_AuctionHouse and type(C_AuctionHouse.SendSearchQuery) == "function")
+        and not UsesModernAuctionHouse()
 end
 
 local function ApplySuggestion()
@@ -52,24 +56,54 @@ local function ApplySuggestion()
     end
 end
 
+local function RefreshButtonVisibility()
+    local btn = Posting.button
+    if not btn or not HasLegacySellFrame() then return end
+    local hasItem = select(10, GetAuctionSellItemInfo()) ~= nil
+    if hasItem then
+        if btn.Show then btn:Show() end
+    else
+        if btn.Hide then btn:Hide() end
+    end
+end
+
 local function Attach()
-    if Posting.button or not HasLegacySellFrame() then return end
+    if Posting.button or not HasLegacySellFrame() then
+        RefreshButtonVisibility()
+        return
+    end
     local button = CreateFrame("Button", "MarketSyncLegacyUndercutButton", _G.AuctionFrameAuctions, "UIPanelButtonTemplate")
-    button:SetSize(120, 22)
-    button:SetPoint("TOPRIGHT", _G.AuctionFrameAuctions, "TOPRIGHT", -20, -35)
-    button:SetText("Undercut 1c/unit")
+    button:SetSize(96, 20)
+    button:SetPoint("TOPLEFT", _G.AuctionFrameAuctions, "TOPLEFT", 110, -73)
+    if button.SetNormalFontObject then
+        button:SetNormalFontObject("GameFontNormalSmall")
+        button:SetHighlightFontObject("GameFontHighlightSmall")
+    end
+    button:SetText("Match AH -1c")
     button:SetScript("OnClick", ApplySuggestion)
     button:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Set the buyout 1 copper below MarketSync's last observed price. Review it before posting.")
+        GameTooltip:SetText("Match Lowest Price (-1c)", 1, 0.82, 0)
+        GameTooltip:AddLine("Fills Buyout at 1 copper below MarketSync's last observed unit price. Review before posting.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     Posting.button = button
+    -- The legacy sell slot already listens for item changes.
+    local sellItemButton = _G.AuctionsItemButton
+    if sellItemButton and sellItemButton.HookScript then
+        sellItemButton:HookScript("OnEvent", function(_, event)
+            if event == "NEW_AUCTION_UPDATE" then RefreshButtonVisibility() end
+        end)
+    end
+    if _G.AuctionFrameAuctions.HookScript then
+        _G.AuctionFrameAuctions:HookScript("OnShow", RefreshButtonVisibility)
+    end
+    RefreshButtonVisibility()
 end
 
-if type(CreateFrame) == "function" then
+if type(CreateFrame) == "function" and not UsesModernAuctionHouse() then
     local watcher = CreateFrame("Frame")
     watcher:RegisterEvent("AUCTION_HOUSE_SHOW")
     watcher:SetScript("OnEvent", Attach)

@@ -238,7 +238,7 @@ function MarketSync.CompleteNeutralFullScan(exactKeys)
                 local meta = realmDB.NeutralMeta and realmDB.NeutralMeta[dbKey]
                 if meta then
                     meta.state = "Complete"
-                    meta.source = UnitName("player") or "Personal"
+                    meta.source = MarketSync.GetPlayerScanName() or "Personal"
                     meta.time = now
                 end
             end
@@ -255,6 +255,7 @@ function MarketSync.CompleteNeutralFullScan(exactKeys)
 
     realmDB.NeutralVerifiedDay = verifiedDay
     realmDB.NeutralScanTime = now
+    realmDB.NeutralScanCharacter = MarketSync.GetPlayerScanName()
     realmDB.NeutralSwarmTSF = now
     realmDB.CachedScanStats = nil
     if realmDB.NeutralSync then

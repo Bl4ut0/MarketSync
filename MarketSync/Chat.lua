@@ -573,6 +573,7 @@ local function BuildApplyTransaction(session, operations)
             { field = "NeutralSwarmTSF", original = realmDB.NeutralSwarmTSF },
             { field = "NeutralVerifiedDay", original = realmDB.NeutralVerifiedDay },
             { field = "NeutralScanTime", original = realmDB.NeutralScanTime },
+            { field = "NeutralScanCharacter", original = realmDB.NeutralScanCharacter },
             { field = "CachedScanStats", original = realmDB.CachedScanStats },
         },
     }
@@ -795,6 +796,7 @@ local function CommitStagedSession(session, finalSequence, expectedRecords)
             realmDB.NeutralVerifiedDay = math.max(tonumber(realmDB.NeutralVerifiedDay) or 0, revision)
             realmDB.NeutralSwarmTSF = math.max(oldScanTime, scanTime)
             realmDB.NeutralScanTime = realmDB.NeutralSwarmTSF
+            if scanTime >= oldScanTime then realmDB.NeutralScanCharacter = session.senderName end
         else
             realmDB.LatestBucket = math.max(tonumber(realmDB.LatestBucket) or 0, revision)
             realmDB.SwarmTSF = math.max(oldScanTime, scanTime)
@@ -1709,6 +1711,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 local realmDB = MarketSync.GetRealmDB()
                 realmDB.NeutralSwarmTSF = (senderScanTime > 0) and senderScanTime or time()
                 realmDB.NeutralScanTime = realmDB.NeutralSwarmTSF
+                realmDB.NeutralScanCharacter = senderName
             else
                 if MarketSync.LogNetworkEvent then
                     MarketSync.LogNetworkEvent(string.format("|cffff8800[Neutral Rx Partial]|r Received %d / %d neutral items.", rxCount, itemsSent))

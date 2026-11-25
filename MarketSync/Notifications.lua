@@ -581,29 +581,45 @@ function MarketSync.ImportNotificationRequestsFromFavorites(listNames, options)
 
     for _, entry in ipairs(itemsToImport) do
         local itemID = entry.itemID
-        local name, link = MarketSync.GetItemInfo(itemID)
-        local displayName = name or ("Item " .. tostring(itemID))
-        
-        local marketPrice = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(itemID)
+        local meta = MarketSyncDB.FavoriteMeta and MarketSyncDB.FavoriteMeta[entry.listName]
+            and MarketSyncDB.FavoriteMeta[entry.listName].items
+            and MarketSyncDB.FavoriteMeta[entry.listName].items[itemID]
+        local qty = MarketSyncDB.FavoriteQuantities and MarketSyncDB.FavoriteQuantities[entry.listName]
+            and MarketSyncDB.FavoriteQuantities[entry.listName][itemID]
+        local suffix = (meta and tonumber(meta.suffix) and tonumber(meta.suffix) > 0) and math.floor(tonumber(meta.suffix)) or 0
+        local matchType = (suffix > 0) and "dbKey" or "itemID"
+        local matchValue = (suffix > 0) and string.format("p:%d:%d", itemID, suffix) or itemID
+        local variantMode = (suffix > 0) and "exact_key" or "any_suffix"
+
+        local name = MarketSync.GetItemInfo and MarketSync.GetItemInfo(itemID)
+        if (not name or name == "") and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
+            name = MarketSyncDB.ItemInfoCache[itemID].n
+        end
+        local displayName = name or (meta and meta.name) or ("Item " .. tostring(itemID))
+
+        local marketPrice = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(suffix > 0 and matchValue or itemID)
         local resolvedThreshold = fallbackCopper
 
         if thresholdPct and marketPrice and marketPrice > 0 then
             resolvedThreshold = math.floor(marketPrice * (thresholdPct / 100))
+        elseif (not resolvedThreshold or resolvedThreshold <= 0) and meta and tonumber(meta.maxPrice) and tonumber(meta.maxPrice) > 0 then
+            resolvedThreshold = math.floor(tonumber(meta.maxPrice))
         elseif (not resolvedThreshold or resolvedThreshold <= 0) and marketPrice and marketPrice > 0 then
             resolvedThreshold = math.floor(marketPrice * 0.9)
         end
 
-        local reqID = BuildRequestID("itemID", itemID, scope)
+        local reqID = BuildRequestID(matchType, matchValue, scope)
         local req = MarketSync.UpsertNotificationRequest({
             id = reqID,
-            matchType = "itemID",
-            matchValue = itemID,
+            matchType = matchType,
+            matchValue = matchValue,
             displayName = displayName,
             thresholdCopper = resolvedThreshold,
             scope = scope,
-            variantMode = "any_suffix",
+            variantMode = variantMode,
             cooldownSec = cooldown,
             enabled = (options.enabledDefault ~= nil) and options.enabledDefault or (resolvedThreshold > 0),
+            quantityHint = qty,
             importSource = entry.listName,
         })
         if req then
@@ -674,17 +690,20 @@ function MarketSync.GetNotificationImportCandidates(listName, listSource, discou
         specs[1] = { name = listName, source = listSource or "favorites" }
     end
 
-    local function AddCandidate(itemID, displayName, sourceName, sourceType, maxPrice, quantityHint)
+    local function AddCandidate(itemID, displayName, sourceName, sourceType, maxPrice, quantityHint, suffix)
         itemID = tonumber(itemID)
-        local matchType = itemID and "itemID" or "name"
-        local matchValue = itemID or tostring(displayName or ""):lower()
+        local suffixNum = (tonumber(suffix) and tonumber(suffix) > 0) and math.floor(tonumber(suffix)) or 0
+        local matchType = (itemID and suffixNum > 0) and "dbKey" or (itemID and "itemID" or "name")
+        local matchValue = (itemID and suffixNum > 0) and string.format("p:%d:%d", itemID, suffixNum)
+            or (itemID or tostring(displayName or ""):lower())
+        local variantMode = (matchType == "dbKey") and "exact_key" or "any_suffix"
         if matchValue == "" then return end
         local identity = matchType .. ":" .. tostring(matchValue)
         if seen[identity] then return end
         seen[identity] = true
 
         local marketPrice = MarketSync.GetAuctionPrice
-            and MarketSync.GetAuctionPrice(itemID or displayName) or nil
+            and MarketSync.GetAuctionPrice((matchType == "dbKey" and matchValue) or itemID or displayName) or nil
         marketPrice = tonumber(marketPrice)
         if not marketPrice or marketPrice <= 0 then marketPrice = nil end
         local threshold = tonumber(maxPrice)
@@ -705,6 +724,7 @@ function MarketSync.GetNotificationImportCandidates(listName, listSource, discou
             itemID = itemID,
             matchType = matchType,
             matchValue = matchValue,
+            variantMode = variantMode,
             displayName = tostring(displayName or (itemID and ("Item " .. itemID)) or matchValue),
             marketPrice = marketPrice,
             thresholdCopper = resolvedThreshold,
@@ -722,9 +742,19 @@ function MarketSync.GetNotificationImportCandidates(listName, listSource, discou
     for _, spec in ipairs(specs) do
         if spec.source == "favorites" then
             local list = MarketSyncDB and MarketSyncDB.Favorites and MarketSyncDB.Favorites[spec.name]
+            local metaItems = MarketSyncDB and MarketSyncDB.FavoriteMeta and MarketSyncDB.FavoriteMeta[spec.name]
+                and MarketSyncDB.FavoriteMeta[spec.name].items
+            local qtyMap = MarketSyncDB and MarketSyncDB.FavoriteQuantities and MarketSyncDB.FavoriteQuantities[spec.name]
             for _, itemID in ipairs(list or {}) do
+                local meta = metaItems and metaItems[itemID]
                 local name = MarketSync.GetItemInfo and MarketSync.GetItemInfo(itemID)
-                AddCandidate(itemID, name, spec.name, "favorites")
+                if (not name or name == "") and MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID] then
+                    name = MarketSyncDB.ItemInfoCache[itemID].n
+                end
+                if (not name or name == "") and meta and meta.name then
+                    name = meta.name
+                end
+                AddCandidate(itemID, name, spec.name, "favorites", meta and meta.maxPrice, qtyMap and qtyMap[itemID], meta and meta.suffix)
             end
         elseif spec.source == "auctionator" and Auctionator and Auctionator.API and Auctionator.API.v1 then
             local api = Auctionator.API.v1
@@ -827,4 +857,138 @@ function MarketSync.ImportNotificationRequestsFromAuctionator(listNames, options
         return imported, string.format("Skipped %d invalid entry(s).", skipped)
     end
     return imported
+end
+
+function MarketSync.BuildNotificationCandidatesFromDecodedList(decoded, options)
+    options = options or {}
+    if type(decoded) ~= "table" or type(decoded.i) ~= "table" then
+        return {}
+    end
+
+    local defaultScope = options.scope
+    if not defaultScope then
+        if decoded.fa == "Neutral" then
+            defaultScope = "neutral"
+        elseif decoded.fa == "Alliance" or decoded.fa == "Horde" or decoded.fa == "CrossFaction" or decoded.fa == "Commodities" then
+            defaultScope = "main"
+        else
+            defaultScope = "all"
+        end
+    end
+    defaultScope = NormalizeScope(defaultScope)
+
+    local discountPct = math.max(0, math.min(100, tonumber(options.discountPct) or 10))
+    local sourceListName = options.listName or decoded.n or "Imported List"
+    local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    local candidates, seen = {}, {}
+
+    for _, item in ipairs(decoded.i) do
+        local id = tonumber(item.id)
+        if id and id > 0 then
+            local suffix = (tonumber(item.s) and tonumber(item.s) > 0) and math.floor(tonumber(item.s)) or 0
+            local matchType = (suffix > 0) and "dbKey" or "itemID"
+            local matchValue = (suffix > 0) and string.format("p:%d:%d", id, suffix) or id
+            local variantMode = (suffix > 0) and "exact_key" or "any_suffix"
+            local identity = matchType .. ":" .. tostring(matchValue)
+            if not seen[identity] then
+                seen[identity] = true
+
+                local resolvedName = ResolveItemName(id)
+                local fallbackName = (type(item.nm) == "string" and item.nm ~= "") and item.nm or nil
+                local displayName = resolvedName or fallbackName or ("Item #" .. tostring(id))
+
+                local marketPrice = MarketSync.GetAuctionPrice
+                    and MarketSync.GetAuctionPrice((suffix > 0) and matchValue or id) or nil
+                marketPrice = tonumber(marketPrice)
+                if not marketPrice or marketPrice <= 0 then marketPrice = nil end
+
+                local explicitMax = tonumber(item.m)
+                local thresholdCopper
+                if explicitMax and explicitMax > 0 then
+                    thresholdCopper = math.floor(explicitMax)
+                elseif marketPrice and marketPrice > 0 then
+                    thresholdCopper = math.floor(marketPrice * (100 - discountPct) / 100)
+                else
+                    thresholdCopper = 0
+                end
+
+                local existing
+                for _, request in pairs((realmDB and realmDB.NotificationRequests) or {}) do
+                    if request.matchType == matchType and tostring(request.matchValue) == tostring(matchValue) then
+                        existing = request
+                        break
+                    end
+                end
+
+                local finalThreshold = existing and tonumber(existing.thresholdCopper) or thresholdCopper
+                local enabled
+                if item.a ~= nil then
+                    enabled = (item.a == 1) and (finalThreshold > 0)
+                else
+                    enabled = existing and (existing.enabled ~= false) or (finalThreshold > 0)
+                end
+
+                candidates[#candidates + 1] = {
+                    itemID = id,
+                    matchType = matchType,
+                    matchValue = matchValue,
+                    variantMode = variantMode,
+                    displayName = tostring(displayName),
+                    marketPrice = marketPrice,
+                    thresholdCopper = finalThreshold,
+                    scope = existing and existing.scope or defaultScope,
+                    urgent = existing and existing.urgent == true or false,
+                    enabled = enabled,
+                    selected = (item.a ~= 0) and (finalThreshold > 0),
+                    requestID = existing and existing.id or nil,
+                    listName = sourceListName,
+                    listSource = "ms1",
+                    quantityHint = tonumber(item.q) or 1,
+                    alertFlag = item.a,
+                }
+            end
+        end
+    end
+
+    return candidates
+end
+
+function MarketSync.ImportNotificationRequestsFromDecodedList(decoded, options)
+    options = options or {}
+    local candidates = MarketSync.BuildNotificationCandidatesFromDecodedList(decoded, options)
+    local created = 0
+    local skipped = 0
+    local cooldown = tonumber(options.cooldownSec) or 300
+
+    for _, c in ipairs(candidates) do
+        local shouldImport = (c.alertFlag == 1)
+            or (c.alertFlag == nil and not options.requireAlertFlag and c.thresholdCopper > 0)
+            or (options.includeDisabledAlerts == true and c.thresholdCopper > 0)
+        if shouldImport and c.thresholdCopper > 0 then
+            local reqID = c.requestID or BuildRequestID(c.matchType, c.matchValue, c.scope)
+            local req = MarketSync.UpsertNotificationRequest({
+                id = reqID,
+                matchType = c.matchType,
+                matchValue = c.matchValue,
+                displayName = c.displayName,
+                thresholdCopper = c.thresholdCopper,
+                scope = c.scope,
+                variantMode = c.variantMode,
+                cooldownSec = cooldown,
+                urgent = c.urgent,
+                enabled = (c.alertFlag ~= 0),
+                quantityHint = c.quantityHint,
+                importSource = c.listName,
+            })
+            if req then
+                created = created + 1
+            else
+                skipped = skipped + 1
+            end
+        else
+            skipped = skipped + 1
+        end
+    end
+
+    return created, skipped
 end

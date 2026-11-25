@@ -229,3 +229,40 @@ function Provider.Initialize()
         active.Initialize()
     end
 end
+
+-- MarketSyncData Hook: supplement missing scan data from MarketSyncData addon
+function MarketSync.GetMarketSyncDataPrice(itemId)
+    local dataAddon = _G.MarketSyncData
+    if type(dataAddon) ~= "table" then return nil end
+    if type(dataAddon.GetPrice) == "function" then
+        return dataAddon.GetPrice(itemId)
+    end
+    local prices = dataAddon.prices or dataAddon.Prices
+    if type(prices) == "table" then
+        return prices[itemId] or prices[tostring(itemId)]
+    end
+    return nil
+end
+
+function MarketSync.FormatDataSourceLabel(source)
+    if source == "personal" then return "Personal Scan" end
+    if source == "guild" then return "Guild Sync" end
+    if source == "msdata" then return "MarketSyncData" end
+    return "Unknown"
+end
+
+function MarketSync.GetPriceWithSource(itemId)
+    local personal = MarketSync.GetPersonalPrice and MarketSync.GetPersonalPrice(itemId)
+    if personal then
+        return personal, "personal"
+    end
+    local guild = MarketSync.GetGuildPrice and MarketSync.GetGuildPrice(itemId)
+    if guild then
+        return guild, "guild"
+    end
+    local msdata = MarketSync.GetMarketSyncDataPrice and MarketSync.GetMarketSyncDataPrice(itemId)
+    if msdata then
+        return msdata, "msdata"
+    end
+    return nil, nil
+end

@@ -1,0 +1,16 @@
+## Interface: 16001, 120107, 120105, 120100, 120007, 120005, 120001, 120000, 50504, 50503, 38000, 20506, 20505, 11509, 11508
+## Title: MarketSync Ledger
+## Notes: Optional item movement, mail, crafting, and purchase ledger for MarketSync.
+## Version: 1.0.1
+## Dependencies: MarketSync
+## SavedVariables: MarketSyncLedgerDB
+## AllowLoadGameType: camelot, classic, tbc
+
+LedgerCore.lua
+ItemLedger.lua
+CraftLedger.lua
+PurchaseList.lua
+UI_ItemLedger.lua
+UI_CraftManager.lua
+UI_PurchaseList.lua
+TransactionTracking.lua

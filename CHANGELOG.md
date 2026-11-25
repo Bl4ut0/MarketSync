@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Honor secret-string rejection in inventory, crafting and purchase chat handlers. A string type fallback can no longer override the safety check, preventing restricted system/loot/modifier messages from being compared or parsed. The receipt parser also rejects restricted strings directly; readable trade and purchase confirmations retain their normal routing.
+- Retain refused BEGIN/DATA/END frames and queued controls until the local send API accepts them. Retries preserve payload and sequence, use bounded jittered backoff, and abort without claiming completion after six refusals, a 30-second frame retry deadline, or 120 seconds without accepted data progress.
+- Advance transmitted record counts only after acceptance. Refused immediate directed PULL requests enter the bounded control queue instead of being silently lost.
+- Limit controls to 64 queued entries, expire old controls and obsolete session messages, and retain deduplication and reserved control slots.
+
+### Changed
+- Extend Legacy styling through features added after the original releases: scanner backgrounds and checkboxes, live Search rows, category filters, chart backgrounds and grids, pagers and scrollbars, crafting headers, settings cards, breakout tabs and alert import. Use Classic knob/arrow artwork for Legacy while retaining navigation and purchase behavior.
+- Restore the original Classic Auction House artwork from the 0.4-0.7 beta releases for the Legacy theme, replacing grey/slate styling. Main, crafting, ledger and wide dialogs use the archived portrait surround, borders and footer; smaller windows and the breakout panel use matching warm textured frames. Preserve the current features and Forever theme, keep artwork behind controls, and provide a complete fallback when Classic textures are unavailable.
+- Normalize traffic measurements by actual elapsed time and distinguish MarketSync's accepted/refused API calls from other addons' unknown-result attempts. Report per-transport attempts and exclude all MarketSync data prefixes from external load.
+- Under sustained external byte pressure, allow at most one server-checked data probe per 15 seconds below the API-flood threshold. Persistent refusal or overload terminates cleanly instead of indefinitely retaining a transfer.
+- Network and task monitors now show wait reasons, retries, expiry/drop counts and API results. The gauge is labelled as a reference, not a universal WoW bandwidth limit; Battle.net traffic is explicitly excluded.
+
 ## [0.9.7-rc6] - 2026-11-11
 
 ### Changed & Added

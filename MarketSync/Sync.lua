@@ -46,6 +46,9 @@ local PEER_BASELINE_TTL_SECONDS = 360
 local TX_DATA_BUDGET_BYTES_PER_SECOND = 640
 local TX_OTHER_API_PAUSE_RATE = 36
 local TX_HOLD_AFTER_SECONDS = 10
+local CONTROL_QUEUE_LIMIT, CONTROL_TTL_SECONDS = 64, 30
+local TX_RETRY_LIMIT, TX_RETRY_LIFETIME = 6, 30
+local TX_STALL_TIMEOUT, TX_FAIR_PROBE_INTERVAL = 120, 15
 
 MarketSync.SYNC_PROTOCOL_REVISION = SYNC_PROTOCOL_REVISION
 MarketSync.SyncVersionBlocked = MarketSync.SyncVersionBlocked or false
@@ -129,6 +132,8 @@ MarketSync.AddonTxBytes = {}
 MarketSync.AddonTxAPI = {}
 MarketSync.TxBytes = 0
 MarketSync.TxAPICalls = 0
+MarketSync.AddonTxTransports = {}
+MarketSync.SyncQueueStats = { expired = 0, dropped = 0, retries = 0, aborted = 0 }
 
 -- Global hook to intercept all addons' transmission
 hooksecurefunc(C_ChatInfo, "SendAddonMessage", function(prefix, text, chatType, target)
@@ -140,13 +145,19 @@ hooksecurefunc(C_ChatInfo, "SendAddonMessage", function(prefix, text, chatType, 
     if prefix then
         MarketSync.AddonTxBytes[prefix] = (MarketSync.AddonTxBytes[prefix] or 0) + bytes
         MarketSync.AddonTxAPI[prefix] = (MarketSync.AddonTxAPI[prefix] or 0) + 1
+        local transports = MarketSync.AddonTxTransports[prefix] or {}
+        MarketSync.AddonTxTransports[prefix] = transports
+        local kind = chatType or "UNKNOWN"
+        local row = transports[kind] or { bytes = 0, api = 0 }
+        transports[kind] = row
+        row.bytes = row.bytes + bytes; row.api = row.api + 1
     end
 end)
 
 local function SendAddonMessage(prefix, text, chatType, target)
     -- We removed MarketSync.TxBytes counting from here because the hooksecurefunc
     -- above will catch the _SendAddonMessage call below automatically.
-    MarketSync.SendAddonMessage(prefix, text, chatType, target)
+    return MarketSync.SendAddonMessageChecked(prefix, text, chatType, target)
 end
 
 local function SetTransientBlockedState(reason)
@@ -220,6 +231,9 @@ function MarketSync.StripKnownRealmSuffix(identity)
 end
 
 function MarketSync.GetLocalPlayerDisplayName()
+    if MarketSync.GetClientFlavor and MarketSync.GetClientFlavor() == "forever" and MarketSync.GetPlayerScanName then
+        return MarketSync.GetPlayerScanName() or "Unknown"
+    end
     local unitName, unitSecond = nil, nil
     if type(UnitName) == "function" then
         unitName, unitSecond = UnitName("player")
@@ -310,6 +324,11 @@ end
 
 function MarketSync.GetLocalSyncIdentity()
     local displayName = MarketSync.GetLocalPlayerDisplayName()
+    if MarketSync.GetClientFlavor and MarketSync.GetClientFlavor() == "forever" then
+        local realm = GetLocalRealmName()
+        if realm and realm ~= "" then return displayName .. "-" .. realm end
+        return displayName
+    end
     if type(UnitFullName) == "function" then
         local name, realm = UnitFullName("player")
         if name and name ~= "" then
@@ -396,7 +415,7 @@ function MarketSync.CanParticipateInData(scope)
     return MarketSyncDB.PassiveSync ~= false
 end
 
-local function QueueControlMessage(payload, dedupeKey, priority)
+local function QueueControlMessage(payload, dedupeKey, priority, prefix)
     if not payload or payload == "" then return end
     if #payload > MAX_WIRE_BYTES then
         if MarketSync.LogNetworkEvent then
@@ -409,17 +428,38 @@ local function QueueControlMessage(payload, dedupeKey, priority)
     if dedupeKey then
         for index = #controlQueue, 1, -1 do
             if controlQueue[index].key == dedupeKey then
-                controlQueue[index].payload = payload
-                return
+                local entry = controlQueue[index]
+                if entry.payload ~= payload then
+                    entry.attempts, entry.retryAt, entry.firstAttemptAt = nil, nil, nil
+                    entry.createdAt = GetTime()
+                end
+                entry.payload = payload
+                entry.expiresAt = GetTime() + (entry.pullScope and PULL_REQUEST_TIMEOUT_SECONDS - 2 or CONTROL_TTL_SECONDS)
+                return true, entry
             end
         end
     end
-    local entry = { payload = payload, key = dedupeKey }
+    if #controlQueue >= CONTROL_QUEUE_LIMIT then
+        -- Reserve room for session controls by evicting the oldest ordinary
+        -- advertisement first. Never let urgent traffic create an unbounded queue.
+        local evict
+        if priority then for index, queued in ipairs(controlQueue) do if not queued.priority then evict = index; break end end end
+        if evict then table.remove(controlQueue, evict)
+        else MarketSync.SyncQueueStats.dropped = MarketSync.SyncQueueStats.dropped + 1; return false end
+        MarketSync.SyncQueueStats.dropped = MarketSync.SyncQueueStats.dropped + 1
+    end
+    local entry = { payload = payload, key = dedupeKey, priority = priority, prefix = prefix or PREFIX,
+        createdAt = GetTime(), expiresAt = GetTime() + CONTROL_TTL_SECONDS }
+    if payload:match("^PULL;") or payload:match("^NPULL;") then
+        entry.pullScope = payload:match("^NPULL;") and "N" or "M"
+        entry.expiresAt = GetTime() + PULL_REQUEST_TIMEOUT_SECONDS - 2
+    end
     if priority then
         table.insert(controlQueue, 1, entry)
     else
         table.insert(controlQueue, entry)
     end
+    return true, entry
 end
 
 MarketSync.QueueSyncControl = QueueControlMessage
@@ -502,8 +542,10 @@ end
 function MarketSync.GetSyncTaskStatus()
     local receiving = guildLane.phase == "receiving"
     local queuedControlBytes = 0
+    local oldestControlAge = 0
     for _, entry in ipairs(controlQueue) do
         queuedControlBytes = queuedControlBytes + #(entry.payload or "")
+        oldestControlAge = math.max(oldestControlAge, GetTime() - entry.createdAt)
     end
     return {
         busy = MarketSync.IsSyncBusy(),
@@ -517,6 +559,14 @@ function MarketSync.GetSyncTaskStatus()
         queuedControlBytes = queuedControlBytes,
         frozenEntryCount = outboundTransfer and outboundTransfer.frozenEntryCount or 0,
         pendingFrameBytes = outboundTransfer and #(outboundTransfer.pendingPayload or "") or 0,
+        waitReason = outboundTransfer and outboundTransfer.waitReason or (#controlQueue > 0 and guildLane.lastWaitReason) or "none",
+        frameAttempts = outboundTransfer and outboundTransfer.attempts or 0,
+        retryIn = outboundTransfer and math.max(0, (outboundTransfer.retryAt or 0) - GetTime()) or 0,
+        stalledFor = outboundTransfer and math.max(0, GetTime() - outboundTransfer.lastProgressAt) or 0,
+        oldestControlAge = oldestControlAge,
+        queueStats = MarketSync.SyncQueueStats,
+        sendStats = MarketSync.SyncSendStats,
+        lastFailure = MarketSync.LastSyncFailure,
         receivedItems = tonumber(MarketSync.RxCount) or 0,
         sentItems = tonumber(MarketSync.TxCount) or 0,
     }
@@ -777,12 +827,52 @@ end
 
 local function AbortOutboundTransfer(transfer, reason)
     local abortPayload = string.format("ABORT;%s;%s", transfer.sessionId, transfer.scope)
-    SendAddonMessage(DATA_PREFIX, abortPayload, "GUILD")
+    QueueControlMessage(abortPayload, "ABORT:" .. transfer.sessionId, true, DATA_PREFIX)
+    MarketSync.SyncQueueStats.aborted = MarketSync.SyncQueueStats.aborted + 1
+    MarketSync.LastSyncFailure = { at = GetTxClock(), reason = tostring(reason) }
     if MarketSync.LogNetworkEvent then
         MarketSync.LogNetworkEvent("|cffff0000[Sync Error]|r Broadcast aborted: " .. tostring(reason))
     end
     outboundTransfer = nil
     ResetGuildLane("sender error")
+end
+
+local function RetrySend(entry, now)
+    entry.attempts = (entry.attempts or 0) + 1
+    entry.firstAttemptAt = entry.firstAttemptAt or now
+    if entry.attempts >= TX_RETRY_LIMIT or now - entry.firstAttemptAt >= TX_RETRY_LIFETIME then return false end
+    entry.retryAt = now + math.min(8, 0.7 * 2 ^ (entry.attempts - 1)) + math.random() * 0.35
+    MarketSync.SyncQueueStats.retries = MarketSync.SyncQueueStats.retries + 1
+    return true
+end
+
+local function SendQueuedControl(now)
+    for index = #controlQueue, 1, -1 do
+        local entry = controlQueue[index]
+        local session = entry.payload:match("^HOLD;([^;]+)")
+        local stalePull = entry.pullScope and (guildLane.scope ~= entry.pullScope or guildLane.phase == "idle" or guildLane.phase == "receiving" or guildLane.phase == "sending")
+        if now >= entry.expiresAt or stalePull or (session and (not outboundTransfer or session ~= outboundTransfer.sessionId)) then
+            table.remove(controlQueue, index)
+            MarketSync.SyncQueueStats.expired = MarketSync.SyncQueueStats.expired + 1
+        end
+    end
+    for index, entry in ipairs(controlQueue) do
+        if now >= (entry.retryAt or 0) then
+            if SendAddonMessage(entry.prefix, entry.payload, "GUILD") then
+                local session = entry.payload:match("^HOLD;([^;]+)")
+                if session and outboundTransfer and outboundTransfer.sessionId == session then outboundTransfer.lastLeaseAt = now end
+                table.remove(controlQueue, index)
+                guildLane.lastWaitReason = nil
+            elseif not RetrySend(entry, now) then
+                table.remove(controlQueue, index)
+                MarketSync.SyncQueueStats.dropped = MarketSync.SyncQueueStats.dropped + 1
+                if MarketSync.LogNetworkEvent then MarketSync.LogNetworkEvent("|cffff8800[Send Refused]|r Control frame exhausted its bounded retries.") end
+            else
+                guildLane.lastWaitReason = "Control send refused; retry queued"
+            end
+            return
+        end
+    end
 end
 
 local function CompleteOutboundTransfer(transfer)
@@ -802,31 +892,46 @@ end
 -- advancing the producer. A sparse HOLD keeps an already-started receiver from
 -- discarding its staging buffer during sustained external traffic pressure.
 C_Timer.NewTicker(TX_TICK_SECONDS, function()
+    local now = GetTxClock()
     txWheelPosition = (txWheelPosition % 10) + 1
     local isControlSlot = txWheelPosition == 10
+    -- Never revive a stream after its receiver is likely to have timed out.
+    -- Even a HOLD needs API acceptance to extend the sender's lease.
+    if outboundTransfer then
+        local t = outboundTransfer
+        if t.began and now - (t.lastLeaseAt or t.lastProgressAt) >= GUILD_LANE_TIMEOUT_SECONDS - 5 then
+            AbortOutboundTransfer(t, "no accepted data or HOLD before receiver lease expired"); return
+        elseif not t.began and now - t.lastProgressAt >= PULL_REQUEST_TIMEOUT_SECONDS - 5 then
+            AbortOutboundTransfer(t, "BEGIN could not be accepted within the request window"); return
+        end
+    end
 
     -- With no data dump active, control traffic should not wait for its reserved slot.
     if not outboundTransfer and guildLane.phase ~= "receiving" and #controlQueue > 0 then
-        local entry = table.remove(controlQueue, 1)
-        SendAddonMessage(PREFIX, entry.payload, "GUILD")
+        SendQueuedControl(now)
         return
     end
 
     if isControlSlot then
         if #controlQueue > 0 then
-            local entry = table.remove(controlQueue, 1)
-            SendAddonMessage(PREFIX, entry.payload, "GUILD")
+            SendQueuedControl(now)
         end
         return
     end
 
     local transfer = outboundTransfer
     if not transfer then return end
-    local now = GetTxClock()
+    if now - transfer.lastProgressAt >= TX_STALL_TIMEOUT then
+        AbortOutboundTransfer(transfer, "no accepted data progress for " .. TX_STALL_TIMEOUT .. " seconds")
+        return
+    end
+    if transfer.attempts and (now - (transfer.firstAttemptAt or now)) >= TX_RETRY_LIFETIME then
+        AbortOutboundTransfer(transfer, "frame retry deadline exceeded"); return
+    end
     local refillRate = RefillTxBudget(now)
 
     if not transfer.pendingPayload then
-        local ok, payload, isFinal = coroutine.resume(transfer.producer)
+        local ok, payload, isFinal, records = coroutine.resume(transfer.producer)
         if not ok then
             AbortOutboundTransfer(transfer, payload)
             return
@@ -842,6 +947,7 @@ C_Timer.NewTicker(TX_TICK_SECONDS, function()
         end
         transfer.pendingPayload = payload
         transfer.pendingFinal = isFinal and true or false
+        transfer.pendingRecords = records or 0
     end
 
     local payloadBytes = #transfer.pendingPayload
@@ -849,7 +955,16 @@ C_Timer.NewTicker(TX_TICK_SECONDS, function()
     -- promptly; otherwise a source paused before BEGIN has no session id it can
     -- heartbeat and requesters may reopen the lane. All DATA/END frames budget.
     local isBeginFrame = transfer.pendingPayload:sub(1, 6) == "BEGIN;"
-    if not isBeginFrame and (refillRate <= 0 or txBudgetTokens < payloadBytes) then
+    local pressure = not isBeginFrame and (refillRate <= 0 or txBudgetTokens < payloadBytes)
+    -- Yield to other addons normally. Under sustained byte pressure allow one
+    -- small, server-checked probe per 15 seconds, only at a low API call rate.
+    -- This is bounded progress, not a claim that transports have separate caps.
+    local fairProbe = pressure and refillRate <= 0
+        and (tonumber(MarketSync.OtherTxAPIRate) or 0) < TX_OTHER_API_PAUSE_RATE
+        and now - transfer.lastProgressAt >= TX_FAIR_PROBE_INTERVAL
+        and now - (transfer.lastProbeAt or 0) >= TX_FAIR_PROBE_INTERVAL
+        and now >= (transfer.retryAt or 0)
+    if pressure and not fairProbe or now < (transfer.retryAt or 0) then
         if transfer.began and (now - (transfer.lastProgressAt or now)) >= TX_HOLD_AFTER_SECONDS
             and (now - (transfer.lastHoldAt or 0)) >= TX_HOLD_AFTER_SECONDS then
             QueueControlMessage(string.format("HOLD;%s;%s", transfer.sessionId, transfer.scope),
@@ -860,11 +975,12 @@ C_Timer.NewTicker(TX_TICK_SECONDS, function()
             MarketSync.UpdateSwarmUI(UnitName("player"), "Throttled")
         end
         transfer.throttled = true
+        transfer.waitReason = now < (transfer.retryAt or 0) and "Client refused send; backing off" or "Waiting behind other-addon traffic"
         if not MarketSync.lastThrottleLog or (time() - MarketSync.lastThrottleLog) > 5 then
             MarketSync.lastThrottleLog = time()
             if MarketSync.LogNetworkEvent then
                 MarketSync.LogNetworkEvent(string.format(
-                    "|cffff8800[Throttled]|r Pausing DATA for other-addon load (%d msgs/s, %d B/s); staged transfer retained.",
+                    "|cffff8800[Throttled]|r " .. transfer.waitReason .. " (other attempts %.1f API/s, %.0f B/s); staged transfer retained.",
                     tonumber(MarketSync.OtherTxAPIRate) or 0, tonumber(MarketSync.OtherTxBytesRate) or 0))
             end
         end
@@ -873,11 +989,27 @@ C_Timer.NewTicker(TX_TICK_SECONDS, function()
 
     local payload = transfer.pendingPayload
     local isFinal = transfer.pendingFinal
+    if fairProbe then transfer.lastProbeAt = now end
+    -- Charge attempts too: rejected calls must never create a tight retry loop.
+    txBudgetTokens = math.max(0, txBudgetTokens - payloadBytes)
+    local accepted, result = SendAddonMessage(DATA_PREFIX, payload, "GUILD")
+    if not accepted then
+        transfer.waitReason = "Client refused send (" .. tostring(result) .. "); backing off"
+        transfer.throttled = true
+        if MarketSync.LogNetworkEvent then
+            MarketSync.LogNetworkEvent("|cffff8800[Send Refused]|r " .. (payload:match("^([^;]+)") or "frame") .. " rejected by local API (" .. tostring(result) .. "); exact frame retained.")
+        end
+        if not RetrySend(transfer, now) then AbortOutboundTransfer(transfer, "frame refused after bounded retries") end
+        return
+    end
+    MarketSync.TxCount = (MarketSync.TxCount or 0) + (transfer.pendingRecords or 0)
     transfer.pendingPayload = nil
     transfer.pendingFinal = nil
-    txBudgetTokens = math.max(0, txBudgetTokens - payloadBytes)
-    SendAddonMessage(DATA_PREFIX, payload, "GUILD")
+    transfer.pendingRecords = nil
+    transfer.attempts, transfer.retryAt, transfer.firstAttemptAt = nil, nil, nil
+    transfer.waitReason = nil
     transfer.lastProgressAt = now
+    transfer.lastLeaseAt = now
     if isBeginFrame then transfer.began = true end
     if transfer.throttled and MarketSync.UpdateSwarmUI then
         MarketSync.UpdateSwarmUI(UnitName("player"), transfer.scope == "N" and "Sending Neutral" or "Sending")
@@ -899,19 +1031,24 @@ end
 -- NETWORK MONITORING (Tx/Rx per second)
 -- ================================================================
 local lastTx, lastRx, lastTxBytes, lastTxAPI = 0, 0, 0, 0
-local lastAddonBytes = {}
+local lastAddonBytes, lastTransportBytes, lastOwnStats = {}, {}, {}
+local lastTrafficSample = GetTime()
 
 -- Store global rates for sync ticker throttling
 MarketSync.GlobalTxAPIRate = 0
 MarketSync.GlobalTxBytesRate = 0
 
 C_Timer.NewTicker(1.0, function()
-    local txRate = (MarketSync.TxCount or 0) - lastTx
-    local rxRate = (MarketSync.RxCount or 0) - lastRx
+    local now = GetTime()
+    local elapsed = now - lastTrafficSample
+    if elapsed <= 0 then return end
+    lastTrafficSample = now
+    local txRate = math.max(0, (MarketSync.TxCount or 0) - lastTx) / elapsed
+    local rxRate = math.max(0, (MarketSync.RxCount or 0) - lastRx) / elapsed
     local currentTxBytes = MarketSync.TxBytes or 0
     local currentTxAPI = MarketSync.TxAPICalls or 0
-    local txBytesRate = currentTxBytes - lastTxBytes
-    local txAPIRate = currentTxAPI - lastTxAPI
+    local txBytesRate = math.max(0, currentTxBytes - lastTxBytes) / elapsed
+    local txAPIRate = math.max(0, currentTxAPI - lastTxAPI) / elapsed
     lastTx = MarketSync.TxCount or 0
     lastRx = MarketSync.RxCount or 0
     lastTxBytes = currentTxBytes
@@ -926,6 +1063,7 @@ C_Timer.NewTicker(1.0, function()
     local syncAPIRate = 0
     local safeAddonBytes = MarketSync.AddonTxBytes or {}
     local safeAddonAPI = MarketSync.AddonTxAPI or {}
+    local otherTransports = {}
     
     -- Consolidate known prefixes
     local knownPrefixes = {}
@@ -938,13 +1076,29 @@ C_Timer.NewTicker(1.0, function()
         
         local prevBytes = lastAddonBytes[prefix] or { bytes = 0, api = 0 }
         
-        local rateBytes = currentBytes - (prevBytes.bytes or 0)
-        local rateAPI = currentAPI - (prevBytes.api or 0)
+        local rateBytes = math.max(0, currentBytes - (prevBytes.bytes or 0)) / elapsed
+        local rateAPI = math.max(0, currentAPI - (prevBytes.api or 0)) / elapsed
+        local ownPrefix = prefix == PREFIX
+        for _, dataPrefix in ipairs(DATA_PREFIXES or {}) do if prefix == dataPrefix then ownPrefix = true end end
+        local transports = {}
+        lastTransportBytes[prefix] = lastTransportBytes[prefix] or {}
+        for kind, counts in pairs(MarketSync.AddonTxTransports[prefix] or {}) do
+            local old = lastTransportBytes[prefix][kind] or { bytes = 0, api = 0 }
+            local row = { rate = math.max(0, counts.bytes - old.bytes) / elapsed,
+                apiRate = math.max(0, counts.api - old.api) / elapsed }
+            transports[kind] = row
+            lastTransportBytes[prefix][kind] = { bytes = counts.bytes, api = counts.api }
+            if not ownPrefix then
+                local total = otherTransports[kind] or { rate = 0, apiRate = 0 }
+                otherTransports[kind] = total
+                total.rate = total.rate + row.rate; total.apiRate = total.apiRate + row.apiRate
+            end
+        end
         
         if rateBytes > 0 or prevBytes.bytes > 0 or rateAPI > 0 or prevBytes.api > 0 then
-            table.insert(addonRates, { prefix = prefix, rate = rateBytes, apiRate = rateAPI })
+            table.insert(addonRates, { prefix = prefix, rate = rateBytes, apiRate = rateAPI, transports = transports, own = ownPrefix })
         end
-        if prefix == PREFIX or prefix == DATA_PREFIX then
+        if ownPrefix then
             syncBytesRate = syncBytesRate + math.max(0, rateBytes)
             syncAPIRate = syncAPIRate + math.max(0, rateAPI)
         end
@@ -958,6 +1112,13 @@ C_Timer.NewTicker(1.0, function()
     MarketSync.SyncTxAPIRate = syncAPIRate
     MarketSync.OtherTxBytesRate = math.max(0, txBytesRate - syncBytesRate)
     MarketSync.OtherTxAPIRate = math.max(0, txAPIRate - syncAPIRate)
+    MarketSync.OtherTransportRates = otherTransports
+    MarketSync.SyncSendRates = {}
+    for _, key in ipairs({ "attempts", "accepted", "refused", "errors", "attemptedBytes", "acceptedBytes", "refusedBytes" }) do
+        local value = (MarketSync.SyncSendStats or {})[key] or 0
+        MarketSync.SyncSendRates[key] = math.max(0, value - (lastOwnStats[key] or 0)) / elapsed
+        lastOwnStats[key] = value
+    end
     
     -- Sort the addon breakdown highest to lowest (by bytes)
     table.sort(addonRates, function(a, b)
@@ -1041,6 +1202,7 @@ function MarketSync.MergePersonalIntoGuild(key)
     if sourceNewer then
         for _, field in ipairs({"m", "d", "observedAt", "available"}) do target[field] = source[field] end
         target.source = "Personal"
+        target.src = nil
     end
     target.latestBucket = math.max(tonumber(target.latestBucket) or 0, tonumber(source.latestBucket) or 0)
 end
@@ -1160,6 +1322,7 @@ function MarketSync.EnsureVerifiedSnapshotSchema()
     realmDB.NeutralVerifiedDay = nil
     realmDB.NeutralSwarmTSF = nil
     realmDB.NeutralScanTime = nil
+    realmDB.NeutralScanCharacter = nil
     realmDB.CachedScanStats = nil
     realmDB.VerifiedSnapshotSchema = 1
     return true
@@ -2142,10 +2305,16 @@ local function SendDirectedPullNow(scope, sinceRevision, sourceIdentity, adverti
 
     -- When the lane is idle, send PULL immediately so all peers observe it and
     -- cancel their pending lottery timers without waiting up to 0.35s in queue.
+    local acceptedImmediately = false
     if not outboundTransfer and guildLane.phase ~= "receiving" then
-        SendAddonMessage(PREFIX, pullPayload, "GUILD")
+        acceptedImmediately = SendAddonMessage(PREFIX, pullPayload, "GUILD")
+        if not acceptedImmediately then
+            local queued, entry = QueueControlMessage(pullPayload, "PULL:" .. scope, true)
+            if not queued then ResetGuildLane("PULL control queue full"); return false end
+            RetrySend(entry, GetTxClock())
+        end
     else
-        QueueControlMessage(pullPayload, "PULL:" .. scope, true)
+        if not QueueControlMessage(pullPayload, "PULL:" .. scope, true) then ResetGuildLane("PULL control queue full"); return false end
     end
 
     MarketSync.SetPullRequestPending(true)
@@ -2154,8 +2323,8 @@ local function SendDirectedPullNow(scope, sinceRevision, sourceIdentity, adverti
     end
     if MarketSync.LogNetworkEvent then
         MarketSync.LogNetworkEvent(string.format(
-            "Outgoing |cffff8800[%s]|r sent for exact source %s (advertised %d, local %d).",
-            msgType, tostring(sourceIdentity), tonumber(advertisedRevision) or 0, tonumber(sinceRevision) or 0))
+            "Outgoing |cffff8800[%s]|r %s for exact source %s (advertised %d, local %d).",
+            msgType, acceptedImmediately and "accepted by local API" or "queued", tostring(sourceIdentity), tonumber(advertisedRevision) or 0, tonumber(sinceRevision) or 0))
     end
     return true
 end
@@ -2283,10 +2452,10 @@ local function CreateTransferProducer(sessionId, scope, baseRevision, revision, 
             if #payload > MAX_WIRE_BYTES then
                 error("encoded DATA frame exceeded wire limit: " .. tostring(#payload))
             end
-            MarketSync.TxCount = (MarketSync.TxCount or 0) + bufferedRecords
+            local records = bufferedRecords
             buffer = ""
             bufferedRecords = 0
-            coroutine.yield(payload, false)
+            coroutine.yield(payload, false, records)
         end
 
         local function appendRecord(record)
@@ -2527,6 +2696,7 @@ function MarketSync.UpdateLocalDBByKey(key, price_or_day, day_or_histStr, qty_or
                 pData[key].observedAt = MarketSync.ScanDayToTimestamp(incomingDay) + maxIncomingBucketOffset * 1800
                 pData[key].available = latestIncomingQuantity
                 pData[key].source = sender or "Guild"
+                pData[key].src = nil
             end
             pData[key].d = math.max(tonumber(pData[key].d) or 0, incomingDay)
             pData[key].latestBucket = math.max(tonumber(pData[key].latestBucket) or 0, incomingBucket)

@@ -311,6 +311,7 @@ test('Scanner parses table itemKey in ITEM_SEARCH_RESULTS_UPDATED and commodity 
     MarketSync = {
       IsAuctionHouseOpen = true,
       GetRealmDB = function() return { PersonalData = {} } end,
+      RecordPersonalScan = function(db, timestamp) db.PersonalScanTime = timestamp end,
       Debug = function() end,
       ToBase36 = function(n) return tostring(n) end,
       UpsertScanBucket = function(_, offset, price, quantity)
@@ -428,6 +429,9 @@ test('Modern Dialog Helpers and Task Manager / Rate Monitor update logic', () =>
         SetFrameStrata = function(self, s) end,
         SetFrameLevel = function(self, l) end,
         SetToplevel = function(self, t) end,
+        GetName = function(self) return self.name end,
+        GetChildren = function() end,
+        SetScrollChild = function(self, child) self.scrollChild = child end,
         SetClampedToScreen = function(self, c) end,
         SetBackdrop = function(self, b) end,
         SetBackdropColor = function(self, ...) end,
@@ -455,6 +459,7 @@ test('Modern Dialog Helpers and Task Manager / Rate Monitor update logic', () =>
             SetJustifyH = function() end,
             SetText = function(s, t) s.text = t end,
             GetText = function(s) return s.text end,
+            GetStringHeight = function(s) local _,n=s.text:gsub("\\n", ""); return (n+1)*12 end,
             Hide = function() end,
             Show = function() end,
           }
@@ -509,6 +514,12 @@ test('Modern Dialog Helpers and Task Manager / Rate Monitor update logic', () =>
     assert(rf.addonRows[2]:IsShown(), "Second addon row should be shown")
     assert(rf.addonRows[2].nameText:GetText():find("Auctionator"), "Addon row 2 should contain Auctionator")
     assert(not rf.addonRows[3]:IsShown(), "Third addon row should be hidden")
+    MarketSync.SyncSendRates = { accepted = 1.25, refused = 0.5 }
+    MarketSync.OtherTransportRates = { WHISPER = { apiRate = 2.5, rate = 100 } }
+    MarketSync.UpdateRateMonitor(1.5, 2.5, 3.25, 180.5, {})
+    assert(rf.deliveryLabel:GetText():find("0.5 refused/s"), "Own refusals must be visible")
+    assert(rf.transportLabel:GetText():find("WHISPER"), "Transport-specific attempts must be visible")
+    assert(rf.txByteLabel:GetText():find("Attempted payload"), "Do not label attempts as delivered bandwidth")
 
     MarketSync.ToggleTaskManager()
     local tm = MarketSyncTaskManagerFrame
@@ -1686,7 +1697,7 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(frame.template == "BackdropTemplate", "Legacy theme must use the compatible backdrop shell")
     assert(frame.tabs[1].template == "CharacterFrameTabButtonTemplate")
     assert(frame.tabs[1].points[1][1] == "TOPLEFT", "Legacy tabs use the old bottom-edge anchors")
-    assert(frame.tabs[1]:GetWidth() == 92)
+    assert(frame.tabs[1]:GetWidth() >= 106)
   `]) {
     if (lauxlib.luaL_dostring(legacyState, to_luastring(chunk)) !== 0) {
       throw new Error('Legacy theme frame check failed: ' + to_jsstring(lua.lua_tostring(legacyState, -1)));
@@ -1807,8 +1818,10 @@ test('AuctionHouse buy frame button hook and sidecar suppression across tabs', (
     end
     MarketSync.CreateAHSidecar = function(parent)
       local sc = CreateFrame("Frame", nil, parent)
-      sc.SetMode = function(m) sc.mode = m end
-      sc.SetExpanded = function(exp) sc.expanded = exp end
+      MarketSync.AHSidecar = {
+        SetMode = function(mode) sc.mode = mode end,
+        SetVisibleForAH = function(visible) if visible then sc:Show() else sc:Hide() end end,
+      }
       return sc
     end
   `;
@@ -1854,6 +1867,11 @@ test('AuctionHouse buy frame button hook and sidecar suppression across tabs', (
     -- Switching back to Scanner tab restores Sidecar
     AH.ShowAuctionHousePanel("scanner")
     assert(AH.Sidecar:IsShown() == true, "Sidecar must restore on Scanner tab")
+
+    AuctionHouseFrame:SetDisplayMode("auctions")
+    assert(not AH.Sidecar:IsShown(), "The native Auctions tab hides the sidecar")
+    AuctionHouseFrame:SetDisplayMode("sell")
+    assert(AH.Sidecar:IsShown() and AH.Sidecar.mode == "sell", "Selling restores the sidecar")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('AH buy button and sidecar suppression check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
@@ -2386,8 +2404,8 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     assert(MarketSync.SetUITheme("legacy") == true and MarketSync.GetUITheme() == "legacy")
     assert(not themeReloaded, "Theme selection must not call protected ReloadUI from a dropdown")
     local legacyR, legacyG, legacyB = MarketSync.GetThemeColor("inset")
-    assert(legacyB > legacyR and legacyB > legacyG,
-      "Forced Legacy on a modern client should select the slate palette")
+    assert(legacyR > legacyG and legacyG > legacyB,
+      "Forced Legacy on a modern client should select the original brown/gold palette")
     assert(MarketSync.SetUITheme("unknown") == false and MarketSync.GetUITheme() == "legacy")
     assert(MarketSync.SetUITheme("forever") == true)
     local foreverR, foreverG, foreverB = MarketSync.GetThemeColor("inset")

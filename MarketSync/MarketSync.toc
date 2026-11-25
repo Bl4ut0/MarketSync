@@ -1,10 +1,10 @@
-## Interface: 16001, 120001, 120000, 50503, 38000, 20506, 20505, 11509, 11508
+## Interface: 16001, 120107, 120105, 120100, 120007, 120005, 120001, 120000, 50504, 50503, 38000, 20506, 20505, 11509, 11508
 ## Title: MarketSync
 ## Notes: The Guild Auction DB - Sync prices, check history, and browse offline.
 ## Author: Gemini
-## Version: 0.9.7-rc6
+## Version: 0.9.8-rc1
 ## SavedVariables: MarketSyncDB
-## OptionalDeps: Auctionator
+## OptionalDeps: Auctionator, MarketSyncData
 ## AllowLoadGameType: camelot, classic, tbc
 ## X-Forever-Target: 1.60.1 (70205)
 
@@ -23,6 +23,7 @@ ObservationAPI.lua
 
 # Favorites & Preferred Lists
 Favorites.lua
+ListCodec.lua
 
 # Native Auction House Scanner
 Scanner.lua
@@ -37,11 +38,8 @@ Neutral.lua
 # Processing: EV arbitrage + craft profitability
 Processing.lua
 
-# Ledger: inventory tracking, FIFO lots, craft & purchase ledgers
-Ledger\CraftLedger.lua
-Ledger\PurchaseList.lua
-Ledger\ItemLedger.lua
-Ledger\InventoryTracking.lua
+# Character inventory tracking
+InventoryTracking.lua
 
 # Sync: protocol, data merging, passive/bulk sync
 Sync.lua
@@ -56,19 +54,17 @@ UI_History.lua
 UI_Monitor.lua
 UI_Processing.lua
 UI_CraftingInfo.lua
-Ledger\UI_CraftManager.lua
-Ledger\UI_ItemLedger.lua
 UI_Notifications.lua
 UI_ItemDetail.lua
 
 # Native Auction House Embedded Panel, Scanner & Sidecar UI
 UI_AHScanner.lua
 UI_LegacySearch.lua
-Ledger\UI_PurchaseList.lua
 UI_AHSidecar.lua
 AuctionHouse.lua
 LegacyAuctionHouse.lua
 LegacyPosting.lua
+PostingWarning.lua
 
 # UI Main: frame shell, tabs, settings
 UI_Main.lua

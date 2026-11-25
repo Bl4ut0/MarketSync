@@ -76,6 +76,39 @@ run(`
   assert(MarketSync.GetRealmDB().PersonalData["100"].m == 400, "switching back must restore Horde prices")
   assert(MarketSyncDB.RealmData.ClassicBetaPvP.PersonalData == oldPrices,
     "legacy prices must remain preserved as an archive")
+  local originalRealm, originalNormalizedRealm = GetRealmName, GetNormalizedRealmName
+  GetRealmName = function() return "" end
+  GetNormalizedRealmName = GetRealmName
+  Enum = { GameRule = { PvPRuleset = 1, RPRuleset = 2, HardcoreRuleset = 3 } }
+  local pvp, rp = true, false
+  C_GameRules = { IsGameRuleActive = function(rule) return (rule == 1 and pvp) or (rule == 2 and rp) end }
+  assert(MarketSync.GetAuctionRealm() == "pvp")
+  assert(MarketSync.GetRealmDB() == horde, "blank realms should reopen existing same-ruleset faction scans")
+  local originalUnitName = UnitName
+  UnitName = function() return "Bank", "Eh" end
+  assert(MarketSync.GetPlayerScanName() == "Bank Eh")
+  MarketSync.RecordPersonalScan(horde, 500)
+  UnitName = function() return "Blauto", "Theblind" end
+  assert(MarketSync.GetLatestAuctionScan("personal") == "Bank Eh",
+    "An alt sees the character who scanned, not the character viewing the data")
+  horde.GuildData["1001"] = { m = 99, t = 550, src = "DataPack" }
+  local source, stamp = MarketSync.GetLatestAuctionScan("guild")
+  assert(source == "Web" and stamp == 550)
+  horde.GuildData["1001"].source = "Guild Member"
+  horde.GuildData["1001"].observedAt = 600
+  source, stamp = MarketSync.GetLatestAuctionScan("guild")
+  assert(source == "Guild Member" and stamp == 600 and not MarketSync.IsWebAuctionRecord(horde.GuildData["1001"]),
+    "Legacy pack markers cannot relabel real guild observations")
+  UnitName = originalUnitName
+  faction = "Alliance"
+  assert(MarketSync.GetRealmDB() == alliance, "restore the active faction only")
+  rp = true
+  assert(MarketSync.GetAuctionRealm() == "roleplaypvp" and next(MarketSync.GetRealmDB().PersonalData) == nil)
+  rp, pvp = false, false
+  assert(MarketSync.GetAuctionRealm() == "normal" and next(MarketSync.GetRealmDB().PersonalData) == nil)
+  GetRealmName, GetNormalizedRealmName = originalRealm, originalNormalizedRealm
+  C_GameRules, Enum = nil, nil
+  faction = "Horde"
   MarketSync.myRealm = "ClassicBetaPvP"
   assert(MarketSync.GetSyncMarketRealm() == "ClassicBetaPvP@Horde")
   faction = nil

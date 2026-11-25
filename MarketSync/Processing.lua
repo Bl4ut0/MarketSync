@@ -903,12 +903,19 @@ local function ScanCurrentTradeSkillRecipes()
                     local dedupeKey = tostring(outputItemID) .. ":" .. tostring(recipeName)
                     if not seen[dedupeKey] then
                         seen[dedupeKey] = true
+                        local _, _, _, _, _, _, _, _, _, _, sellPrice = SafeGetItemInfo(outputItemID)
+                        local vSell = tonumber(sellPrice)
+                        if vSell and MarketSyncDB and MarketSyncDB.ItemInfoCache then
+                            MarketSyncDB.ItemInfoCache[outputItemID] = MarketSyncDB.ItemInfoCache[outputItemID] or {}
+                            MarketSyncDB.ItemInfoCache[outputItemID].sp = vSell
+                        end
                         recipes[#recipes + 1] = {
                             name = recipeName,
                             outputItemID = outputItemID,
                             outputQty = outputQty,
                             outputQtyMin = outputQtyMin,
                             outputQtyMax = outputQtyMax,
+                            vendorSellPrice = vSell,
                             skillType = tostring(recipeInfo and (recipeInfo.relativeDifficulty or recipeInfo.difficulty) or ""),
                             numSkillUps = tonumber(recipeInfo and recipeInfo.numSkillUps) or 1,
                             mats = mats,
@@ -964,12 +971,19 @@ local function ScanCurrentTradeSkillRecipes()
                     local dedupeKey = tostring(outputItemID) .. ":" .. tostring(recipeName)
                     if not seen[dedupeKey] then
                         seen[dedupeKey] = true
+                        local _, _, _, _, _, _, _, _, _, _, sellPrice = SafeGetItemInfo(outputLink or outputItemID)
+                        local vSell = tonumber(sellPrice)
+                        if vSell and MarketSyncDB and MarketSyncDB.ItemInfoCache then
+                            MarketSyncDB.ItemInfoCache[outputItemID] = MarketSyncDB.ItemInfoCache[outputItemID] or {}
+                            MarketSyncDB.ItemInfoCache[outputItemID].sp = vSell
+                        end
                         recipes[#recipes + 1] = {
                             name = recipeName,
                             outputItemID = outputItemID,
                             outputQty = outputQty,
                             outputQtyMin = outputQtyMin,
                             outputQtyMax = outputQtyMax,
+                            vendorSellPrice = vSell,
                             skillType = tostring(skillType or ""),
                             numSkillUps = tonumber(numSkillUps),
                             mats = mats,
@@ -1222,12 +1236,36 @@ local function GetItemName(itemID)
     if not itemID then return nil end
     local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[itemID]
     if cached and cached.n then return cached.n end
-    local name = SafeGetItemInfo(itemID)
+    local name, _, _, _, _, _, _, _, _, _, sellPrice = SafeGetItemInfo(itemID)
     if name and MarketSyncDB and MarketSyncDB.ItemInfoCache then
         MarketSyncDB.ItemInfoCache[itemID] = MarketSyncDB.ItemInfoCache[itemID] or {}
         MarketSyncDB.ItemInfoCache[itemID].n = name
+        if tonumber(sellPrice) ~= nil then
+            MarketSyncDB.ItemInfoCache[itemID].sp = tonumber(sellPrice)
+        end
     end
     return name
+end
+
+function MarketSync.GetVendorSellPrice(itemID, cacheOnly)
+    local id = tonumber(itemID)
+    if not id or id <= 0 then return nil end
+    local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[id]
+    if cached and cached.sp ~= nil then
+        return tonumber(cached.sp) or 0
+    end
+    if cacheOnly then return nil end
+    local name, _, _, _, _, _, _, _, _, _, sellPrice = SafeGetItemInfo(id)
+    if name then
+        local sp = tonumber(sellPrice) or 0
+        if MarketSyncDB and MarketSyncDB.ItemInfoCache then
+            MarketSyncDB.ItemInfoCache[id] = MarketSyncDB.ItemInfoCache[id] or {}
+            MarketSyncDB.ItemInfoCache[id].n = MarketSyncDB.ItemInfoCache[id].n or name
+            MarketSyncDB.ItemInfoCache[id].sp = sp
+        end
+        return sp
+    end
+    return nil
 end
 
 local function GetPriceByItemID(itemID)
@@ -2155,6 +2193,7 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper, charac
         local outputPrice, outputAge, outputStale = priceLookup(recipe.outputItemID)
         outputPrice = outputPrice or 0
         local craftCost = 0
+        local hasMissingMat = false
         local hasMissing = outputPrice <= 0
         local hasStaleMat = false
         local matsDetailed = {}
@@ -2173,6 +2212,7 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper, charac
             if matPrice and matPrice > 0 then
                 craftCost = craftCost + (matPrice * qty)
             else
+                hasMissingMat = true
                 hasMissing = true
             end
             matsDetailed[#matsDetailed + 1] = {
@@ -2191,6 +2231,23 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper, charac
         local revenueMin = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQtyMin)) or nil
         local revenueMax = outputPrice > 0 and math.floor(NetMainAuctionValue(outputPrice * outputQtyMax)) or nil
 
+        -- Vendor Shuffle (0% AH cut, unlimited instant liquidity at any merchant)
+        local vendorUnitPrice = tonumber(recipe.vendorSellPrice)
+        if vendorUnitPrice == nil and MarketSync.GetVendorSellPrice then
+            vendorUnitPrice = MarketSync.GetVendorSellPrice(recipe.outputItemID, snapshot ~= nil)
+        end
+        vendorUnitPrice = tonumber(vendorUnitPrice) or 0
+        local vendorRevenueExpected = vendorUnitPrice > 0 and math.floor(vendorUnitPrice * outputQty) or nil
+        local vendorRevenueMin = vendorUnitPrice > 0 and math.floor(vendorUnitPrice * outputQtyMin) or nil
+        local vendorRevenueMax = vendorUnitPrice > 0 and math.floor(vendorUnitPrice * outputQtyMax) or nil
+        local vendorMarginMin = (not hasMissingMat and vendorRevenueMin) and (vendorRevenueMin - craftCost) or nil
+        local vendorMarginExpected = (not hasMissingMat and vendorRevenueExpected) and (vendorRevenueExpected - craftCost) or nil
+        local vendorMarginMax = (not hasMissingMat and vendorRevenueMax) and (vendorRevenueMax - craftCost) or nil
+        local vendorRevenue = vendorRevenueMin or vendorRevenueExpected
+        local vendorMargin = vendorMarginMin or vendorMarginExpected
+        local vendorMaxCraftCost = vendorRevenue and math.max(0, vendorRevenue - minMargin) or nil
+        local vendorMatCapScale = (vendorMaxCraftCost and craftCost > 0) and (vendorMaxCraftCost / craftCost) or nil
+
         -- Under-promise & over-deliver: conservative baseline uses outputQtyMin
         local marginMin = not hasMissing and (revenueMin - craftCost) or nil
         local marginExpected = not hasMissing and (revenueExpected - craftCost) or nil
@@ -2200,10 +2257,15 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper, charac
         local margin = marginMin or marginExpected
         local maxCraftCost = revenue and math.max(0, revenue - minMargin) or nil
         local matCapScale = (maxCraftCost and craftCost > 0) and (maxCraftCost / craftCost) or nil
-        if matCapScale then
+        if matCapScale or vendorMatCapScale then
             for _, matInfo in ipairs(matsDetailed) do
                 if matInfo.price and matInfo.price > 0 then
-                    matInfo.capPrice = math.max(1, math.floor(matInfo.price * matCapScale))
+                    if matCapScale then
+                        matInfo.capPrice = math.max(1, math.floor(matInfo.price * matCapScale))
+                    end
+                    if vendorMatCapScale then
+                        matInfo.vendorCapPrice = math.max(1, math.floor(matInfo.price * vendorMatCapScale))
+                    end
                 end
             end
         end
@@ -2232,7 +2294,19 @@ function MarketSync.FindProfitableCrafts(professionName, minMarginCopper, charac
             marginExpected = marginExpected,
             marginMax = marginMax,
             hasMissingPrice = hasMissing,
+            hasMissingMatPrice = hasMissingMat,
             meetsMargin = margin and (margin >= minMargin) or false,
+            vendorUnitPrice = vendorUnitPrice,
+            vendorRevenue = vendorRevenue,
+            vendorRevenueMin = vendorRevenueMin,
+            vendorRevenueExpected = vendorRevenueExpected,
+            vendorRevenueMax = vendorRevenueMax,
+            vendorMargin = vendorMargin,
+            vendorMarginMin = vendorMarginMin,
+            vendorMarginExpected = vendorMarginExpected,
+            vendorMarginMax = vendorMarginMax,
+            vendorMeetsMargin = vendorMargin and (vendorMargin >= minMargin) or false,
+            vendorMaxCraftCost = vendorMaxCraftCost,
             outputAge = outputAge,
             outputStale = outputStale,
             hasStaleMat = hasStaleMat,
@@ -2323,27 +2397,48 @@ MarketSync.VendorPrices = {
     [2320]  = 10,     -- Coarse Thread
     [2321]  = 100,    -- Fine Thread
     [4291]  = 5000,   -- Silken Thread
+    [8343]  = 2000,   -- Heavy Silken Thread
     [14341] = 5000,   -- Rune Thread
     [21892] = 30000,  -- Eternium Thread
     [44703] = 50000,  -- Frost Thread
-    -- Flux, Coal, Stocks
+    -- Dyes & Bleach (Tailoring / Leatherworking)
+    [2324]  = 25,     -- Bleach
+    [2325]  = 1000,   -- Black Dye
+    [2604]  = 50,     -- Red Dye
+    [2605]  = 100,    -- Green Dye
+    [4340]  = 350,    -- Gray Dye
+    [4341]  = 500,    -- Yellow Dye
+    [4342]  = 2500,   -- Purple Dye
+    [6260]  = 50,     -- Blue Dye
+    [6261]  = 1000,   -- Orange Dye
+    [10290] = 2500,   -- Pink Dye
+    -- Flux, Coal, Stocks & Woods
     [2880]  = 20,     -- Weak Flux
     [3466]  = 2000,   -- Strong Flux
     [3857]  = 500,    -- Coal
-    [4371]  = 400,    -- Wooden Stock
-    [4372]  = 2000,   -- Heavy Stock
+    [4399]  = 200,    -- Wooden Stock
+    [4400]  = 2000,   -- Heavy Stock
+    [4470]  = 38,     -- Simple Wood
+    [4471]  = 13,     -- Flint and Tinder
+    [11291] = 4500,   -- Star Wood
     -- Salts
     [4289]  = 10,     -- Salt
     [3470]  = 100,    -- Coarse Salt
     [3471]  = 500,    -- Heavy Salt
     [20815] = 500,    -- Rock Salt
-    -- Spices, Flour & Water
+    -- Spices, Flour, Drinks & Cooking Reagents
     [2678]  = 10,     -- Mild Spices
     [2692]  = 100,    -- Hot Spices
     [3713]  = 200,    -- Soothing Spices
     [159]   = 25,     -- Refreshing Spring Water
     [3081]  = 25,     -- Simple Flour
     [1179]  = 125,    -- Ice Cold Milk
+    [1708]  = 500,    -- Sweet Nectar
+    [2593]  = 150,    -- Flask of Stormwind Tawny
+    [2594]  = 150,    -- Flagon of Dwarven Honeymead
+    [2596]  = 200,    -- Skin of Dwarven Stout
+    [2665]  = 100,    -- Stormwind Seasoning Herbs
+    [2894]  = 250,    -- Rhapsody Malt
     -- Parchment (Inscription)
     [39354] = 20,     -- Light Parchment
     [39501] = 100,    -- Common Parchment
@@ -2733,6 +2828,20 @@ function MarketSync.CalculateRecipeProfit(recipeOrOutputItemID, userOverrides, t
     local groundUpMarginPct = (costData.groundUpCost > 0) and math.floor((groundUpProfit / costData.groundUpCost) * 100) or 0
     local effectiveMarginPct = (costData.effectiveCost > 0) and math.floor((effectiveProfit / costData.effectiveCost) * 100) or 0
 
+    -- Bulk Vendor Shuffle calculation (0% AH cut, instant merchant payout)
+    local vendorUnitPrice = (type(recipeOrOutputItemID) == "table" and tonumber(recipeOrOutputItemID.vendorSellPrice))
+        or (MarketSync.GetVendorSellPrice and MarketSync.GetVendorSellPrice(outputItemID))
+        or 0
+    local vendorRevenue = math.floor(vendorUnitPrice * costData.outputQty)
+    local vendorDirectProfit = vendorRevenue - costData.directCraftCost
+    local vendorGroundUpProfit = vendorRevenue - costData.groundUpCost
+    local vendorEffectiveProfit = vendorRevenue - costData.effectiveCost
+    local vendorDirectMarginPct = (costData.directCraftCost > 0) and math.floor((vendorDirectProfit / costData.directCraftCost) * 100) or 0
+    local vendorGroundUpMarginPct = (costData.groundUpCost > 0) and math.floor((vendorGroundUpProfit / costData.groundUpCost) * 100) or 0
+    local vendorEffectiveMarginPct = (costData.effectiveCost > 0) and math.floor((vendorEffectiveProfit / costData.effectiveCost) * 100) or 0
+    local isVendorShuffle = (not costData.hasMissing) and (vendorRevenue > 0) and (vendorEffectiveProfit > 0)
+    local vendorBeatsAH = (vendorRevenue > 0) and (outputPrice == 0 or vendorRevenue > netRevenue)
+
     local warnings = {}
     if not outputItemID then
         table.insert(warnings, "Recipe has no item output")
@@ -2762,6 +2871,16 @@ function MarketSync.CalculateRecipeProfit(recipeOrOutputItemID, userOverrides, t
         directMarginPct = directMarginPct,
         groundUpMarginPct = groundUpMarginPct,
         effectiveMarginPct = effectiveMarginPct,
+        vendorUnitPrice = vendorUnitPrice,
+        vendorRevenue = vendorRevenue,
+        vendorDirectProfit = vendorDirectProfit,
+        vendorGroundUpProfit = vendorGroundUpProfit,
+        vendorEffectiveProfit = vendorEffectiveProfit,
+        vendorDirectMarginPct = vendorDirectMarginPct,
+        vendorGroundUpMarginPct = vendorGroundUpMarginPct,
+        vendorEffectiveMarginPct = vendorEffectiveMarginPct,
+        isVendorShuffle = isVendorShuffle,
+        vendorBeatsAH = vendorBeatsAH,
         warnings = warnings,
         hasWarnings = (#warnings > 0),
     }
@@ -2922,42 +3041,48 @@ function MarketSync.ExportCustomShoppingList(treeData, userOverrides, listName)
     return true, #searchStrings
 end
 
--- Caching vendor prices dynamically on MERCHANT_SHOW
+local function GetMerchantPrice(index)
+    if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
+        local info = C_MerchantFrame.GetItemInfo(index)
+        if info then
+            return info.price, info.stackCount, info.numAvailable, info.hasExtendedCost, info.currencyID
+        end
+    elseif GetMerchantItemInfo then
+        local _, _, price, quantity, available, _, _, extendedCost, currencyID = GetMerchantItemInfo(index)
+        return price, quantity, available, extendedCost, currencyID
+    end
+end
+
+local function CacheMerchantPrices()
+    local count = GetMerchantNumItems and GetMerchantNumItems() or 0
+    local realmDB = count > 0 and MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    if not realmDB then return end
+    realmDB.VendorPrices = realmDB.VendorPrices or {}
+    realmDB.VendorBuyQuotes = realmDB.VendorBuyQuotes or {}
+
+    for index = 1, count do
+        local itemID = (GetMerchantItemID and GetMerchantItemID(index))
+            or (GetMerchantItemLink and ParseItemIDFromLink(GetMerchantItemLink(index)))
+        local price, quantity, available, extendedCost, currencyID = GetMerchantPrice(index)
+        if itemID and price and price > 0 and not extendedCost and (not currencyID or currencyID == 0) then
+            quantity = math.max(1, tonumber(quantity) or 1)
+            local old = realmDB.VendorBuyQuotes[itemID]
+            if not old or old.price ~= price or old.quantity ~= quantity then
+                realmDB.VendorBuyQuotes[itemID] = { price = price, quantity = quantity }
+            end
+            if available == -1 or available == nil then
+                realmDB.VendorPrices[itemID] = math.floor(price / quantity)
+            end
+        end
+    end
+end
+
 if CreateFrame then
     local merchantWatcher = CreateFrame("Frame")
     if merchantWatcher and merchantWatcher.RegisterEvent then
         merchantWatcher:RegisterEvent("MERCHANT_SHOW")
-        merchantWatcher:SetScript("OnEvent", function()
-        local numItems = (GetMerchantNumItems and GetMerchantNumItems()) or 0
-        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-        if not realmDB then return end
-        realmDB.VendorPrices = realmDB.VendorPrices or {}
-
-        for i = 1, numItems do
-            local link = GetMerchantItemLink and GetMerchantItemLink(i)
-            local itemID = ParseItemIDFromLink(link)
-            if not itemID and GetMerchantItemID then
-                itemID = GetMerchantItemID(i)
-            end
-            if itemID then
-                local price, stackCount, numAvailable
-                if GetMerchantItemInfo then
-                    _, _, price, stackCount, numAvailable = GetMerchantItemInfo(i)
-                elseif C_MerchantFrame and C_MerchantFrame.GetItemInfo then
-                    local info = C_MerchantFrame.GetItemInfo(i)
-                    if info then
-                        price = info.price
-                        stackCount = info.stackCount
-                        numAvailable = info.numAvailable
-                    end
-                end
-                stackCount = math.max(1, tonumber(stackCount) or 1)
-                if price and price > 0 and (numAvailable == -1 or numAvailable == nil) then
-                    realmDB.VendorPrices[itemID] = math.floor(price / stackCount)
-                end
-            end
-        end
-    end)
+        merchantWatcher:RegisterEvent("MERCHANT_UPDATE")
+        merchantWatcher:SetScript("OnEvent", CacheMerchantPrices)
     end
 end
 
@@ -2965,13 +3090,15 @@ end
 -- TOOLTIP HOOKS (Disenchanting, Milling, Prospecting, Crafting)
 -- ================================================================
 local function OnTooltipSetItem(tooltip, data)
-    if not MarketSyncDB then return end
-    if not MarketSyncDB.EnableTooltipAuctionPrice and not MarketSyncDB.EnableTooltipProb and not MarketSyncDB.EnableTooltipCraftCost then return end
-    if not tooltip then return end
+    if not MarketSyncDB or not tooltip then return end
 
     local name, link
     if tooltip.GetItem then
         name, link = tooltip:GetItem()
+    end
+    if MarketSync.IsSecretValue then
+        if MarketSync.IsSecretValue(name) or MarketSync.IsSecretValue(link)
+            or (data and MarketSync.IsSecretValue(data.id)) then return end
     end
     
     local itemID = nil
@@ -2994,6 +3121,28 @@ local function OnTooltipSetItem(tooltip, data)
         end
     end
     if not itemID then return end
+
+    local isShiftDetails = MarketSync.IsDetailsKeyDown and MarketSync.IsDetailsKeyDown()
+    if isShiftDetails and MarketSyncDB.EnableTooltipVendorPrice ~= false then
+        local format = MarketSync.FormatMoneyColored or MarketSync.FormatMoney
+        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+        local vendorQuote = realmDB and realmDB.VendorBuyQuotes and realmDB.VendorBuyQuotes[itemID]
+        if vendorQuote and vendorQuote.price and vendorQuote.price > 0 then
+            local priceText = format(vendorQuote.price)
+            if (vendorQuote.quantity or 1) > 1 then
+                priceText = string.format("%s for %d", priceText, vendorQuote.quantity)
+            end
+            tooltip:AddDoubleLine("|cffffd700Vendor Sale Price:|r", priceText)
+        else
+            local staticBuy = (MarketSync.VendorPrices and MarketSync.VendorPrices[itemID])
+                or (realmDB and realmDB.VendorPrices and realmDB.VendorPrices[itemID])
+            if staticBuy and staticBuy > 0 then
+                tooltip:AddDoubleLine("|cffffd700Vendor Sale Price:|r", format(staticBuy))
+            end
+        end
+    end
+
+    if not MarketSyncDB.EnableTooltipAuctionPrice and not MarketSyncDB.EnableTooltipProb and not MarketSyncDB.EnableTooltipCraftCost then return end
 
     if (not link or not link:match("item:%d+")) and itemID then
         local _, resolvedLink = SafeGetItemInfo(itemID)
@@ -3105,13 +3254,17 @@ local function OnTooltipSetItem(tooltip, data)
                     local pStr = ""
                     if profitData.outputPrice and profitData.outputPrice > 0 then
                         local pVal = profitData.effectiveProfit
-                        local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                        local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020-"
                         pStr = string.format(" (%s%s|r)", pCol, MarketSync.FormatMoney(math.abs(pVal)))
                     end
                     tooltip:AddDoubleLine("|cffffd700To Craft:|r", costStr .. pStr)
+                    if profitData.isVendorShuffle then
+                        local vStr = MarketSync.FormatMoney(math.abs(profitData.vendorEffectiveProfit))
+                        tooltip:AddDoubleLine("|cff00ff00Vendor Shuffle:|r", string.format("|cff00ff00+%s (+%d%%)|r", vStr, profitData.vendorEffectiveMarginPct))
+                    end
                 else
                     tooltip:AddLine(" ")
-                    local yieldStr = (cost.outputQty and cost.outputQty > 1) and string.format(" (x%d)", cost.outputQty) or ""
+                    local yieldStr = (cost.outputQty and cost.outputQty > 1) and string.format(" (x%g)", cost.outputQty) or ""
                     tooltip:AddLine("|cffffd700MarketSync Crafting" .. yieldStr .. "|r")
 
                     local costStr = MarketSync.FormatMoneyColored and MarketSync.FormatMoneyColored(cost.effectiveCost) or MarketSync.FormatMoney(cost.effectiveCost)
@@ -3126,10 +3279,18 @@ local function OnTooltipSetItem(tooltip, data)
 
                     if profitData.outputPrice and profitData.outputPrice > 0 then
                         local pVal = profitData.effectiveProfit
-                        local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                        local pCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020-"
                         local pStr = MarketSync.FormatMoney(math.abs(pVal))
                         local mCol = (pVal >= 0) and "|cff00ff00+" or "|cffff2020"
-                        tooltip:AddDoubleLine("Craft Profit:", string.format("%s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.effectiveMarginPct))
+                        tooltip:AddDoubleLine("Craft Profit (AH):", string.format("%s%s|r (%s%d%%|r)", pCol, pStr, mCol, profitData.effectiveMarginPct))
+                    end
+                    if profitData.vendorRevenue and profitData.vendorRevenue > 0 and not cost.hasMissing then
+                        local vVal = profitData.vendorEffectiveProfit
+                        local vCol = (vVal >= 0) and "|cff00ff00+" or "|cffff2020-"
+                        local vStr = MarketSync.FormatMoney(math.abs(vVal))
+                        local vmCol = (vVal >= 0) and "|cff00ff00+" or "|cffff2020"
+                        local vSaleStr = MarketSync.FormatMoney(profitData.vendorRevenue)
+                        tooltip:AddDoubleLine("Vendor Shuffle:", string.format("%s%s|r (%s%d%%|r |cff888888@ %s|r)", vCol, vStr, vmCol, profitData.vendorEffectiveMarginPct, vSaleStr))
                     end
                 end
             end
@@ -3364,39 +3525,57 @@ local function ResolveHistoryDBKey(input)
     return input
 end
 
-function MarketSync.GetItemHistory(dbKey)
-    dbKey = ResolveHistoryDBKey(dbKey)
-    local pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
-    local priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
-    if (not priceData or not priceData.h) and (not pData or not pData.h) then return {} end
+local function IsDataPackEntry(record)
+    if type(record) ~= "table" then return false end
+    if record.src == "DataPack" then return true end
+    if MarketSync.IsWebAuctionRecord and MarketSync.IsWebAuctionRecord(record) then return true end
+    return false
+end
 
-    local history = {}
-    local meta = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
-    local FromBase36 = MarketSync.FromBase36
-
-    -- Track which days have granular data so we don't double-count
-    local granularDays = {}
-
-    -- 1. Unpack granular timeseries strings and compact summaries from PersonalData
-    if pData and pData.h then
-        for dayStr, histStr in pairs(pData.h) do
-            if histStr and histStr ~= "" then
-                if MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr) then
-                    local parsed = MarketSync.ParseCompactRecord and MarketSync.ParseCompactRecord(histStr)
+local function UnpackHistoryRecord(record, defaultOrigin, meta, FromBase36, outHistory, coveredDays)
+    if type(record) ~= "table" then return end
+    if record.h then
+        for dayStr, histVal in pairs(record.h) do
+            if type(histVal) == "number" then
+                local day = tonumber(dayStr)
+                if day and not coveredDays[dayStr] then
+                    coveredDays[dayStr] = true
+                    local lowPrice = record.l and record.l[dayStr] or histVal
+                    local qty = record.a and record.a[dayStr] or 0
+                    local source = defaultOrigin
+                    if defaultOrigin == "Guild" and meta and meta.days and meta.days[dayStr] then
+                        local s = meta.days[dayStr].source
+                        if s then source = s:match("^([^%-]+)") or s end
+                    end
+                    table.insert(outHistory, {
+                        day = day,
+                        bucketOffset = nil,
+                        sortKey = day * 100,
+                        high = histVal,
+                        low = lowPrice,
+                        price = histVal,
+                        quantity = qty,
+                        source = source,
+                        origin = defaultOrigin,
+                        isGranular = false,
+                    })
+                end
+            elseif type(histVal) == "string" and histVal ~= "" then
+                if MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histVal) then
+                    local parsed = MarketSync.ParseCompactRecord and MarketSync.ParseCompactRecord(histVal)
                     if parsed then
                         local day = tonumber(dayStr)
                         local isWeekly = false
-                        if not day and type(dayStr) == "string" and dayStr:sub(1, 2) == "W_" then
+                        if not day and dayStr:sub(1, 2) == "W_" then
                             local weekNum = tonumber(dayStr:sub(3))
                             if weekNum then
                                 day = weekNum * 7
                                 isWeekly = true
                             end
                         end
-                        if day then
-                            granularDays[tostring(day)] = true
-                            local timeLabel = isWeekly and "Weekly Avg" or "Daily Avg"
-                            table.insert(history, {
+                        if day and not coveredDays[tostring(day)] then
+                            coveredDays[tostring(day)] = true
+                            table.insert(outHistory, {
                                 day = day,
                                 bucketOffset = nil,
                                 sortKey = (day * 100) + 48,
@@ -3404,8 +3583,9 @@ function MarketSync.GetItemHistory(dbKey)
                                 low = parsed.min,
                                 price = parsed.avg,
                                 quantity = parsed.volume,
-                                source = "Personal",
-                                timeLabel = timeLabel,
+                                source = defaultOrigin,
+                                origin = defaultOrigin,
+                                timeLabel = isWeekly and "Weekly Avg" or "Daily Avg",
                                 isGranular = false,
                                 isCompact = true,
                                 isWeekly = isWeekly,
@@ -3414,30 +3594,28 @@ function MarketSync.GetItemHistory(dbKey)
                     end
                 else
                     local day = tonumber(dayStr)
-                    if day then
-                        granularDays[dayStr] = true
-                        for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                    if day and not coveredDays[dayStr] then
+                        coveredDays[dayStr] = true
+                        for b_offs, p_b36, q_b36 in string.gmatch(histVal, "(%d+):([%w%-]+):([%w%-]+)") do
                             local bucketOffset = tonumber(b_offs)
                             local price = FromBase36(p_b36)
                             local qty = FromBase36(q_b36)
                             if price and price > 0 then
-                                -- Per-day source attribution
-                                local source = "Personal"
-                                if meta and meta.days and meta.days[dayStr] then
+                                local source = defaultOrigin
+                                if defaultOrigin == "Guild" and meta and meta.days and meta.days[dayStr] then
                                     local s = meta.days[dayStr].source
                                     if s then source = s:match("^([^%-]+)") or s end
                                 end
-
-                                table.insert(history, {
+                                table.insert(outHistory, {
                                     day = day,
                                     bucketOffset = bucketOffset,
-                                    -- sortKey: scanDay * 100 + bucketOffset gives chronological ordering
                                     sortKey = (day * 100) + bucketOffset,
                                     high = price,
                                     low = price,
                                     price = price,
                                     quantity = qty,
                                     source = source,
+                                    origin = defaultOrigin,
                                     timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
                                     isGranular = true,
                                 })
@@ -3448,35 +3626,95 @@ function MarketSync.GetItemHistory(dbKey)
             end
         end
     end
+    -- Fallback when a record only carries top-level m / d (e.g. lightweight DataPack or Neutral snapshot)
+    local topPrice = tonumber(record.m)
+    local topDay = tonumber(record.d) or (MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0)
+    if topPrice and topPrice > 0 and topDay > 0 and not coveredDays[tostring(topDay)] then
+        coveredDays[tostring(topDay)] = true
+        table.insert(outHistory, {
+            day = topDay,
+            bucketOffset = nil,
+            sortKey = topDay * 100,
+            high = topPrice,
+            low = topPrice,
+            price = topPrice,
+            quantity = tonumber(record.q) or 0,
+            source = defaultOrigin,
+            origin = defaultOrigin,
+            isGranular = false,
+        })
+    end
+end
 
-    -- 2. Fill any days that DON'T have granular data with daily aggregate fallback
-    if priceData and priceData.h then
-        for dayStr, highPrice in pairs(priceData.h) do
-            local day = tonumber(dayStr)
-            if day and not granularDays[dayStr] then
-                local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
-                local qty = priceData.a and priceData.a[dayStr] or 0
+function MarketSync.GetItemHistory(dbKey, filterOpts)
+    dbKey = ResolveHistoryDBKey(dbKey)
+    local realmDB = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+    local FromBase36 = MarketSync.FromBase36
+    local history = {}
+    local coveredDays = {}
 
-                local source = "Personal"
-                if meta and meta.days and meta.days[dayStr] then
-                    local s = meta.days[dayStr].source
-                    if s then source = s:match("^([^%-]+)") or s end
-                elseif day == (MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0) then
-                    source = "Personal"
-                end
+    local market = type(filterOpts) == "table" and filterOpts.market or "main"
+    if market == "neutral" then
+        local nData = realmDB and realmDB.NeutralData and realmDB.NeutralData[dbKey]
+        local nMeta = realmDB and realmDB.NeutralMeta and realmDB.NeutralMeta[dbKey]
+        local nOrigin = (nMeta and nMeta.source) or "Neutral"
+        if nData then
+            UnpackHistoryRecord(nData, nOrigin, nil, FromBase36, history, coveredDays)
+        end
+        table.sort(history, function(a, b) return a.sortKey > b.sortKey end)
+        return history
+    end
 
+    local incLocal = not filterOpts or filterOpts.localScan ~= false
+    local incGuild = not filterOpts or filterOpts.guildSync ~= false
+    local incPack  = not filterOpts or filterOpts.dataPack ~= false
+
+    local meta = realmDB and realmDB.ItemMetadata and realmDB.ItemMetadata[dbKey]
+    local pData = realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey]
+    local gData = realmDB and realmDB.GuildData and realmDB.GuildData[dbKey]
+    local auctData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
+
+    -- 1. Personal / Local Scan
+    if incLocal and pData then
+        UnpackHistoryRecord(pData, "Personal", nil, FromBase36, history, coveredDays)
+    end
+
+    -- 2. Guild Sync vs Data Pack inside GuildData
+    if gData then
+        local gIsPack = IsDataPackEntry(gData)
+        if gIsPack and incPack then
+            UnpackHistoryRecord(gData, "DataPack", meta, FromBase36, history, coveredDays)
+        elseif not gIsPack and incGuild then
+            UnpackHistoryRecord(gData, "Guild", meta, FromBase36, history, coveredDays)
+        end
+    end
+
+    -- 3. Direct MarketSyncData addon fallback when DataPack is toggled ON
+    if incPack and _G.MarketSyncData and type(_G.MarketSyncData.GetCurrentMarketPrices) == "function" then
+        local okP, packPrices = pcall(_G.MarketSyncData.GetCurrentMarketPrices)
+        local pEntry = okP and type(packPrices) == "table" and (packPrices[dbKey] or packPrices[tonumber(dbKey)])
+        if type(pEntry) == "table" then
+            UnpackHistoryRecord(pEntry, "DataPack", nil, FromBase36, history, coveredDays)
+        elseif type(pEntry) == "number" and pEntry > 0 then
+            local curDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0
+            if curDay > 0 and not coveredDays[tostring(curDay)] then
+                coveredDays[tostring(curDay)] = true
                 table.insert(history, {
-                    day = day,
-                    bucketOffset = nil,
-                    sortKey = day * 100,
-                    high = highPrice,
-                    low = lowPrice,
-                    price = highPrice,
-                    quantity = qty,
-                    source = source,
-                    isGranular = false,
+                    day = curDay, sortKey = curDay * 100, high = pEntry, low = pEntry,
+                    price = pEntry, quantity = 0, source = "DataPack", origin = "DataPack", isGranular = false,
                 })
             end
+        end
+    end
+
+    -- 4. Legacy Auctionator.Database.db fallback
+    if auctData and auctData ~= gData then
+        local aIsPack = IsDataPackEntry(auctData)
+        if aIsPack and incPack then
+            UnpackHistoryRecord(auctData, "DataPack", meta, FromBase36, history, coveredDays)
+        elseif not aIsPack and (incLocal or incGuild) then
+            local fallbackOrigin = incLocal and "Personal" or "Guild"
+            UnpackHistoryRecord(auctData, fallbackOrigin, meta, FromBase36, history, coveredDays)
         end
     end
 
@@ -3488,45 +3726,66 @@ end
 -- Returns ONLY the granular 30-min data points for analytics algorithms.
 -- Compact daily/weekly records are skipped to preserve intraday accuracy.
 -- Each entry: { day, bucketOffset, price, quantity, timestamp }
-function MarketSync.GetGranularHistory(dbKey)
+function MarketSync.GetGranularHistory(dbKey, filterOpts)
     dbKey = ResolveHistoryDBKey(dbKey)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-    local pData = realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey]
-    if not pData or not pData.h then return {} end
-
+    local market = type(filterOpts) == "table" and filterOpts.market or "main"
     local FromBase36 = MarketSync.FromBase36
     local points = {}
+    local seenBuckets = {}
 
-    for dayStr, histStr in pairs(pData.h) do
-        -- Skip compact summaries (not 30-min bucket points)
-        if not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr)) and not (type(dayStr) == "string" and dayStr:sub(1, 2) == "W_") then
-            local day = tonumber(dayStr)
-            if day and histStr and histStr ~= "" then
-                for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
-                    local bucketOffset = tonumber(b_offs)
-                    local price = FromBase36(p_b36)
-                    local qty = FromBase36(q_b36)
-                    if price and price > 0 then
-                        -- Reconstruct approximate UNIX timestamp for this data point
-                        local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
-                        if not dayTimestamp then
-                            local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
-                                or (MarketSync and MarketSync.SCAN_DAY_0)
-                                or 1577836800
-                            dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
+    local function CollectGranular(record)
+        if type(record) ~= "table" or not record.h then return end
+        for dayStr, histStr in pairs(record.h) do
+            if type(histStr) == "string" and histStr ~= ""
+                and not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr))
+                and dayStr:sub(1, 2) ~= "W_" then
+                local day = tonumber(dayStr)
+                if day then
+                    for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                        local bucketOffset = tonumber(b_offs)
+                        local price = FromBase36(p_b36)
+                        local qty = FromBase36(q_b36)
+                        local bKey = day * 100 + (bucketOffset or 0)
+                        if price and price > 0 and not seenBuckets[bKey] then
+                            seenBuckets[bKey] = true
+                            local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
+                            if not dayTimestamp then
+                                local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
+                                    or (MarketSync and MarketSync.SCAN_DAY_0)
+                                    or 1577836800
+                                dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
+                            end
+                            local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
+                            table.insert(points, {
+                                day = day,
+                                bucketOffset = bucketOffset,
+                                price = price,
+                                quantity = qty,
+                                timestamp = pointTimestamp,
+                                timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
+                            })
                         end
-                        local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
-
-                        table.insert(points, {
-                            day = day,
-                            bucketOffset = bucketOffset,
-                            price = price,
-                            quantity = qty,
-                            timestamp = pointTimestamp,
-                            timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
-                        })
                     end
                 end
+            end
+        end
+    end
+
+    if market == "neutral" then
+        CollectGranular(realmDB and realmDB.NeutralData and realmDB.NeutralData[dbKey])
+    else
+        local incLocal = not filterOpts or filterOpts.localScan ~= false
+        local incGuild = not filterOpts or filterOpts.guildSync ~= false
+        local incPack  = not filterOpts or filterOpts.dataPack ~= false
+        if incLocal then
+            CollectGranular(realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey])
+        end
+        local gData = realmDB and realmDB.GuildData and realmDB.GuildData[dbKey]
+        if gData then
+            local gIsPack = IsDataPackEntry(gData)
+            if (gIsPack and incPack) or (not gIsPack and incGuild) then
+                CollectGranular(gData)
             end
         end
     end

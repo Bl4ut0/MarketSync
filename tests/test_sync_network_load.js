@@ -952,3 +952,4 @@ function assert(condition, message) {
 }
 
 console.log(`\nAll ${passed} sync verification and network load tests passed successfully!`);
+module.exports = { createLuaEnv };

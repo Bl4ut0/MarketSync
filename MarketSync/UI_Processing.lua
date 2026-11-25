@@ -294,9 +294,9 @@ local function SetControlVisible(control, visible)
     if visible then control:Show() else control:Hide() end
 end
 
-local function CreateBox(parent, x, y, width, height)
+local function CreateBox(parent, x, y, width, height, auctionSurface)
     if MarketSync and MarketSync.CreateModernInset then
-        return MarketSync.CreateModernInset(parent, x, y, width, height)
+        return MarketSync.CreateModernInset(parent, x, y, width, height, auctionSurface)
     end
     local box = CreateFrame("Frame", nil, parent)
     box:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
@@ -312,9 +312,10 @@ end
 
 function MarketSync.CreateProcessingPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
-    local LEFT_X = isEmbedded and 10 or 14
+    local isLegacyMain = not isEmbedded and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+    local LEFT_X = isEmbedded and 10 or (isLegacyMain and 24 or 14)
     local LEFT_W = 220
-    local RESULTS_X = isEmbedded and 16 or 18
+    local RESULTS_X = isEmbedded and 16 or (isLegacyMain and 24 or 18)
     -- The classic Auction House hosts this panel in a shorter but wider area
     -- than the portable window. Use the actual host width instead of leaving
     -- unused space to the right of the price columns.
@@ -361,10 +362,10 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.page = 0
     panel.customPage = 0
 
-    local leftTopBox = CreateBox(panel, LEFT_X, controlsTop, effectiveWidth - LEFT_X - 10, 68)
-    local rightBox = CreateBox(panel, RESULTS_X - 4, resultsTop, ROW_WIDTH + 8, 320)
-    rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
-    local leftBottomBox = CreateBox(panel, 0, 0, LEFT_W, 202)
+    local leftTopBox = CreateBox(panel, LEFT_X, controlsTop, effectiveWidth - LEFT_X - 10, 68, "controls")
+    local rightBox = CreateBox(panel, RESULTS_X - 4, resultsTop, ROW_WIDTH + 8, 320, "results")
+    rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, parent.MarketSyncNativeAuctionFooter and 0 or 8)
+    local leftBottomBox = CreateBox(panel, 0, 0, LEFT_W, 202, "controls")
     if leftBottomBox.ClearAllPoints then leftBottomBox:ClearAllPoints() end
     leftBottomBox:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, resultsTop - 4)
     leftBottomBox:SetSize(LEFT_W, 202)
@@ -387,6 +388,8 @@ function MarketSync.CreateProcessingPanel(parent)
     local RunActiveMode
     local UpdateResultRows
     local HandleTableMouseWheel
+    local RefreshResultHeaders
+    local BuildCraftDisplay
 
     local tableScrollBar
     if MarketSync.CreateModernTableScrollBar and rightBox then
@@ -644,6 +647,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
     panel.selectedProfession = "ALL"
+    panel.craftSaleTarget = "ah" -- "ah" (resell on AH -5% cut) or "vendor" (bulk vendor shuffle, 0% cut)
 
     local RefreshProfessionOptions
     local characterLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -707,6 +711,35 @@ function MarketSync.CreateProcessingPanel(parent)
     craftDesc:SetJustifyH("LEFT")
     if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
     craftDesc:SetText("|cff777777Current realm AH prices|r")
+
+    local saleTargetDropdown
+    local function RefreshSaleTarget()
+        if panel.craftSaleTarget == "vendor" then
+            SetDropdownLabel(saleTargetDropdown, "Vendor Sale")
+            craftDesc:SetText("|cff777777Vendor sell price less reagent cost (0% fee).|r")
+        else
+            SetDropdownLabel(saleTargetDropdown, "Auction Sale")
+            craftDesc:SetText("|cff777777Current realm auction prices less reagent cost and the 5% cut.|r")
+        end
+    end
+    saleTargetDropdown = BuildDropdown(parentPrefix .. "ProcessingSaleTargetDropdown", panel, 116, function(_, level)
+        for _, option in ipairs({ { "ah", "Auction Sale" }, { "vendor", "Vendor Sale" } }) do
+            local target, label = option[1], option[2]
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label
+            info.checked = panel.craftSaleTarget == target
+            info.func = function()
+                if panel.craftSaleTarget == target then return end
+                panel.craftSaleTarget = target
+                RefreshSaleTarget()
+                if RefreshResultHeaders then RefreshResultHeaders() end
+                if panel.activeMode == "craft" and RunActiveMode then RunActiveMode() end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    saleTargetDropdown:SetPoint("LEFT", modeButtons.craft, "RIGHT", 8, 0)
+    RefreshSaleTarget()
 
 
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -829,7 +862,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local colX = RESULTS_X - 2
     for i, col in ipairs(colDefs) do
-        local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(panel, col.width, 20, col.name, col.sortKey)
+        local hdr = MarketSync.CreateAHColumnHeader and MarketSync.CreateAHColumnHeader(panel, col.width, 20, col.name, col.sortKey, true)
         if not hdr then
             hdr = CreateFrame("Button", nil, panel, "BackdropTemplate")
             hdr:SetSize(col.width, 20)
@@ -882,8 +915,21 @@ function MarketSync.CreateProcessingPanel(parent)
         { "Status", "Price freshness and whether the craft is currently profitable." },
     }
 
-    local function RefreshResultHeaders()
-        local definitions = (panel.activeMode == "craft") and CRAFT_HEADERS or ARBITRAGE_HEADERS
+    local VENDOR_CRAFT_HEADERS = {
+        { "Item", "Crafted output item." },
+        { "Diff.", "Current profession difficulty reported for this recipe." },
+        { "Vendor+", "Bulk Vendor profit per craft (Vendor sell payout minus complete material cost, 0% cut)." },
+        { "Vendor", "Total Vendor sell payout per craft (break-even max material spend)." },
+        { "Mats", "Current total Auction House / vendor cost of all reagents for one craft." },
+        { "Room", "Expected bulk vendor profit per craft (Vendor payout minus material cost)." },
+        { "Status", "Whether buying reagents on the AH and selling the craft to a vendor is profitable." },
+    }
+
+    RefreshResultHeaders = function()
+        local definitions = ARBITRAGE_HEADERS
+        if panel.activeMode == "craft" then
+            definitions = (panel.craftSaleTarget == "vendor") and VENDOR_CRAFT_HEADERS or CRAFT_HEADERS
+        end
         for i, header in ipairs(panel.headerButtons) do
             local definition = definitions[i]
             if header.label and definition then
@@ -931,11 +977,6 @@ function MarketSync.CreateProcessingPanel(parent)
         end
         row.rowBg = rowBg
 
-        local rowHl = row:CreateTexture(nil, "HIGHLIGHT")
-        rowHl:SetPoint("TOPLEFT", 34, 0)
-        rowHl:SetPoint("BOTTOMRIGHT", 0, 0)
-        rowHl:SetColorTexture(MarketSync.GetThemeColor("hover"))
-
         local c1 = colDefs[1].width
         local c2 = c1 + colDefs[2].width
         local c3 = c2 + colDefs[3].width
@@ -981,20 +1022,27 @@ function MarketSync.CreateProcessingPanel(parent)
             if label.SetWordWrap then label:SetWordWrap(false) end
         end
 
-        local selectedBg = row:CreateTexture(nil, "BACKGROUND")
-        selectedBg:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
-        selectedBg:SetVertexColor(1, 0.8, 0, 0.5)
-        selectedBg:SetBlendMode("ADD")
-        selectedBg:SetAllPoints(row)
+        local createNativeHighlight = MarketSync.CreateForeverAuctionRowHighlight
+        local selectedBg = createNativeHighlight and createNativeHighlight(row, true)
+        if not selectedBg then
+            selectedBg = row:CreateTexture(nil, "BACKGROUND")
+            selectedBg:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
+            selectedBg:SetVertexColor(1, 0.8, 0, 0.45)
+            selectedBg:SetBlendMode("ADD")
+            selectedBg:SetAllPoints(row)
+
+            local highlight = row:CreateTexture(nil, "HIGHLIGHT")
+            highlight:SetTexture("Interface\\HelpFrame\\HelpFrameButton-Highlight")
+            highlight:SetBlendMode("ADD")
+            if highlight.SetAlpha then highlight:SetAlpha(0.38) end
+            highlight:SetSize(ROW_WIDTH - 38, 32)
+            highlight:SetPoint("TOPLEFT", 33, -3)
+            highlight:SetTexCoord(0, 1.0, 0, 0.578125)
+        else
+            createNativeHighlight(row)
+        end
         selectedBg:Hide()
         row.selectedBg = selectedBg
-
-        local highlight = row:CreateTexture(nil, "HIGHLIGHT")
-        highlight:SetTexture("Interface\\HelpFrame\\HelpFrameButton-Highlight")
-        highlight:SetBlendMode("ADD")
-        highlight:SetSize(ROW_WIDTH - 38, 32)
-        highlight:SetPoint("TOPLEFT", 33, -3)
-        highlight:SetTexCoord(0, 1.0, 0, 0.578125)
 
         local function ShowRowTooltip(owner)
             GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
@@ -1158,7 +1206,7 @@ function MarketSync.CreateProcessingPanel(parent)
     prevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     prevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
     local pnt = prevBtn.GetNormalTexture and prevBtn:GetNormalTexture()
-    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     local nextBtn = CreateFrame("Button", nil, panel)
     nextBtn:SetSize(20, 20)
@@ -1167,7 +1215,7 @@ function MarketSync.CreateProcessingPanel(parent)
     nextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
     nextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
     local nnt = nextBtn.GetNormalTexture and nextBtn:GetNormalTexture()
-    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     panel.pageText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     panel.pageText:SetPoint("RIGHT", prevBtn, "LEFT", -8, 0)
@@ -1286,7 +1334,7 @@ function MarketSync.CreateProcessingPanel(parent)
         if i % 2 == 0 then
             local bg = row:CreateTexture(nil, "BACKGROUND")
             bg:SetAllPoints()
-            bg:SetColorTexture(1, 1, 1, 0.04)
+            bg:SetColorTexture(MarketSync.GetThemeColor("stripe"))
         end
 
         row.deleteBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
@@ -1320,7 +1368,7 @@ function MarketSync.CreateProcessingPanel(parent)
     customPrevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     customPrevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
     local cpnt = customPrevBtn.GetNormalTexture and customPrevBtn:GetNormalTexture()
-    if cpnt and cpnt.SetVertexColor then cpnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if cpnt and cpnt.SetVertexColor then cpnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     local customNextBtn = CreateFrame("Button", nil, leftBottomBox)
     customNextBtn:SetSize(16, 16)
@@ -1329,7 +1377,7 @@ function MarketSync.CreateProcessingPanel(parent)
     customNextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
     customNextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
     local cnnt = customNextBtn.GetNormalTexture and customNextBtn:GetNormalTexture()
-    if cnnt and cnnt.SetVertexColor then cnnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+    if cnnt and cnnt.SetVertexColor then cnnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     local function ModeLabel(mode)
         if mode == "process" then return "Process Scan" end
@@ -1415,6 +1463,7 @@ function MarketSync.CreateProcessingPanel(parent)
         SetControlVisible(professionDropdown, isCraft)
         SetControlVisible(craftDesc, isCraft)
         SetControlVisible(btnResyncProf, isCraft)
+        SetControlVisible(saleTargetDropdown, isCraft)
 
         customTitle:SetText(isCraft and "|cffffd700Craft Lists|r" or "|cffffd700Saved Analyses|r")
         customNameLabel:SetText(isCraft and "List" or "Preset")
@@ -1511,11 +1560,11 @@ function MarketSync.CreateProcessingPanel(parent)
         nextBtn:SetEnabled(hasNext)
         local pnt = prevBtn.GetNormalTexture and prevBtn:GetNormalTexture()
         if pnt and pnt.SetVertexColor then
-            if hasPrev then pnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else pnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasPrev then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else pnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         local nnt = nextBtn.GetNormalTexture and nextBtn:GetNormalTexture()
         if nnt and nnt.SetVertexColor then
-            if hasNext then nnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else nnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasNext then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else nnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
 
         if total > 0 then
@@ -1614,18 +1663,8 @@ function MarketSync.CreateProcessingPanel(parent)
             local pctColor = "|cff888888"
             local pctLabel = ""
             if roiPct then
-                local sign = (roiPct > 0) and "+" or ""
-                if roiPct >= 50 then
-                    pctColor = "|cff00ff00"
-                elseif roiPct >= 20 then
-                    pctColor = "|cff33cc33"
-                elseif roiPct >= 0 then
-                    pctColor = "|cffffd700"
-                elseif roiPct >= -20 then
-                    pctColor = "|cffff8800"
-                else
-                    pctColor = "|cffff4444"
-                end
+                local sign = (roiPct >= 0) and "+" or ""
+                pctColor = (roiPct >= 0) and "|cff00ff00" or "|cffff2020"
                 pctLabel = " " .. pctColor .. "(" .. sign .. roiPct .. "%)|r"
             end
 
@@ -1735,18 +1774,60 @@ function MarketSync.CreateProcessingPanel(parent)
         return rows
     end
 
-    local function BuildCraftDisplay(craftResults, yieldStep)
+    BuildCraftDisplay = function(craftResults, yieldStep)
         local rows = {}
+        local useVendor = (panel.craftSaleTarget == "vendor")
 
         for index, c in ipairs(craftResults or {}) do
             local outputName = c.outputName or c.recipeName or ("Item " .. tostring(c.outputItemID or "?"))
             local itemName, itemLink, icon = ResolveCachedItemVisual(c.outputItemID, outputName)
-            local revenue = tonumber(c.revenue) or 0
             local craftCost = tonumber(c.craftCost) or 0
-            local margin = tonumber(c.margin) or 0
-            local maxSpend = tonumber(c.maxCraftCost) or 0
+            local missingMatPrice = c.hasMissingMatPrice == true
+            local outputQty = math.max(1, tonumber(c.outputQty) or 1)
+            local outputQtyMin = math.max(1, tonumber(c.outputQtyMin) or outputQty)
+            local outputQtyMax = math.max(outputQtyMin, tonumber(c.outputQtyMax) or outputQty)
+
+            -- Resolve vendor sell price from client item cache for previously cached recipes
+            local vendorUnitPrice = tonumber(c.vendorUnitPrice) or 0
+            if vendorUnitPrice <= 0 and c.outputItemID and MarketSync.GetVendorSellPrice then
+                local resolvedSell = MarketSync.GetVendorSellPrice(c.outputItemID, false)
+                if resolvedSell and resolvedSell > 0 then
+                    vendorUnitPrice = resolvedSell
+                    c.vendorUnitPrice = resolvedSell
+                    c.vendorRevenueMin = math.floor(resolvedSell * outputQtyMin)
+                    c.vendorRevenueExpected = math.floor(resolvedSell * outputQty)
+                    c.vendorRevenueMax = math.floor(resolvedSell * outputQtyMax)
+                    c.vendorRevenue = c.vendorRevenueMin or c.vendorRevenueExpected
+                    c.vendorMaxCraftCost = c.vendorRevenue
+                    if not missingMatPrice then
+                        c.vendorMarginMin = c.vendorRevenueMin - craftCost
+                        c.vendorMarginExpected = c.vendorRevenueExpected - craftCost
+                        c.vendorMarginMax = c.vendorRevenueMax - craftCost
+                        c.vendorMargin = c.vendorMarginMin or c.vendorMarginExpected
+                        c.vendorMeetsMargin = (c.vendorMargin or 0) >= 0
+                        if craftCost > 0 then
+                            local vScale = c.vendorMaxCraftCost / craftCost
+                            for _, matInfo in ipairs(c.matsDetailed or {}) do
+                                if matInfo.price and matInfo.price > 0 then
+                                    matInfo.vendorCapPrice = math.max(1, math.floor(matInfo.price * vScale))
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            local vendorRevenue = tonumber(c.vendorRevenue) or 0
+            local vendorMargin = tonumber(c.vendorMargin) or 0
+            local vendorMaxSpend = tonumber(c.vendorMaxCraftCost) or 0
+            local hasVendorSell = vendorRevenue > 0
+
+            local revenue = useVendor and vendorRevenue or (tonumber(c.revenue) or 0)
+            local margin = useVendor and vendorMargin or (tonumber(c.margin) or 0)
+            local maxSpend = useVendor and vendorMaxSpend or (tonumber(c.maxCraftCost) or 0)
             local capDelta = maxSpend - craftCost
             local missingPrice = c.hasMissingPrice == true
+            if useVendor then missingPrice = missingMatPrice or not hasVendorSell end
 
             -- Match the Materials window: ROI is profit divided by material
             -- cost, not profit divided by net sale proceeds.
@@ -1754,26 +1835,25 @@ function MarketSync.CreateProcessingPanel(parent)
                 and math.floor((margin / craftCost * 100) + 0.5) or nil
             local pctLabel = ""
             if profitPct and not missingPrice then
-                if profitPct >= 30 then
+                if profitPct >= 0 then
                     pctLabel = " |cff00ff00(+" .. profitPct .. "%)|r"
-                elseif profitPct >= 10 then
-                    pctLabel = " |cffffd700(+" .. profitPct .. "%)|r"
-                elseif profitPct >= 0 then
-                    pctLabel = " |cffffd700(+" .. profitPct .. "%)|r"
                 else
-                    pctLabel = " |cffff4444(" .. profitPct .. "%)|r"
+                    pctLabel = " |cffff2020(" .. profitPct .. "%)|r"
                 end
             end
 
             local status
             local statusRank = 0
-            if missingPrice then
+            if useVendor and not hasVendorSell then
+                status = "|cff777777NO VENDOR|r"
+                statusRank = 0
+            elseif missingPrice then
                 status = "|cffffaa00NO PRICE|r"
                 statusRank = 1
-            elseif c.outputStale or c.hasStaleMat then
+            elseif (not useVendor and c.outputStale) or c.hasStaleMat then
                 status = "|cffffaa00STALE|r" .. pctLabel
                 statusRank = 2
-            elseif c.meetsMargin then
+            elseif (useVendor and c.vendorMeetsMargin) or (not useVendor and c.meetsMargin) then
                 status = "|cff00ff00GOOD|r" .. pctLabel
                 statusRank = 3
             else
@@ -1797,12 +1877,26 @@ function MarketSync.CreateProcessingPanel(parent)
             end
             detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
                 ColorLabel("Output AH/Each (gross):"), (c.outputUnitPrice and c.outputUnitPrice > 0) and MoneyText(c.outputUnitPrice) or "Unavailable")
-            if missingPrice then
-                detailLines[#detailLines + 1] = ColorWarn("Profit unavailable: scan missing output or material prices.")
-            else
-                detailLines[#detailLines + 1] = string.format("%s %s %s", ColorLabel("Net Revenue/Craft:"),
-                    ColorGood(MoneyText(revenue)), ColorMuted("(after " .. tostring(ahCutPercent) .. "% main-AH cut)"))
+            if hasVendorSell then
+                detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r %s",
+                    ColorLabel("Vendor Payout/Craft:"), MoneyText(vendorRevenue), ColorMuted("(0% cut, instant bulk)"))
+            end
+            if not missingMatPrice then
                 detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r", ColorLabel("Material Cost/Craft:"), MoneyText(craftCost))
+            end
+            if c.hasMissingPrice ~= true then
+                detailLines[#detailLines + 1] = string.format("%s %s %s", ColorLabel("Net AH Revenue/Craft:"),
+                    ColorGood(MoneyText(tonumber(c.revenue) or 0)), ColorMuted("(after " .. tostring(ahCutPercent) .. "% main-AH cut)"))
+            elseif not useVendor then
+                detailLines[#detailLines + 1] = ColorWarn("AH Profit unavailable: scan missing output or material prices.")
+            end
+            if hasVendorSell and not missingMatPrice then
+                local vProfitText = SignedMoneyText(vendorMargin, true)
+                local vRoi = craftCost > 0 and math.floor((vendorMargin / craftCost * 100) + 0.5) or 0
+                detailLines[#detailLines + 1] = string.format("%s %s %s",
+                    ColorLabel("Bulk Vendor Profit/Craft:"),
+                    (vendorMargin >= 0) and ColorGood(vProfitText) or ColorBad(vProfitText),
+                    ColorMuted(string.format("(%s%d%% ROI)", vendorMargin >= 0 and "+" or "", vRoi)))
             end
 
             local marginText = MoneyText(math.abs(margin))
@@ -1811,22 +1905,23 @@ function MarketSync.CreateProcessingPanel(parent)
             else
                 marginText = "-" .. marginText
             end
-            if not missingPrice then
+            if not missingPrice and not useVendor then
                 if c.marginMin and c.marginMax and c.marginMax > c.marginMin then
                     detailLines[#detailLines + 1] = string.format("%s %s / %s / %s",
-                        ColorLabel("Profit/Craft (min / expected / max):"),
+                        ColorLabel("AH Profit/Craft (min / exp / max):"),
                         (c.marginMin >= 0 and ColorGood or ColorBad)(SignedMoneyText(c.marginMin, true)),
                         ((c.marginExpected or margin) >= 0 and ColorGood or ColorBad)(SignedMoneyText(c.marginExpected or margin, true)),
                         (c.marginMax >= 0 and ColorGood or ColorBad)(SignedMoneyText(c.marginMax, true)))
                     detailLines[#detailLines + 1] = ColorMuted(string.format("Guaranteed floor: %s | Max proc yield: %s",
                         SignedMoneyText(c.marginMin, true), SignedMoneyText(c.marginMax, true)))
                 else
-                    detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("Profit/Craft:"), (margin >= 0) and ColorGood(marginText) or ColorBad(marginText))
+                    detailLines[#detailLines + 1] = string.format("%s %s", ColorLabel("AH Profit/Craft:"), (margin >= 0) and ColorGood(marginText) or ColorBad(marginText))
                 end
             end
 
             if maxSpend > 0 and not missingPrice then
-                detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r", ColorLabel("Material Cost Cap/Craft:"), MoneyText(maxSpend))
+                detailLines[#detailLines + 1] = string.format("%s |cffffffff%s|r",
+                    ColorLabel(useVendor and "Vendor Break-Even Mat Cap/Craft:" or "AH Material Cost Cap/Craft:"), MoneyText(maxSpend))
             end
 
             local mats = c.matsDetailed or {}
@@ -1839,14 +1934,18 @@ function MarketSync.CreateProcessingPanel(parent)
                 local qty = tonumber(mat.qty) or 1
                 local matPriceText = (mat.price and mat.price > 0) and MoneyText(mat.price) or "No price"
                 local priceColor = mat.stale and ColorWarn(matPriceText) or "|cffffffff" .. matPriceText .. "|r"
-                detailLines[#detailLines + 1] = string.format("%s x%d %s %s%s",
-                    ColorMuted(matName), qty, ColorMuted("@"), priceColor, ColorMuted("/ea"))
+                local capNote = (useVendor and mat.vendorCapPrice and mat.vendorCapPrice > 0)
+                    and ColorMuted(" (max " .. MoneyText(mat.vendorCapPrice) .. "/ea)") or ""
+                detailLines[#detailLines + 1] = string.format("%s x%d %s %s%s%s",
+                    ColorMuted(matName), qty, ColorMuted("@"), priceColor, ColorMuted("/ea"), capNote)
             end
 
+            local minMarg = useVendor and c.vendorMarginMin or c.marginMin
+            local maxMarg = useVendor and c.vendorMarginMax or c.marginMax
             local valueDisplay = "-"
             if not missingPrice then
-                if c.marginMin and c.marginMax and c.marginMax > c.marginMin then
-                    valueDisplay = SignedMoneyText(c.marginMin, true) .. " +"
+                if minMarg and maxMarg and maxMarg > minMarg then
+                    valueDisplay = SignedMoneyText(minMarg, true) .. " +"
                 else
                     valueDisplay = SignedMoneyText(margin, true)
                 end
@@ -2059,8 +2158,10 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.displayRows = data.rows
 
             local profitableCount = 0
+            local useVendor = panel.craftSaleTarget == "vendor"
             for _, row in ipairs(data.results) do
-                if row and row.meetsMargin then profitableCount = profitableCount + 1 end
+                local profit = useVendor and row.vendorMargin or (not useVendor and row.margin)
+                if profit and profit > 0 then profitableCount = profitableCount + 1 end
             end
             local sourceLabel = characterKey and Truncate(characterKey, 14) or "This character"
             local setLabel = setName and (" / " .. Truncate(setName, 14)) or ""
@@ -2241,11 +2342,11 @@ function MarketSync.CreateProcessingPanel(parent)
         customNextBtn:SetEnabled(hasCNext)
         local cpnt = customPrevBtn.GetNormalTexture and customPrevBtn:GetNormalTexture()
         if cpnt and cpnt.SetVertexColor then
-            if hasCPrev then cpnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else cpnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasCPrev then cpnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else cpnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
         local cnnt = customNextBtn.GetNormalTexture and customNextBtn:GetNormalTexture()
         if cnnt and cnnt.SetVertexColor then
-            if hasCNext then cnnt:SetVertexColor(0.70, 0.65, 0.55, 0.90) else cnnt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if hasCNext then cnnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else cnnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
     end
     panel.RefreshCustomRows = RefreshCustomRows

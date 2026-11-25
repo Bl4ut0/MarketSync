@@ -43,7 +43,7 @@ MarketSync.ICON_COIN = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
 -- and Blizzard passes protected / secret string values to chat handlers.
 -- ================================================================
 function MarketSync.IsSecretValue(val)
-    if val == nil then return false end
+    if type(val) == "nil" then return false end
     if type(issecretvalue) == "function" then
         local ok, isSecret = pcall(issecretvalue, val)
         if ok and isSecret then return true end
@@ -105,9 +105,132 @@ function MarketSync.GetPlayerMarketFaction()
     return "Unknown"
 end
 
+local ANNIVERSARY_REALMS = {
+    dreamscythe = true,
+    nightslayer = true,
+    maladath = true,
+    doomhowl = true,
+}
+
+function MarketSync.GetClientFlavor()
+    local interface = GetBuildInfo and select(4, GetBuildInfo())
+    local toc = tonumber(interface) or 0
+    if toc == 16001 or (interface == nil and MarketSyncForeverScanner ~= nil) or MarketSyncForeverScanner ~= nil or WOW_PROJECT_ID == 91 then
+        return "forever"
+    end
+    if toc >= 100000 then
+        return "retail"
+    end
+    local realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+        or (GetRealmName and GetRealmName())
+        or ""
+    local realmKey = string.lower(tostring(realm)):gsub("[%s%-_']+", "")
+    if ANNIVERSARY_REALMS[realmKey] then
+        return "anniversary"
+    end
+    if toc > 0 and toc < 20000 then
+        return "classicEra"
+    end
+    if toc >= 20000 and toc < 100000 then
+        return "classic"
+    end
+    return "classicEra"
+end
+
+local function GetAuctionRealmName()
+    local realm = GetNormalizedRealmName and GetNormalizedRealmName()
+    if MarketSync.IsSafeString(realm) and realm ~= "" then return realm end
+    realm = GetRealmName and GetRealmName()
+    if MarketSync.IsSafeString(realm) and realm ~= "" then return realm end
+end
+
+function MarketSync.GetForeverRulesetForRealm(realm)
+    local name = realm:lower():gsub("[^%a]", "")
+    if name:match("roleplaypvp$") or name:match("rppvp$") then return "roleplaypvp" end
+    if name:match("roleplay$") or name:match("rp$") then return "roleplay" end
+    if name:match("hardcore$") or name:match("hc$") then return "hardcore" end
+    if name:match("pvp$") then return "pvp" end
+    if name:match("pve$") or name:match("normal$") then return "normal" end
+end
+
+function MarketSync.GetForeverAuctionRuleset()
+    if MarketSync.GetClientFlavor() ~= "forever" then return end
+    local rules = Enum and Enum.GameRule
+    local active = C_GameRules and C_GameRules.IsGameRuleActive
+    -- These flags describe the playset. Forever no longer exposes a layer's realm name.
+    if active and rules and rules.PvPRuleset and rules.RPRuleset then
+        local pvp = active(rules.PvPRuleset)
+        local rp = active(rules.RPRuleset)
+        if pvp then return rp and "roleplaypvp" or "pvp" end
+        if rp then return "roleplay" end
+        if rules.HardcoreRuleset and active(rules.HardcoreRuleset) then return "hardcore" end
+        return "normal"
+    end
+    local realm = GetAuctionRealmName()
+    return realm and MarketSync.GetForeverRulesetForRealm(realm)
+end
+
+function MarketSync.GetAuctionRealm()
+    return GetAuctionRealmName() or MarketSync.GetForeverAuctionRuleset()
+end
+
+function MarketSync.GetPlayerScanName()
+    if type(UnitName) ~= "function" then return end
+    local name, surname = UnitName("player")
+    if not MarketSync.IsSafeString(name) or name == "" then return end
+    if MarketSync.GetClientFlavor() ~= "forever" then return name end
+    if (not MarketSync.IsSafeString(surname) or surname == "") and type(UnitFullName) == "function" then
+        local _, second = UnitFullName("player")
+        surname = second
+    end
+    if MarketSync.IsSafeString(surname) and surname ~= "" then
+        local realm = GetAuctionRealmName()
+        local suffix = " " .. surname
+        if not MarketSync.IsSameSyncRealm(surname, realm) and name:sub(-#suffix) ~= suffix then
+            return name .. suffix
+        end
+    end
+    return name
+end
+
+function MarketSync.RecordPersonalScan(realmDB, timestamp)
+    realmDB.PersonalScanTime = timestamp
+    realmDB.PersonalScanCharacter = MarketSync.GetPlayerScanName()
+end
+
+function MarketSync.IsWebAuctionRecord(record)
+    return type(record) == "table" and (record.source == "Web" or record.source == "DataPack"
+        or (record.src == "DataPack" and not record.source))
+end
+
+local recoveredAuctionKeys = {}
+
 function MarketSync.GetFactionRealmKey()
-    local realm = GetNormalizedRealmName() or GetRealmName()
-    return realm and (realm .. "@" .. MarketSync.GetPlayerMarketFaction()) or nil
+    local faction = MarketSync.GetPlayerMarketFaction()
+    local realm = GetAuctionRealmName()
+    if realm then return realm .. "@" .. faction end
+    if faction == "Unknown" then return nil end
+    local ruleset = MarketSync.GetForeverAuctionRuleset()
+    if not ruleset then return nil end
+    local market = ruleset .. "@" .. faction
+    local partitions = MarketSyncDB and MarketSyncDB.RealmData
+    if not partitions or partitions[market] then return market end
+    if recoveredAuctionKeys[market] and partitions[recoveredAuctionKeys[market]] then
+        return recoveredAuctionKeys[market]
+    end
+
+    -- Reopen an unambiguous existing market. Do not adopt unqualified or blank-realm data.
+    local recovered
+    for key, partition in pairs(partitions) do
+        local oldRealm, oldFaction = key:match("^(.+)@([^@]+)$")
+        if oldFaction == faction and MarketSync.GetForeverRulesetForRealm(oldRealm) == ruleset
+            and type(partition.PersonalData) == "table" and next(partition.PersonalData) then
+            if recovered then return market end
+            recovered = key
+        end
+    end
+    recoveredAuctionKeys[market] = recovered
+    return recovered or market
 end
 
 -- Use the existing realm wire field for a fail-closed faction boundary. Older
@@ -197,6 +320,35 @@ function MarketSync.SendAddonMessage(prefix, text, channel, target)
     local send = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
     if send then return send(prefix, text, channel, target) end
     return false
+end
+
+-- A post-call hook cannot see return values. Only our own sends can report
+-- acceptance/refusal without replacing another addon's API. Acceptance is local
+-- API acceptance, not a delivery acknowledgment. Old clients return nil/true.
+function MarketSync.SendAddonMessageChecked(prefix, text, channel, target)
+    local ok, result = pcall(MarketSync.SendAddonMessage, prefix, text, channel, target)
+    local accepted = ok and (result == nil or result == true or result == 0)
+    local stats = MarketSync.SyncSendStats
+    if not stats then
+        stats = { attempts = 0, accepted = 0, refused = 0, errors = 0,
+            attemptedBytes = 0, acceptedBytes = 0, refusedBytes = 0, byTransport = {} }
+        MarketSync.SyncSendStats = stats
+    end
+    local bytes = type(text) == "string" and #text or 0
+    stats.attempts = stats.attempts + 1
+    stats.attemptedBytes = stats.attemptedBytes + bytes
+    local kind = accepted and "accepted" or "refused"
+    stats[kind] = stats[kind] + 1
+    stats[kind .. "Bytes"] = stats[kind .. "Bytes"] + bytes
+    if not ok then stats.errors = stats.errors + 1 end
+    stats.lastResult = ok and tostring(result) or "API error"
+    stats.lastAttemptAt = GetTime and GetTime() or time()
+    if not accepted then stats.lastRefusalAt = stats.lastAttemptAt end
+    local transport = tostring(channel or "UNKNOWN")
+    local row = stats.byTransport[transport] or { attempts = 0, accepted = 0, refused = 0 }
+    stats.byTransport[transport] = row
+    row.attempts = row.attempts + 1; row[kind] = row[kind] + 1
+    return accepted, ok and result or "API error"
 end
 
 -- ================================================================
@@ -403,6 +555,8 @@ function MarketSync.InitializeDB()
             EnableNotificationSounds = true,
             BuildCacheOnStartup = false,
             LowRamMode = true,
+            PartialLowRamKeepLatest = true,
+            KeepSecondaryIndexesLoaded = false,
             OnDemandPersonal = true,
             OnDemandGuild = true,
             OnDemandNeutral = true,
@@ -439,7 +593,6 @@ function MarketSync.InitializeDB()
     if MarketSyncDB.EnableTooltipAuctionPrice == nil then MarketSyncDB.EnableTooltipAuctionPrice = true end
     if MarketSyncDB.EnableProfessionCraftInfo == nil then MarketSyncDB.EnableProfessionCraftInfo = true end
     if MarketSyncDB.EnableTooltipCraftCost == nil then MarketSyncDB.EnableTooltipCraftCost = true end
-    if MarketSyncDB.EnableTooltipCraftDemand == nil then MarketSyncDB.EnableTooltipCraftDemand = true end
     if MarketSyncDB.ShowItemsOnOtherCharacters == nil then MarketSyncDB.ShowItemsOnOtherCharacters = true end
     if MarketSyncDB.TooltipModifier == nil then MarketSyncDB.TooltipModifier = "SHIFT" end
     if MarketSyncDB.EnableProcessingTab == nil then MarketSyncDB.EnableProcessingTab = false end
@@ -450,6 +603,8 @@ function MarketSync.InitializeDB()
     end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.LowRamMode == nil then MarketSyncDB.LowRamMode = true end
+    if MarketSyncDB.PartialLowRamKeepLatest == nil then MarketSyncDB.PartialLowRamKeepLatest = true end
+    if MarketSyncDB.KeepSecondaryIndexesLoaded == nil then MarketSyncDB.KeepSecondaryIndexesLoaded = false end
     if MarketSyncDB.OnDemandPersonal == nil then MarketSyncDB.OnDemandPersonal = true end
     if MarketSyncDB.OnDemandGuild == nil then MarketSyncDB.OnDemandGuild = true end
     if MarketSyncDB.OnDemandNeutral == nil then MarketSyncDB.OnDemandNeutral = true end
@@ -460,12 +615,6 @@ function MarketSync.InitializeDB()
         MarketSyncDB.MinimapIcon.lock = MarketSyncDB.MinimapIcon.locked == true
     end
     MarketSyncDB.MinimapIcon.locked = nil
-    if MarketSyncDB.EnableLedgerBeta == nil then MarketSyncDB.EnableLedgerBeta = false end
-    if MarketSyncDB.EnableLedgerMinimapIcon == nil then MarketSyncDB.EnableLedgerMinimapIcon = false end
-    if not MarketSyncDB.LedgerMinimapIcon then
-        MarketSyncDB.LedgerMinimapIcon = { hide = not MarketSyncDB.EnableLedgerMinimapIcon, angle = 3.25, minimapPos = 195 }
-    end
-    if MarketSyncDB.LedgerRetentionDays == nil then MarketSyncDB.LedgerRetentionDays = 30 end
     if not MarketSyncDB.NotificationSoundID then MarketSyncDB.NotificationSoundID = 8959 end
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
@@ -493,7 +642,7 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB.RealmData then MarketSyncDB.RealmData = {} end
 
     -- MIGRATION: Move old global data to the current realm's partition on first load
-    local realm = GetNormalizedRealmName() or GetRealmName()
+    local realm = GetAuctionRealmName()
     if realm and not MarketSyncDB.RealmData[realm] then
         MarketSyncDB.RealmData[realm] = {
             PersonalData = MarketSyncDB.PersonalData or {},
@@ -585,7 +734,7 @@ function MarketSync.GetRealmDB()
         }
         -- Profession knowledge is not an auction quote. Retain existing saved
         -- character recipes while starting fresh, separate price histories.
-        local oldRealm = GetNormalizedRealmName() or GetRealmName()
+        local oldRealm = GetAuctionRealmName()
         local archived = MarketSyncDB.RealmData[oldRealm]
         if archived then
             MarketSyncDB.RealmData[realm].KnownCraftingRecipesByCharacter = archived.KnownCraftingRecipesByCharacter or {}
@@ -721,19 +870,68 @@ local function SampleDiagnosticTable(value, maxSamples, force)
     return result
 end
 
+local function SampleGuildAndPackSplit(guildData, maxSamples)
+    if type(guildData) ~= "table" then
+        return { count = 0, estimatedKB = 0 }, { count = 0, estimatedKB = 0 }
+    end
+    local gCount, gSamples, gBytes = 0, 0, 0
+    local pCount, pSamples, pBytes = 0, 0, 0
+    for key, row in pairs(guildData) do
+        local isPack = type(row) == "table" and row.src == "DataPack"
+        if isPack then
+            pCount = pCount + 1
+            if pSamples < maxSamples then
+                pSamples = pSamples + 1
+                local budget = { left = 200 }
+                pBytes = pBytes + 24 + EstimateDiagnosticValue(key, 2, {}, budget)
+                    + EstimateDiagnosticValue(row, 4, {}, budget)
+            end
+        else
+            gCount = gCount + 1
+            if gSamples < maxSamples then
+                gSamples = gSamples + 1
+                local budget = { left = 200 }
+                gBytes = gBytes + 24 + EstimateDiagnosticValue(key, 2, {}, budget)
+                    + EstimateDiagnosticValue(row, 4, {}, budget)
+            end
+        end
+    end
+    local guildEst = (gCount > 0 and (56 + gBytes * gCount / math.max(1, gSamples)) or 0) / 1024
+    local packEst = (pCount > 0 and (56 + pBytes * pCount / math.max(1, pSamples)) or 0) / 1024
+    return { count = gCount, estimatedKB = guildEst }, { count = pCount, estimatedKB = packEst }
+end
+
+local function MeasureAddOnKB(addonName)
+    if type(GetAddOnMemoryUsage) ~= "function" then return nil end
+    if C_AddOns and C_AddOns.IsAddOnLoaded and addonName ~= "MarketSync" and not C_AddOns.IsAddOnLoaded(addonName) then
+        return nil
+    elseif type(IsAddOnLoaded) == "function" and addonName ~= "MarketSync" and not IsAddOnLoaded(addonName) then
+        return nil
+    end
+    local ok, amount = pcall(GetAddOnMemoryUsage, addonName)
+    if ok and type(amount) == "number" and amount >= 0 then
+        return amount
+    end
+    return nil
+end
+
 function MarketSync.GetDiagnosticsSnapshot(force)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or {}
     local db = MarketSyncDB or {}
     local sampleLimit = 80
     local liveStore = MarketSync.Provider and MarketSync.Provider.GetLiveStore
         and MarketSync.Provider.GetLiveStore() or nil
+    local guildPrices, dataPackActive = SampleGuildAndPackSplit(realmDB.GuildData, sampleLimit)
     local storage = {
         personal = SampleDiagnosticTable(realmDB.PersonalData, sampleLimit, force),
+        guildPrices = guildPrices,
+        dataPackActive = dataPackActive,
         guild = SampleDiagnosticTable(realmDB.ItemMetadata, sampleLimit, force),
         provider = SampleDiagnosticTable(liveStore, sampleLimit, force),
         neutral = SampleDiagnosticTable(realmDB.NeutralData, sampleLimit, force),
         history = SampleDiagnosticTable(realmDB.HistoryLog, sampleLimit, force),
         itemInfo = SampleDiagnosticTable(db.ItemInfoCache, sampleLimit, force),
+        inventory = SampleDiagnosticTable(db.InventoryTracking, sampleLimit, force),
         recipes = SampleDiagnosticTable(realmDB.KnownCraftingRecipesByCharacter, sampleLimit, force),
         alerts = SampleDiagnosticTable(realmDB.NotificationRequests, sampleLimit, force),
     }
@@ -742,6 +940,59 @@ function MarketSync.GetDiagnosticsSnapshot(force)
         -- The provider store can be shared with Auctionator and may alias
         -- personal data. Report it separately, not as MarketSync-owned storage.
         if name ~= "provider" then storedKB = storedKB + part.estimatedKB end
+    end
+
+    local dataAddon = _G.MarketSyncData
+    local packDB = _G.MarketSyncDataDB
+    local dataPack = {
+        loaded = type(dataAddon) == "table",
+        flavor = type(dataAddon) == "table" and tostring(dataAddon.flavor or dataAddon.Flavor or "—") or "—",
+        version = type(dataAddon) == "table" and tostring(dataAddon.version or dataAddon.Version or "—") or "—",
+        importedMarket = type(dataAddon) == "table" and dataAddon.importedMarket or nil,
+        partitionCount = 0,
+        totalRecords = 0,
+        estimatedKB = 0,
+        partitions = {},
+    }
+    if type(dataAddon) == "table" then
+        local dates = dataAddon.dates or dataAddon.Dates
+        local compiled = dataAddon.compiledAt or dataAddon.date or dataAddon.Date
+        if type(dates) == "table" and #dates > 0 then
+            dataPack.dataDate = #dates == 1 and tostring(dates[1]) or string.format("%s to %s", dates[1], dates[#dates])
+        elseif compiled then
+            dataPack.dataDate = tostring(compiled)
+        elseif type(dataAddon.generatedAt) == "number" and dataAddon.generatedAt > 0 then
+            dataPack.dataDate = date("%Y-%m-%d", dataAddon.generatedAt)
+        else
+            dataPack.dataDate = "—"
+        end
+    end
+    if type(packDB) == "table" then
+        local currentPrices, currentLabel
+        if type(dataAddon) == "table" and type(dataAddon.GetCurrentMarketPrices) == "function" then
+            local okP, pTable, pLabel = pcall(dataAddon.GetCurrentMarketPrices)
+            if okP then currentPrices, currentLabel = pTable, pLabel end
+        end
+        dataPack.currentMarketLabel = currentLabel or dataPack.importedMarket
+        for partKey, partTable in pairs(packDB) do
+            if type(partTable) == "table" then
+                local sampled = SampleDiagnosticTable(partTable, sampleLimit, force)
+                dataPack.partitionCount = dataPack.partitionCount + 1
+                dataPack.totalRecords = dataPack.totalRecords + (sampled.count or 0)
+                dataPack.estimatedKB = dataPack.estimatedKB + (sampled.estimatedKB or 0)
+                table.insert(dataPack.partitions, {
+                    key = tostring(partKey),
+                    count = sampled.count or 0,
+                    estimatedKB = sampled.estimatedKB or 0,
+                    active = (currentPrices ~= nil and partTable == currentPrices),
+                })
+            end
+        end
+        table.sort(dataPack.partitions, function(a, b)
+            if a.active ~= b.active then return a.active end
+            if a.estimatedKB ~= b.estimatedKB then return a.estimatedKB > b.estimatedKB end
+            return a.key < b.key
+        end)
     end
 
     local indexes = MarketSync.GetIndexStatus and MarketSync.GetIndexStatus() or {}
@@ -757,12 +1008,10 @@ function MarketSync.GetDiagnosticsSnapshot(force)
         peers = SampleDiagnosticTable(MarketSync.SwarmPeers, sampleLimit).count,
     }
 
-    local addonKB
     if type(UpdateAddOnMemoryUsage) == "function" then pcall(UpdateAddOnMemoryUsage) end
-    if type(GetAddOnMemoryUsage) == "function" then
-        local ok, amount = pcall(GetAddOnMemoryUsage, "MarketSync")
-        if ok and type(amount) == "number" and amount >= 0 then addonKB = amount end
-    end
+    local addonKB = MeasureAddOnKB("MarketSync")
+    local dataPackAddonKB = MeasureAddOnKB("MarketSyncData")
+    local ledgerAddonKB = MeasureAddOnKB("MarketSyncLedger")
     local luaHeapKB
     if type(collectgarbage) == "function" then
         local ok, amount = pcall(collectgarbage, "count")
@@ -771,8 +1020,11 @@ function MarketSync.GetDiagnosticsSnapshot(force)
 
     return {
         addonKB = addonKB,
+        dataPackAddonKB = dataPackAddonKB,
+        ledgerAddonKB = ledgerAddonKB,
         luaHeapKB = luaHeapKB,
         storage = storage,
+        dataPack = dataPack,
         storedEstimatedKB = storedKB,
         runtime = runtime,
         indexes = indexes,
@@ -796,30 +1048,43 @@ function MarketSync.GetDiagnosticsSnapshot(force)
             rxRate = tonumber(MarketSync.RxRate) or 0,
             otherBytes = tonumber(MarketSync.OtherTxBytesRate) or 0,
             otherAPIs = tonumber(MarketSync.OtherTxAPIRate) or 0,
+            ownResults = MarketSync.SyncSendRates or {},
+            otherTransports = MarketSync.OtherTransportRates or {},
         },
     }
 end
 
 function MarketSync.PrintDiagnosticsSnapshot()
     local snapshot = MarketSync.GetDiagnosticsSnapshot(true)
-    local storage, runtime, index = snapshot.storage, snapshot.runtime, snapshot.indexes
+    local storage, runtime, index, pack = snapshot.storage, snapshot.runtime, snapshot.indexes, snapshot.dataPack or {}
     local scanner, sync, network = snapshot.scanner, snapshot.sync, snapshot.network
     local function DescribePart(label, part)
+        if not part then return end
         print(string.format("[MarketSync diagnostics] %s: %d records, ~%.1f KB sampled footprint",
             label, part.count or 0, part.estimatedKB or 0))
     end
     print("|cffffd700[MarketSync diagnostics]|r Current in-memory snapshot; nothing was saved.")
-    print(string.format("[MarketSync diagnostics] Add-on memory: %s; all-addons Lua heap: %s",
+    print(string.format("[MarketSync diagnostics] Add-on memory — MarketSync: %s; MarketSyncData: %s; MarketSyncLedger: %s; all-addons Lua heap: %s",
         snapshot.addonKB and string.format("%.1f KB", snapshot.addonKB) or "unavailable",
+        snapshot.dataPackAddonKB and string.format("%.1f KB", snapshot.dataPackAddonKB) or (pack.loaded and "unavailable" or "not loaded"),
+        snapshot.ledgerAddonKB and string.format("%.1f KB", snapshot.ledgerAddonKB) or "not loaded",
         snapshot.luaHeapKB and string.format("%.1f KB", snapshot.luaHeapKB) or "unavailable"))
     DescribePart("Personal", storage.personal)
+    DescribePart("Guild sync prices", storage.guildPrices)
+    DescribePart("DataPack active (in GuildData)", storage.dataPackActive)
     DescribePart("Guild metadata", storage.guild)
     DescribePart("Provider live store (shared, excluded from subtotal)", storage.provider)
     DescribePart("Neutral", storage.neutral)
     DescribePart("Item info cache", storage.itemInfo)
+    DescribePart("Inventory tracking", storage.inventory)
     DescribePart("History", storage.history)
     DescribePart("Recipes", storage.recipes)
     DescribePart("Alerts", storage.alerts)
+    if pack.loaded then
+        print(string.format("[MarketSync diagnostics] MarketSyncData (%s v%s, %s): %d partitions, %d records, ~%.1f KB sampled",
+            tostring(pack.flavor), tostring(pack.version), tostring(pack.dataDate or "—"),
+            pack.partitionCount or 0, pack.totalRecords or 0, pack.estimatedKB or 0))
+    end
     print(string.format("[MarketSync diagnostics] Indexes: personal %d/%d (%d pending), guild %d/%d (%d pending), neutral %d/%d (%d pending); ~%.1f KB estimated active indexes",
         index.personalResolved or 0, index.personalTotal or 0, index.personalPending or 0,
         index.guildResolved or 0, index.guildTotal or 0, index.guildPending or 0,
@@ -832,8 +1097,17 @@ function MarketSync.PrintDiagnosticsSnapshot()
         tostring(sync.phase or "unknown"), tostring(sync.scope or "unknown"), sync.controlQueued or 0,
         sync.queuedControlBytes or 0, sync.frozenEntryCount or 0, sync.pendingFrameBytes or 0,
         sync.receivedItems or 0, sync.sentItems or 0, tostring(sync.throttled == true)))
-    print(string.format("[MarketSync diagnostics] Traffic: Tx %d items/s, Rx %d items/s; other addons %d B/s, %d API/s",
+    print(string.format("[MarketSync diagnostics] Traffic: Tx %.1f items/s, Rx %.1f items/s; other-addon attempts %.0f B/s, %.1f API/s",
         network.txRate, network.rxRate, network.otherBytes, network.otherAPIs))
+    local sends, queues = sync.sendStats or {}, sync.queueStats or {}
+    print(string.format("[MarketSync diagnostics] Local API sends: %d accepted, %d refused; retries=%d, expired controls=%d, dropped controls=%d, aborted=%d",
+        sends.accepted or 0, sends.refused or 0, queues.retries or 0, queues.expired or 0, queues.dropped or 0, queues.aborted or 0))
+    print(string.format("[MarketSync diagnostics] Wait: %s; frame attempts=%d; next retry=%.1fs; oldest control=%.1fs",
+        tostring(sync.waitReason or "none"), sync.frameAttempts or 0, sync.retryIn or 0, sync.oldestControlAge or 0))
+    if sync.lastFailure then print("[MarketSync diagnostics] Last sender failure: " .. sync.lastFailure.reason) end
+    for kind, rate in pairs(network.otherTransports or {}) do
+        print(string.format("[MarketSync diagnostics] External %s attempts: %.1f API/s, %.0f payload B/s (acceptance unknown)", kind, rate.apiRate, rate.rate))
+    end
 end
 
 -- ================================================================
@@ -970,6 +1244,53 @@ end
 function MarketSync.GetLatestSyncContributor(forceRebuild)
     local _, latestUser, latestTime = MarketSync.GetSyncContributorSnapshot(forceRebuild)
     return latestUser, latestTime
+end
+
+function MarketSync.GetLatestAuctionScan(scope)
+    local realmDB = MarketSync.GetRealmDB()
+    if scope == "neutral" then
+        return realmDB.NeutralScanCharacter or "Neutral", tonumber(realmDB.NeutralScanTime) or 0, "neutral"
+    end
+
+    local source = realmDB.PersonalScanCharacter or "Personal"
+    local latest = tonumber(realmDB.PersonalScanTime) or 0
+    local kind = "personal"
+    if scope ~= "guild" then return source, latest, kind end
+
+    local metadata = realmDB.ItemMetadata or {}
+    for key, record in pairs(realmDB.GuildData or {}) do
+        if MarketSync.IsWebAuctionRecord(record) and (tonumber(record.m) or 0) > 0 then
+            local timestamp = tonumber(record.t or record.observedAt) or 0
+            if timestamp > latest then source, latest, kind = "Web", timestamp, "web" end
+        elseif type(record) == "table" and record.source ~= "Personal" and record.source ~= "Self" then
+            local meta = metadata[key]
+            local character = record.source or (meta and (meta.lastSource or meta.source))
+            if MarketSync.IsSafeString(character) and character ~= "" and character ~= "Self" and character ~= "Personal" then
+                local timestamp = tonumber(record.observedAt) or tonumber(meta and (meta.lastTime or meta.time)) or 0
+                if timestamp > latest or (timestamp > 0 and timestamp == latest and (kind == "web"
+                    or (kind == "guild" and character < source))) then
+                    source, latest, kind = character, timestamp, "guild"
+                end
+            end
+        end
+    end
+    if kind == "guild" and MarketSync.StripKnownRealmSuffix then
+        source = MarketSync.StripKnownRealmSuffix(source)
+    end
+    return source, latest, kind
+end
+
+function MarketSync.FormatAuctionScanStatus(scope)
+    local source, timestamp, kind = MarketSync.GetLatestAuctionScan(scope)
+    if timestamp <= 0 then
+        local empty = scope == "personal" and "No personal scan data"
+            or (scope == "neutral" and "No neutral data yet" or "No sync data yet")
+        return "|cffff8800" .. empty .. "|r", ""
+    end
+    local label = kind == "neutral" and "|cff00ccffLast Neutral Scan|r"
+        or (kind == "guild" and "|cff00ff00Last Guild Sync|r"
+        or (scope == "personal" and "|cff00ff00Last Personal Scan|r" or "|cff00ff00Latest Data|r"))
+    return "|cffffd700" .. MarketSync.FormatRealmTime(timestamp) .. " " .. source .. "|r", label
 end
 
 -- ================================================================
@@ -1571,47 +1892,12 @@ function MarketSync.IsDetailsKeyDown()
     end
 end
 
-function MarketSync.IsLedgerEnabled()
-    return (MarketSyncDB and MarketSyncDB.EnableLedgerBeta == true) or false
-end
-
-function MarketSync.UpdateLedgerUIState()
-    if MarketSyncMainFrame and MarketSyncMainFrame.UpdateLedgerButtonState then
-        MarketSyncMainFrame.UpdateLedgerButtonState()
-    end
-    if MarketSyncCraftManager and MarketSyncCraftManager.UpdateLedgerButtonState then
-        MarketSyncCraftManager.UpdateLedgerButtonState()
-    end
-end
-
-function MarketSync.SetLedgerEnabled(enabled)
-    if not MarketSyncDB then return end
-    MarketSyncDB.EnableLedgerBeta = enabled and true or false
-    if enabled then
-        local t = MarketSync.InventoryTracking
-        if t and t.CaptureBags then t.CaptureBags() end
-        if MarketSync.ItemLedger and MarketSync.ItemLedger.SeedObservedStock then
-            MarketSync.ItemLedger.SeedObservedStock()
-        end
-    else
-        local w = MarketSyncItemLedger
-        if w and w.Hide and w:IsShown() then w:Hide() end
-    end
-    if MarketSync.ItemLedger and MarketSync.ItemLedger.Refresh then
-        MarketSync.ItemLedger.Refresh()
-    end
-    local w = MarketSyncItemLedger
-    if w and w.Refresh and w:IsShown() then w:Refresh() end
-    if MarketSync.UpdateLedgerUIState then
-        MarketSync.UpdateLedgerUIState()
-    end
-end
 
 function MarketSync.RefreshActiveTooltip()
     for _, tip in ipairs({ GameTooltip, ItemRefTooltip }) do
         if tip and tip.IsShown and tip:IsShown() and tip.GetItem then
             local _, link = tip:GetItem()
-            if link then
+            if MarketSync.IsSafeString(link) then
                 tip.MarketSyncOwnershipItem = nil
                 tip.MarketSyncOwnershipShift = nil
                 tip.MarketSyncProcessingItem = nil
@@ -1739,10 +2025,11 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
         price = pEntry.m
         local entryDay = tonumber(pEntry.d) or currentDay
         ageDays = math.max(0, currentDay - entryDay)
-        scanTime = tonumber(pEntry.observedAt)
+        local fromWeb = MarketSync.IsWebAuctionRecord(pEntry)
+        scanTime = tonumber(fromWeb and pEntry.t or pEntry.observedAt)
             or (tonumber(pEntry.d) and tonumber(pEntry.d) > 0 and MarketSync.ScanDayToTimestamp(pEntry.d))
         if scanTime then ageDays = math.max(0, time() - scanTime) / 86400 end
-        source = pEntry.source or "Personal Scan"
+        source = fromWeb and "Web" or pEntry.source or "Personal Scan"
     end
 
     -- 2. Check Provider / LiveStore / Synced Guild Data
@@ -1767,7 +2054,7 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
 
     -- Check ItemMetadata for more accurate guild contributor and timestamp
     local meta = realmDB.ItemMetadata and realmDB.ItemMetadata[priceKey]
-    if meta and not (pEntry and pEntry.source) then
+    if meta and not (pEntry and (pEntry.source or MarketSync.IsWebAuctionRecord(pEntry))) then
         local dayStr = tostring(pEntry and pEntry.d or currentDay)
         if meta.days and meta.days[dayStr] then
             source = meta.days[dayStr].source or source or "Guild Sync"
@@ -1889,7 +2176,7 @@ MarketSync.StandardSounds = {
 
 -- ================================================================
 -- UI HELPER: CreateModernDialog
--- Clean dark-slate dialog matching Blizzard Auction House styling
+-- Theme-aware Warcraft dialog; wide Legacy windows use the original AH shell.
 -- ================================================================
 function MarketSync.CreateModernDialog(name, width, height, titleText, iconTexture)
     local frame = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
@@ -1912,14 +2199,24 @@ function MarketSync.CreateModernDialog(name, width, height, titleText, iconTextu
         insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
     if isLegacy then
-        frame:SetBackdropColor(0.045, 0.048, 0.055, 0.96)
-        frame:SetBackdropBorderColor(0.65, 0.65, 0.70, 0.95)
+        frame:SetBackdropColor(0.065, 0.055, 0.045, 0.96)
+        frame:SetBackdropBorderColor(0.85, 0.72, 0.45, 0.98)
     else
         frame:SetBackdropColor(0.065, 0.055, 0.045, 0.96)
         frame:SetBackdropBorderColor(0.85, 0.72, 0.45, 0.98)
     end
 
     if name then MarketSync.RegisterEscapeFrame(frame) end
+
+    if isLegacy and MarketSync.Theme and MarketSync.Theme.ApplyLegacyAuctionFrame
+        and MarketSync.Theme.ApplyLegacyAuctionFrame(frame) then
+        MarketSync.Theme.DecorateWarcraftWindow(frame, iconTexture, titleText)
+        frame.Header = frame
+        frame.HeaderIcon = frame.portrait
+        MarketSync.Theme.Register(frame)
+        frame:Hide()
+        return frame
+    end
 
     -- Centered Blizzard header banner plate
     local headerBg = frame:CreateTexture(nil, "ARTWORK")
@@ -1937,22 +2234,41 @@ function MarketSync.CreateModernDialog(name, width, height, titleText, iconTextu
 
     -- Circular portrait ring hanging off the top-left corner
     local ring = CreateFrame("Frame", nil, frame)
-    ring:SetSize(54, 54)
-    ring:SetPoint("TOPLEFT", frame, "TOPLEFT", -9, 9)
+    ring:SetSize(52, 52)
+    ring:SetPoint("TOPLEFT", frame, "TOPLEFT", -8, 8)
     local ringLvl = (frame.GetFrameLevel and frame:GetFrameLevel() or 1) + 5
     if ring.SetFrameLevel then ring:SetFrameLevel(ringLvl) end
     frame.warcraftRing = ring
 
     local ringTex = ring:CreateTexture(nil, "OVERLAY")
     ringTex:SetAllPoints(ring)
-    ringTex:SetTexture("Interface\\Minimap\\UI-Minimap-Border")
+    ringTex:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    if ringTex.SetTexCoord then ringTex:SetTexCoord(0, 0.59375, 0, 0.59375) end
     frame.warcraftRingTex = ringTex
 
+    local iconPath = iconTexture or "Interface\\AddOns\\MarketSync\\Media\\MarketSyncIcon"
     local headerIcon = ring:CreateTexture(nil, "ARTWORK")
-    headerIcon:SetSize(38, 38)
+    headerIcon:SetSize(36, 36)
     headerIcon:SetPoint("CENTER", ring, "CENTER", 0, 0)
-    headerIcon:SetTexture(iconTexture or "Interface\\AddOns\\MarketSync\\Media\\MarketSyncIcon")
-    headerIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    if SetPortraitToTexture then
+        SetPortraitToTexture(headerIcon, iconPath)
+    else
+        headerIcon:SetTexture(iconPath)
+        if headerIcon.SetTexCoord then headerIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    end
+    if ring.CreateMaskTexture and headerIcon.AddMaskTexture then
+        local mask = ring:CreateMaskTexture()
+        if mask and mask.SetTexture then
+            mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            if mask.SetAllPoints then
+                mask:SetAllPoints(headerIcon)
+            else
+                if mask.SetSize then mask:SetSize(36, 36) end
+                if mask.SetPoint then mask:SetPoint("CENTER", headerIcon, "CENTER", 0, 0) end
+            end
+            headerIcon:AddMaskTexture(mask)
+        end
+    end
     frame.HeaderIcon = headerIcon
     frame.warcraftEmblem = headerIcon
 
@@ -1996,27 +2312,35 @@ end
 -- MarketSync-owned colors, including popouts and embedded panels.
 local UI_PALETTES = {
     legacy = {
-        dialog = { 0.045, 0.048, 0.055, 0.99 }, inset = { 0.055, 0.060, 0.070, 0.97 },
-        border = { 0.30, 0.31, 0.33, 0.95 }, header = { 0.12, 0.13, 0.15, 0.98 },
-        headerBorder = { 0.32, 0.33, 0.35, 0.90 },
-        rowOdd = { 0.06, 0.065, 0.075, 0.70 }, rowEven = { 0.10, 0.11, 0.13, 0.70 },
-        hover = { 0.20, 0.22, 0.24, 0.95 },
-        thumb = { 0.27, 0.30, 0.34, 0.85 }, thumbHover = { 0.45, 0.49, 0.54, 0.95 },
+        dialog = { 0.075, 0.070, 0.065, 0.98 }, inset = { 0.065, 0.060, 0.055, 0.95 },
+        border = { 0.38, 0.32, 0.22, 0.90 }, header = { 0.12, 0.11, 0.10, 0.95 },
+        headerBorder = { 0.32, 0.28, 0.20, 0.85 }, selected = { 0.20, 0.17, 0.11, 0.96 },
+        rowOdd = { 0.06, 0.055, 0.05, 0.70 }, rowEven = { 0.10, 0.095, 0.09, 0.70 },
+        hover = { 0.24, 0.20, 0.12, 0.95 },
+        thumb = { 0.28, 0.24, 0.16, 0.85 }, thumbHover = { 0.48, 0.38, 0.18, 0.95 },
+        chart = { 0.035, 0.032, 0.030, 0.45 }, grid = { 0.50, 0.50, 0.50, 0.15 },
+        scrollTrack = { 0.045, 0.042, 0.040, 0.55 }, notice = { 0.08, 0.08, 0.10, 0.90 },
+        stripe = { 1, 1, 1, 0.04 }, headerTint = { 0.50, 0.42, 0.28, 0.35 },
+        arrow = { 0.80, 0.75, 0.65, 0.92 }, arrowDisabled = { 0.32, 0.30, 0.25, 0.45 },
     },
     forever = {
         dialog = { 0.075, 0.070, 0.065, 0.98 }, inset = { 0.075, 0.070, 0.065, 0.96 },
         border = { 0.38, 0.32, 0.22, 0.90 }, header = { 0.12, 0.11, 0.10, 0.95 },
-        headerBorder = { 0.32, 0.28, 0.20, 0.85 },
+        headerBorder = { 0.32, 0.28, 0.20, 0.85 }, selected = { 0.20, 0.17, 0.11, 0.96 },
         rowOdd = { 0.06, 0.055, 0.05, 0.70 }, rowEven = { 0.10, 0.095, 0.09, 0.70 },
         hover = { 0.24, 0.20, 0.12, 0.95 },
         thumb = { 0.24, 0.20, 0.14, 0.85 }, thumbHover = { 0.48, 0.38, 0.18, 0.95 },
+        chart = { 0, 0, 0, 0.35 }, grid = { 0.5, 0.5, 0.5, 0.15 },
+        scrollTrack = { 0.04, 0.04, 0.04, 0.55 }, notice = { 0.08, 0.08, 0.10, 0.90 },
+        stripe = { 1, 1, 1, 0.04 }, headerTint = { 0.50, 0.42, 0.28, 0.35 },
+        arrow = { 0.70, 0.65, 0.55, 0.90 }, arrowDisabled = { 0.30, 0.28, 0.22, 0.45 },
     },
 }
 
-function MarketSync.GetThemeColor(role)
+function MarketSync.GetThemeColor(role, alpha)
     local palette = UI_PALETTES[MarketSync.IsLegacyUITheme() and "legacy" or "forever"]
     local color = palette[role] or palette.inset
-    return color[1], color[2], color[3], color[4]
+    return color[1], color[2], color[3], alpha or color[4]
 end
 
 function MarketSync.SetUITheme(theme)
@@ -2034,33 +2358,72 @@ function MarketSync.SetUITheme(theme)
     return true
 end
 
+function MarketSync.IsForeverAuctionStyle()
+    return MarketSync.GetClientFlavor() == "forever" and not MarketSync.IsLegacyUITheme()
+end
+
+function MarketSync.CreateForeverAuctionRowHighlight(row, selected)
+    if not MarketSync.IsForeverAuctionStyle() then return end
+
+    local texture = row:CreateTexture(nil, selected and "BACKGROUND" or "HIGHLIGHT")
+    texture:SetAllPoints(row)
+    local atlas = selected and "auctionhouse-ui-row-select" or "auctionhouse-ui-row-highlight"
+    if texture.SetAtlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+        texture:SetAtlas(atlas, false)
+        texture:SetBlendMode("ADD")
+    else
+        texture:SetColorTexture(0.25, 0.32, 0.83, selected and 0.55 or 0.38)
+    end
+    return texture
+end
+
+function MarketSync.CreateForeverAuctionControl(objectType, parent, template)
+    if not MarketSync.IsForeverAuctionStyle() then return end
+    local ok, control = pcall(CreateFrame, objectType, nil, parent, template)
+    if ok then return control end
+end
+
 -- UI HELPER: CreateModernInset
 -- Matches Blizzard Auction House sleek dark bronze/stone inset panels
 -- ================================================================
-function MarketSync.CreateModernInset(parent, x, y, width, height)
-    local inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    inset:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    local isLegacy = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
-    if isLegacy then
-        inset:SetBackdropColor(0.04, 0.045, 0.05, 0.90)
-        inset:SetBackdropBorderColor(0.35, 0.38, 0.42, 0.90)
+function MarketSync.CreateModernInset(parent, x, y, width, height, auctionSurface)
+    local inset = auctionSurface and MarketSync.CreateForeverAuctionControl("Frame", parent, "InsetFrameTemplate")
+    if inset then
+        if auctionSurface ~= "results" or not inset.Bg then
+            local art = inset.Bg or inset:CreateTexture(nil, "BACKGROUND")
+            if art.ClearAllPoints then art:ClearAllPoints() end
+            art:SetPoint("TOPLEFT", 3, -3)
+            art:SetPoint("BOTTOMRIGHT", -3, 3)
+            art:SetTexture(auctionSurface == "results"
+                and "Interface\\FrameGeneral\\UI-Background-Marble"
+                or "Interface\\QuestFrame\\UI-TextBackground-BackdropBackground")
+            if art.SetHorizTile then art:SetHorizTile(false) end
+            if art.SetVertTile then art:SetVertTile(false) end
+        end
     else
-        inset:SetBackdropColor(0.05, 0.045, 0.04, 0.90)
-        inset:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
-    end
+        inset = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        inset:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        local isLegacy = MarketSync.IsLegacyUITheme()
+        if isLegacy then
+            inset:SetBackdropColor(0.05, 0.045, 0.04, 0.96)
+            inset:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
+        else
+            inset:SetBackdropColor(0.05, 0.045, 0.04, 0.90)
+            inset:SetBackdropBorderColor(0.50, 0.42, 0.28, 0.95)
+        end
 
-    -- Subtle top inner highlight line matching Blizzard AH insets (warm bronze/gold sheen)
-    local topHighlight = inset:CreateTexture(nil, "BORDER")
-    topHighlight:SetHeight(1)
-    topHighlight:SetPoint("TOPLEFT", 3, -3)
-    topHighlight:SetPoint("TOPRIGHT", -3, -3)
-    topHighlight:SetColorTexture(isLegacy and 0.35 or 0.50, isLegacy and 0.38 or 0.42, isLegacy and 0.42 or 0.28, 0.7)
-    inset.topHighlight = topHighlight
+        local topHighlight = inset:CreateTexture(nil, "BORDER")
+        topHighlight:SetHeight(1)
+        topHighlight:SetPoint("TOPLEFT", 3, -3)
+        topHighlight:SetPoint("TOPRIGHT", -3, -3)
+        topHighlight:SetColorTexture(0.50, 0.42, 0.28, 0.7)
+        inset.topHighlight = topHighlight
+    end
 
     if x and y then
         inset:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
@@ -2079,29 +2442,39 @@ end
 -- UI HELPER: CreateAHColumnHeader
 -- Matches Blizzard Auction House column headers (clean dark bronze/stone + sort arrow)
 -- ================================================================
-function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
-    local hdr = CreateFrame("Button", nil, parent, "BackdropTemplate")
+function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey, auctionColumn)
+    local native = auctionColumn and MarketSync.CreateForeverAuctionControl("Button", parent, "ColumnDisplayButtonShortTemplate")
+    local hdr = native or CreateFrame("Button", nil, parent, "BackdropTemplate")
     hdr:SetSize(width, height or 20)
     hdr.sortKey = sortKey
 
-    hdr:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    hdr:SetBackdropColor(MarketSync.GetThemeColor("header"))
-    hdr:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
+    if not native then
+        hdr:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 }
+        })
+        hdr:SetBackdropColor(MarketSync.GetThemeColor("header"))
+        hdr:SetBackdropBorderColor(MarketSync.GetThemeColor("headerBorder"))
 
-    -- Vertical separator on right side
-    local sep = hdr:CreateTexture(nil, "OVERLAY")
-    sep:SetWidth(1)
-    sep:SetPoint("TOPRIGHT", 0, -2)
-    sep:SetPoint("BOTTOMRIGHT", 0, 2)
-    sep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
-    hdr.sep = sep
+        local sep = hdr:CreateTexture(nil, "OVERLAY")
+        sep:SetWidth(1)
+        sep:SetPoint("TOPRIGHT", 0, -2)
+        sep:SetPoint("BOTTOMRIGHT", 0, 2)
+        sep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
+        hdr.sep = sep
 
-    local label = hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        hdr:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
+        end)
+        hdr:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(MarketSync.GetThemeColor("header"))
+        end)
+    end
+
+    local label = hdr.Text or hdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    if hdr.Text and label.ClearAllPoints then label:ClearAllPoints() end
     label:SetPoint("LEFT", 6, 0)
     label:SetPoint("RIGHT", -15, 0)
     label:SetJustifyH("LEFT")
@@ -2116,13 +2489,6 @@ function MarketSync.CreateAHColumnHeader(parent, width, height, text, sortKey)
     arrow:SetTexCoord(0, 0.5625, 0, 1.0)
     arrow:Hide()
     hdr.arrow = arrow
-
-    hdr:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(MarketSync.GetThemeColor("hover"))
-    end)
-    hdr:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(MarketSync.GetThemeColor("header"))
-    end)
 
     return hdr
 end
@@ -2197,6 +2563,35 @@ end
 -- Converts legacy Classic button-sliders into modern WoW Retail /
 -- Classic 1.15+ borderless slim scrollbars matching the client AH.
 -- ================================================================
+-- Classic knob and beveled arrow artwork, shared by scrolling content and
+-- paginated tables. Page/range callbacks stay owned by the caller.
+function MarketSync.StyleLegacyScrollBar(scrollBar, upBtn, downBtn, thumb)
+    scrollBar:SetWidth(16)
+    if thumb then
+        thumb:SetTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+        thumb:SetTexCoord(0.20, 0.80, 0.25, 0.75)
+        thumb:SetVertexColor(1, 1, 1, 1)
+        thumb:SetSize(16, 24)
+    end
+    for index, button in ipairs({ upBtn or false, downBtn or false }) do
+        if button then
+            local prefix = "Interface\\Buttons\\UI-ScrollBar-Scroll" .. (index == 1 and "Up" or "Down") .. "Button-"
+            button:SetSize(18, 16)
+            button:SetNormalTexture(prefix .. "Up")
+            button:SetPushedTexture(prefix .. "Down")
+            button:SetDisabledTexture(prefix .. "Disabled")
+            button:SetHighlightTexture(prefix .. "Highlight", "ADD")
+            for _, getter in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetDisabledTexture", "GetHighlightTexture" }) do
+                local texture = button[getter] and button[getter](button)
+                if texture and texture.SetTexCoord then
+                    texture:SetTexCoord(0.20, 0.80, 0.25, 0.75)
+                    texture:SetVertexColor(1, 1, 1, 1)
+                end
+            end
+        end
+    end
+end
+
 function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
     if not scrollFrame then return end
     local name = scrollFrame.GetName and scrollFrame:GetName()
@@ -2211,7 +2606,8 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
     end
     if not scrollBar then return end
 
-    local barWidth = customWidth or 8
+    local legacyTheme = MarketSync.IsLegacyUITheme()
+    local barWidth = legacyTheme and 16 or (customWidth or 8)
     local xOff = offsetX or 0
     local sbName = scrollBar.GetName and scrollBar:GetName()
 
@@ -2225,6 +2621,17 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
                 elseif not downBtn then downBtn = child end
             end
         end
+    end
+
+    if legacyTheme then
+        scrollBar:ClearAllPoints()
+        scrollBar:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", xOff + barWidth + 2, -16)
+        scrollBar:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", xOff + barWidth + 2, 16)
+        local thumb = (sbName and _G[sbName .. "ThumbTexture"]) or (scrollBar.GetThumbTexture and scrollBar:GetThumbTexture()) or scrollBar.ThumbTexture
+        MarketSync.StyleLegacyScrollBar(scrollBar, upBtn, downBtn, thumb)
+        if upBtn then upBtn:ClearAllPoints(); upBtn:SetPoint("BOTTOM", scrollBar, "TOP", 0, 0) end
+        if downBtn then downBtn:ClearAllPoints(); downBtn:SetPoint("TOP", scrollBar, "BOTTOM", 0, 0) end
+        return
     end
 
     -- Re-anchor scrollBar to span seamlessly
@@ -2261,10 +2668,10 @@ function MarketSync.SkinModernScrollBar(scrollFrame, customWidth, offsetX)
         local nt = btn.GetNormalTexture and btn:GetNormalTexture()
         local dt = btn.GetDisabledTexture and btn:GetDisabledTexture()
         if btn:IsEnabled() then
-            if nt and nt.SetVertexColor then nt:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+            if nt and nt.SetVertexColor then nt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
         else
-            if nt and nt.SetVertexColor then nt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
-            if dt and dt.SetVertexColor then dt:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+            if nt and nt.SetVertexColor then nt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
+            if dt and dt.SetVertexColor then dt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
         end
     end
 
@@ -2320,7 +2727,8 @@ end
 function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged, customWidth, topOffset, bottomOffset)
     if not parent or not insetFrame then return end
 
-    local barWidth = customWidth or 8
+    local legacyTheme = MarketSync.IsLegacyUITheme()
+    local barWidth = legacyTheme and 16 or (customWidth or 8)
     local topOff = topOffset or -30
     local botOff = bottomOffset or 28
 
@@ -2338,7 +2746,7 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
     -- Track gutter
     local track = slider:CreateTexture(nil, "BACKGROUND")
     track:SetAllPoints()
-    track:SetColorTexture(0.04, 0.04, 0.04, 0.55)
+    track:SetColorTexture(MarketSync.GetThemeColor("scrollTrack"))
     slider.track = track
 
     -- Thumb pill
@@ -2366,7 +2774,7 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
         upBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Up-Down")
         upBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Up-Disabled")
         local upTex = upBtn:GetNormalTexture()
-        if upTex and upTex.SetVertexColor then upTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+        if upTex and upTex.SetVertexColor then upTex:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
     end
 
     -- Down Chevron Button
@@ -2378,11 +2786,21 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
         downBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Down-Down")
         downBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Down-Disabled")
         local downTex = downBtn:GetNormalTexture()
-        if downTex and downTex.SetVertexColor then downTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+        if downTex and downTex.SetVertexColor then downTex:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
     end
 
     slider.upBtn = upBtn
     slider.downBtn = downBtn
+
+    if legacyTheme then
+        MarketSync.StyleLegacyScrollBar(slider, upBtn, downBtn, thumb)
+        local level = (insetFrame.GetFrameLevel and insetFrame:GetFrameLevel() or 1) + 5
+        slider:SetFrameLevel(level)
+        upBtn:SetFrameLevel(level + 1)
+        downBtn:SetFrameLevel(level + 1)
+        slider:SetScript("OnEnter", function() thumb:SetVertexColor(1, 0.95, 0.80, 1) end)
+        slider:SetScript("OnLeave", function() thumb:SetVertexColor(1, 1, 1, 1) end)
+    end
 
     local isUpdating = false
     slider:SetScript("OnValueChanged", function(self, value)
@@ -2455,24 +2873,24 @@ function MarketSync.CreateModernTableScrollBar(parent, insetFrame, onPageChanged
             if currentPage <= 0 then
                 upBtn:Disable()
                 local uTex = upBtn.GetNormalTexture and upBtn:GetNormalTexture()
-                if uTex and uTex.SetVertexColor then uTex:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+                if uTex and uTex.SetVertexColor then uTex:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
                 local uDis = upBtn.GetDisabledTexture and upBtn:GetDisabledTexture()
-                if uDis and uDis.SetVertexColor then uDis:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+                if uDis and uDis.SetVertexColor then uDis:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
             else
                 upBtn:Enable()
                 local uTex = upBtn.GetNormalTexture and upBtn:GetNormalTexture()
-                if uTex and uTex.SetVertexColor then uTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+                if uTex and uTex.SetVertexColor then uTex:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
             end
             if currentPage >= maxPage then
                 downBtn:Disable()
                 local dTex = downBtn.GetNormalTexture and downBtn:GetNormalTexture()
-                if dTex and dTex.SetVertexColor then dTex:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+                if dTex and dTex.SetVertexColor then dTex:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
                 local dDis = downBtn.GetDisabledTexture and downBtn:GetDisabledTexture()
-                if dDis and dDis.SetVertexColor then dDis:SetVertexColor(0.30, 0.28, 0.22, 0.45) end
+                if dDis and dDis.SetVertexColor then dDis:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
             else
                 downBtn:Enable()
                 local dTex = downBtn.GetNormalTexture and downBtn:GetNormalTexture()
-                if dTex and dTex.SetVertexColor then dTex:SetVertexColor(0.70, 0.65, 0.55, 0.90) end
+                if dTex and dTex.SetVertexColor then dTex:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
             end
         else
             slider:Hide()
@@ -2634,4 +3052,146 @@ function MarketSync.ShowItemContextMenu(anchorFrame, opts)
     ToggleDropDownMenu(1, nil, globalItemContextMenu, anchorFrame or "cursor", 0, 0)
 end
 
+
+
+local function CountDataPackPrices(records, importedOnly)
+    if type(records) ~= "table" then return 0 end
+    local count = 0
+    for _, entry in pairs(records) do
+        local isRecord = type(entry) == "table"
+        local price = tonumber(isRecord and entry.m or entry)
+        if price and price > 0 and (not importedOnly or MarketSync.IsWebAuctionRecord(entry)) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function CreateDataReviewFrame()
+    local width, margin, gap = 620, 20, 12
+    local bodyWidth = width - 2 * margin
+    local frame = MarketSync.Theme.CreateStandardWindow("MarketSyncDataReviewFrame", "MarketSyncData Status",
+        width, 330, "Interface\\Icons\\INV_Misc_Book_09")
+
+    local statusPanel = MarketSync.CreateModernInset(frame, margin, -60, bodyWidth, 62)
+    local status = statusPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightMedium")
+    status:SetPoint("TOPLEFT", 14, -10)
+    frame.Status = status
+    local description = statusPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    description:SetPoint("TOPLEFT", status, "BOTTOMLEFT", 0, -5)
+    description:SetPoint("RIGHT", statusPanel, "RIGHT", -14, 0)
+    description:SetJustifyH("LEFT")
+    frame.Description = description
+
+    local cardWidth = (bodyWidth - gap) / 2
+    local function AddRecordCard(x, label)
+        local card = MarketSync.CreateModernInset(frame, x, -132, cardWidth, 63)
+        local labelText = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        labelText:SetPoint("TOPLEFT", 14, -10)
+        labelText:SetText(label)
+        local value = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+        value:SetPoint("TOPLEFT", labelText, "BOTTOMLEFT", 0, -6)
+        return value
+    end
+    frame.PackRecords = AddRecordCard(margin, "Pack records for this market")
+    frame.ActiveRecords = AddRecordCard(margin + cardWidth + gap, "Active MarketSyncData records")
+
+    local details = MarketSync.CreateModernInset(frame, margin, -205, bodyWidth, 84)
+    local function AddDetailField(x, y, label)
+        local labelText = details:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        labelText:SetPoint("TOPLEFT", x, y)
+        labelText:SetText(label)
+        local value = details:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        value:SetPoint("TOPLEFT", labelText, "BOTTOMLEFT", 0, -3)
+        return value
+    end
+    frame.Flavor = AddDetailField(14, -10, "Pack flavor")
+    frame.Market = AddDetailField(cardWidth + 14, -10, "Current market")
+    frame.PackVersion = AddDetailField(14, -46, "Pack version")
+    frame.DataDate = AddDetailField(cardWidth + 14, -46, "Data dates")
+    local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    close:SetSize(90, 24)
+    close:SetPoint("BOTTOMRIGHT", -margin, 9)
+    close:SetText("Close")
+    close:SetScript("OnClick", function() frame:Hide() end)
+
+    return frame
+end
+
+function MarketSync.ReviewMarketSyncData()
+    local frame = MarketSync._dataReviewFrame
+    if not frame then
+        frame = CreateDataReviewFrame()
+        MarketSync._dataReviewFrame = frame
+    end
+
+    local realm = MarketSync.GetAuctionRealm()
+    local faction = MarketSync.GetPlayerMarketFaction()
+    local marketKnown = realm and realm ~= "" and faction ~= "Unknown"
+    local marketLabel = marketKnown and (realm .. " / " .. faction)
+    local dataAddon = _G.MarketSyncData
+    local loaded = type(dataAddon) == "table"
+    local packCount, activeCount = 0, 0
+    local status, description = "|cffff6b6bMarketSyncData is not loaded|r",
+        "Enable MarketSyncData to add packaged auction prices."
+    local version, flavor, dataDate = "—", "—", "—"
+    if loaded then
+        version = tostring(dataAddon.version or dataAddon.Version or "—")
+        flavor = tostring(dataAddon.flavor or dataAddon.Flavor or "—")
+        local dates = dataAddon.dates or dataAddon.Dates
+        local compiled = dataAddon.compiledAt or dataAddon.date or dataAddon.Date
+        if type(dates) == "table" and #dates > 0 then
+            dataDate = #dates == 1 and tostring(dates[1])
+                or string.format("%s to %s", dates[1], dates[#dates])
+        elseif compiled then
+            dataDate = tostring(compiled)
+        elseif type(dataAddon.generatedAt) == "number" and dataAddon.generatedAt > 0 then
+            dataDate = "Built " .. date("%Y-%m-%d", dataAddon.generatedAt)
+        end
+
+        local directPrices = dataAddon.prices or dataAddon.Prices
+        local directCount = CountDataPackPrices(directPrices)
+        packCount = directCount
+        activeCount = directCount
+        if type(directPrices) ~= "table" then
+            if type(dataAddon.InjectIntoMarketSync) == "function" then
+                pcall(dataAddon.InjectIntoMarketSync)
+            end
+            if type(dataAddon.GetCurrentMarketPrices) == "function" then
+                local prices, label = dataAddon.GetCurrentMarketPrices()
+                marketLabel = label
+                marketKnown = label ~= nil
+                packCount = CountDataPackPrices(prices)
+            elseif marketKnown and type(_G.MarketSyncDataDB) == "table" then
+                local markets = _G.MarketSyncDataDB
+                local normalized = MarketSync.NormalizeSyncRealm(realm)
+                local prices = markets[realm .. "@" .. faction] or (normalized and markets[normalized .. "@" .. faction])
+                packCount = CountDataPackPrices(prices)
+            end
+            if marketKnown then
+                activeCount = CountDataPackPrices(MarketSync.GetRealmDB().GuildData, true)
+            end
+        end
+
+        if activeCount > 0 then
+            status, description = "|cff40cf78Connected|r", "MarketSyncData prices are available to MarketSync."
+        elseif packCount > 0 then
+            status, description = "|cffffb14eLoaded|r", "The pack has prices for this market. No DataPack prices are active in MarketSync."
+        else
+            status = "|cffffb14eLoaded|r"
+            description = marketKnown and "The pack has no price records for this market." or "The current market is unavailable."
+        end
+    end
+
+    local formatCount = BreakUpLargeNumbers or tostring
+    frame.Status:SetText(status)
+    frame.Description:SetText(description)
+    frame.PackRecords:SetText(formatCount(packCount))
+    frame.ActiveRecords:SetText(formatCount(activeCount))
+    frame.Flavor:SetText(flavor)
+    frame.Market:SetText(marketLabel or "—")
+    frame.PackVersion:SetText(version)
+    frame.DataDate:SetText(dataDate)
+    frame:Show()
+end
 
