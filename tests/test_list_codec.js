@@ -803,6 +803,22 @@ function test7UIAndSlashCommands() {
       -- Test Sidecar UpdateListsView & tooltip hover with metadata (done/maxPrice/note)
       MarketSync.AHSidecar.SelectShoppingList("UI Imported List")
       assert(sidecar ~= nil)
+      local hoverRow
+      for _, f in ipairs(A_Admin.frames) do
+        if f._type == "Button" and f._scripts and f._scripts.OnEnter and f.name and f.name._text
+          and f.name._text:find("Major Mana Potion", 1, true) then
+          hoverRow = f
+          break
+        end
+      end
+      assert(hoverRow ~= nil, "Sidecar list row for the imported item must exist")
+      hoverRow._scripts.OnEnter(hoverRow)
+      local tipLines = {}
+      for _, line in ipairs(GameTooltip.lines) do tipLines[#tipLines + 1] = line.left or "" end
+      local tip = table.concat(tipLines, " | ")
+      assert(tip:find("Target Max: ", 1, true), "Row tooltip must show the target max price")
+      assert(tip:find("Note: UI test", 1, true), "Row tooltip must show the item note")
+      assert(tip:find("Status: Done", 1, true), "Row tooltip must show the done status")
     `, 'test7_ui_' + flavor);
 
     const exportedBySlash = getLuaGlobalString(sim.L, 'EXPORTED_BY_SLASH');

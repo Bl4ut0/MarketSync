@@ -274,7 +274,7 @@ function S.StartScan(itemsOrKeys, label)
         return false
     end
     if not S.IsAvailable() then
-        S.Status = "Auctioneer must be open to scan"
+        S.Status = "Open the Auction House to scan."
         Notify()
         return false
     end
@@ -303,7 +303,7 @@ function S.StartFullScan()
         return false
     end
     if not S.IsAvailable() then
-        S.Status = "Auctioneer must be open to scan"
+        S.Status = "Open the Auction House to scan."
         Notify()
         return false
     end
@@ -329,7 +329,7 @@ function S.StartLiveSearch(query)
         return false
     end
     if not S.IsAvailable() then
-        S.Status = "Auctioneer must be open to search"
+        S.Status = "Open the Auction House to search."
         Notify()
         return false
     end

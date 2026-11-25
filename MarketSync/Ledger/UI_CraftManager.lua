@@ -87,24 +87,46 @@ local function OpenShopping(job)
     if MarketSync.AHSidecar and MarketSync.AHSidecar.SelectShoppingList then MarketSync.AHSidecar.SelectShoppingList(job.shoppingName) end
     if MarketSync.AHSidecar and MarketSync.AHSidecar.ShowForMain then MarketSync.AHSidecar.ShowForMain("lists") end
 end
+local professionMenu
+local function ProfessionMenu()
+    if professionMenu then return professionMenu end
+    local menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    if MarketSync.Theme then MarketSync.Theme.Register(menu) end
+    menu:SetFrameStrata("TOOLTIP")
+    menu:SetBackdrop({bgFile="InterfaceDialogFrameUI-DialogBox-Background", edgeFile="InterfaceTooltipsUI-Tooltip-Border", edgeSize=12})
+    menu.buttons = {}
+    menu.empty = Text(menu, 8, -10, 185, "Open a profession to detect it.")
+    menu.empty:Hide()
+    professionMenu = menu
+    return menu
+end
+local function ProfessionButton(menu, index)
+    local b = menu.buttons[index]
+    if b then return b end
+    b = CreateFrame("Button", nil, menu, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+    b:SetSize(188,24)
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetScript("PostClick", function() menu:Hide(); if menu.anchor then menu.anchor.professionMenu = nil end end)
+    menu.buttons[index] = b
+    return b
+end
 function MarketSync.ShowCraftProfessions(anchor)
     if InCombatLockdown and InCombatLockdown() then return end
     if anchor.professionMenu then anchor.professionMenu:Hide(); anchor.professionMenu = nil; return end
-    local menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    if MarketSync.Theme then MarketSync.Theme.Register(menu) end
-    menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2); menu:SetFrameStrata("TOOLTIP")
-    menu:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile="Interface\\Tooltips\\UI-Tooltip-Border", edgeSize=12})
+    local menu = ProfessionMenu()
+    menu.anchor = anchor
+    menu:ClearAllPoints(); menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
     local professions = MarketSync.GetProcessingProfessions()
     menu:SetSize(200, math.max(35, #professions * 26 + 12))
     for i, name in ipairs(professions) do
         local spell = name == "First Aid (Health)" and "First Aid" or name
-        local b = CreateFrame("Button", nil, menu, "SecureActionButtonTemplate,UIPanelButtonTemplate")
-        b:SetPoint("TOPLEFT", 6, -6 - (i-1)*26); b:SetSize(188,24); b:SetText(name)
+        local b = ProfessionButton(menu, i)
+        b:SetPoint("TOPLEFT", 6, -6 - (i-1)*26); b:SetText(name)
         b:SetAttribute("type", "spell"); b:SetAttribute("spell", spell)
-        b:RegisterForClicks("AnyUp", "AnyDown")
-        b:SetScript("PostClick", function() menu:Hide(); anchor.professionMenu = nil end)
+        b:Show()
     end
-    if #professions == 0 then Text(menu, 8, -10, 185, "Open a profession to detect it.") end
+    for i = #professions + 1, #menu.buttons do menu.buttons[i]:Hide() end
+    if #professions == 0 then menu.empty:Show() else menu.empty:Hide() end
     anchor.professionMenu = menu; menu:Show()
 end
 local function Create()

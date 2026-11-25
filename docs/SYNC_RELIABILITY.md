@@ -1,6 +1,6 @@
 # Send reliability and traffic diagnostics
 
-The local `0.9.7-rc7-local1` preview keeps sync protocol revision 2 and its existing
+The `0.9.8-rc1` release keeps sync protocol revision 2 and its existing
 wire format, source election, faction/playstyle boundaries and staged receiver
 commits. The changes concern local transmission and diagnosis.
 

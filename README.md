@@ -67,7 +67,7 @@ MarketSync integrates directly into World of Warcraft's native AddOn Settings (`
 | `/ms sidecar` (or `/sidecar`, `/mssidecar`) | Toggle the AH Shopping & Bag Selling drawer |
 | `/ms ledger` (or `/ledger`, `/msledger`) | Open the optional Item Ledger when enabled |
 | `/msdata` | Review the MarketSyncData connection and active price records |
-| `/ms search` or `/ms browse` | Open the offline market browser |
+| `/ms search` or `/ms browse` (also `/ms ui`, `/ms open`, `/ms toggle`) | Toggle the main MarketSync window, same as `/ms` |
 | `/ms theme [forever\|legacy\|auto]` | Switch UI window styling |
 | `/ms config` (or `/ms settings`, `/ms options`) | Open AddOn settings panel |
 | `/ms block <player>` | Block a specific sync sender |

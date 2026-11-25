@@ -508,14 +508,3 @@ function MarketSync.CreateItemDetailPanel(parent)
     if MarketSync.Theme then MarketSync.Theme.Register(panel) end
     return panel
 end
-
-function MarketSync.ShowItemDetail(itemID, requestID)
-    if not ItemDetailPanel then return end
-    if MarketSync.HideAllTabContent then MarketSync.HideAllTabContent() end
-    local parent = ItemDetailPanel.GetParent and ItemDetailPanel:GetParent()
-    if parent and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
-        and MarketSync.Theme and MarketSync.Theme.SetLegacyCanvasVisible then
-        MarketSync.Theme.SetLegacyCanvasVisible(parent, true)
-    end
-    ItemDetailPanel:RefreshItem(tonumber(itemID), requestID)
-end

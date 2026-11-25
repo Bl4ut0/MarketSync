@@ -52,7 +52,7 @@ local function ApplySuggestion()
         MoneyInputFrame_SetCopper(_G.StartPrice, math.min(displayPrice, math.max(1, startPrice)))
     end
     if MarketSync.Print then
-        MarketSync.Print("Suggested buyout set to " .. (MarketSync.FormatMoney and MarketSync.FormatMoney(displayPrice) or tostring(displayPrice) .. "c") .. ". Review before posting, especially for item variants.")
+        MarketSync.Print("Suggested buyout set to " .. MarketSync.FormatMoney(displayPrice) .. ". Review before posting, especially for item variants.")
     end
 end
 

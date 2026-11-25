@@ -709,9 +709,17 @@ end
 -- Auction records belong to a faction as well as a realm. Old unqualified
 -- partitions stay intact as an archive: their prices may already contain both
 -- factions, so assigning them to the first character to log in is unsafe.
+local realmDBFallbackLogged = false
 function MarketSync.GetRealmDB()
     local realm = MarketSync.GetFactionRealmKey()
-    if not realm or not MarketSyncDB or not MarketSyncDB.RealmData then return {} end
+    if not realm or not MarketSyncDB or not MarketSyncDB.RealmData then
+        -- Callers index the result directly, so a temporary table is returned. Writes to it are lost.
+        if MarketSyncDB and MarketSyncDB.DebugMode and not realmDBFallbackLogged then
+            realmDBFallbackLogged = true
+            MarketSync.Debug("GetRealmDB: no realm partition available; returning a temporary table, so writes are discarded.")
+        end
+        return {}
+    end
     if not MarketSyncDB.RealmData[realm] then
         MarketSyncDB.RealmData[realm] = {
             PersonalData = {},
@@ -1064,7 +1072,7 @@ function MarketSync.PrintDiagnosticsSnapshot()
             label, part.count or 0, part.estimatedKB or 0))
     end
     print("|cffffd700[MarketSync diagnostics]|r Current in-memory snapshot; nothing was saved.")
-    print(string.format("[MarketSync diagnostics] Add-on memory — MarketSync: %s; MarketSyncData: %s; MarketSyncLedger: %s; all-addons Lua heap: %s",
+    print(string.format("[MarketSync diagnostics] Add-on memory — MarketSync: %s; MarketSyncData: %s; MarketSyncLedger: %s; Lua memory for all addons: %s",
         snapshot.addonKB and string.format("%.1f KB", snapshot.addonKB) or "unavailable",
         snapshot.dataPackAddonKB and string.format("%.1f KB", snapshot.dataPackAddonKB) or (pack.loaded and "unavailable" or "not loaded"),
         snapshot.ledgerAddonKB and string.format("%.1f KB", snapshot.ledgerAddonKB) or "not loaded",
@@ -1093,7 +1101,7 @@ function MarketSync.PrintDiagnosticsSnapshot()
     print(string.format("[MarketSync diagnostics] Scanner: %s; %d/%d; scope=%s; %s",
         scanner.active and "active" or "idle", scanner.current, scanner.total,
         scanner.scope, scanner.status))
-    print(string.format("[MarketSync diagnostics] Sync: %s; scope=%s; controls=%d (%d B); frozen=%d entries; pending=%d B; received=%d; sent=%d; throttled=%s",
+    print(string.format("[MarketSync diagnostics] Sync: %s; scope=%s; control messages queued=%d (%d B); frozen (held back)=%d entries; pending=%d B (waiting to send); received=%d; sent=%d; throttled=%s",
         tostring(sync.phase or "unknown"), tostring(sync.scope or "unknown"), sync.controlQueued or 0,
         sync.queuedControlBytes or 0, sync.frozenEntryCount or 0, sync.pendingFrameBytes or 0,
         sync.receivedItems or 0, sync.sentItems or 0, tostring(sync.throttled == true)))
@@ -1106,7 +1114,7 @@ function MarketSync.PrintDiagnosticsSnapshot()
         tostring(sync.waitReason or "none"), sync.frameAttempts or 0, sync.retryIn or 0, sync.oldestControlAge or 0))
     if sync.lastFailure then print("[MarketSync diagnostics] Last sender failure: " .. sync.lastFailure.reason) end
     for kind, rate in pairs(network.otherTransports or {}) do
-        print(string.format("[MarketSync diagnostics] External %s attempts: %.1f API/s, %.0f payload B/s (acceptance unknown)", kind, rate.apiRate, rate.rate))
+        print(string.format("[MarketSync diagnostics] External %s attempts: %.1f API/s, %.0f payload B/s (WoW did not report whether they were accepted)", kind, rate.apiRate, rate.rate))
     end
 end
 
@@ -1142,9 +1150,19 @@ function MarketSync.IsBlocked(user)
     return MarketSyncDB and MarketSyncDB.BlockedUsers and MarketSyncDB.BlockedUsers[user]
 end
 
-function MarketSync.ToggleBlock(user)
+-- mode "block" or "unblock" makes the change explicit and reports when nothing would change.
+-- Without a mode it flips the current state (used by the UI buttons).
+function MarketSync.ToggleBlock(user, mode)
     if not MarketSyncDB then MarketSync.InitializeDB() end
-    if MarketSyncDB.BlockedUsers[user] then
+    local blocked = MarketSyncDB.BlockedUsers[user] and true or false
+    if mode == "block" and blocked then
+        print(string.format("|cFF00FF00[MarketSync]|r %s is already blocked.", user))
+        return
+    elseif mode == "unblock" and not blocked then
+        print(string.format("|cFF00FF00[MarketSync]|r %s is not blocked.", user))
+        return
+    end
+    if blocked then
         MarketSyncDB.BlockedUsers[user] = nil
         print(string.format("|cFF00FF00[MarketSync]|r Unblocked %s.", user))
     else

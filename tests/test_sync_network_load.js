@@ -27,22 +27,18 @@ function test(name, fn) {
 // ---------------------------------------------------------------------
 // TEST 1: AST Syntax Validation on All Core & UI Files
 // ---------------------------------------------------------------------
-test('AST syntax check on MarketSync sync and alerts files', () => {
-  const fileNames = [
-    'Notifications.lua',
-    'Config.lua',
-    'UI_Notifications.lua',
-    'UI_Main.lua',
-    'Sync.lua',
-    'Chat.lua',
-    'Neutral.lua',
-  ];
+test('AST syntax check on every Lua file listed in MarketSync.toc', () => {
+  const toc = fs.readFileSync(path.join(marketSyncDir, 'MarketSync.toc'), 'utf8');
+  const fileNames = toc
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#') && line.endsWith('.lua'));
+  assert(fileNames.length > 0, 'MarketSync.toc lists no Lua files');
   for (const name of fileNames) {
-    const filePath = path.join(marketSyncDir, name);
-    if (fs.existsSync(filePath)) {
-      const code = fs.readFileSync(filePath, 'utf8');
-      luaparse.parse(code, { luaVersion: '5.1' });
-    }
+    const filePath = path.join(marketSyncDir, ...name.split(/[\\/]/));
+    assert(fs.existsSync(filePath), `MarketSync.toc lists a missing file: ${name}`);
+    const code = fs.readFileSync(filePath, 'utf8');
+    luaparse.parse(code, { luaVersion: '5.1' });
   }
 });
 

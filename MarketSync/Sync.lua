@@ -155,8 +155,8 @@ hooksecurefunc(C_ChatInfo, "SendAddonMessage", function(prefix, text, chatType, 
 end)
 
 local function SendAddonMessage(prefix, text, chatType, target)
-    -- We removed MarketSync.TxBytes counting from here because the hooksecurefunc
-    -- above will catch the _SendAddonMessage call below automatically.
+    -- TxBytes/TxAPICalls are counted by the hooksecurefunc above, which also counts
+    -- refused sends. Accepted vs refused counts are in MarketSync.SyncSendStats.
     return MarketSync.SendAddonMessageChecked(prefix, text, chatType, target)
 end
 
@@ -3005,7 +3005,7 @@ end
 -- ================================================================
 function MarketSync.BroadcastRecentData()
     if MarketSync.IsSyncBusy and MarketSync.IsSyncBusy() then
-        print("|cFFFF8800[MarketSync]|r Sync busy. Wait for current blast to finish before starting a new broadcast.")
+        print("|cFFFF8800[MarketSync]|r Sync is busy sending data. Try again when it finishes.")
         SetTransientBlockedState("send/receive active")
         return
     end
@@ -3024,7 +3024,7 @@ function MarketSync.BroadcastRecentData()
 
         local currentScanDay = GetCurrentScanDay()
         if currentScanDay == 0 then
-            print("|cFFFF0000[MarketSync]|r Error: Could not determine scan day!")
+            print("|cFFFF0000[MarketSync]|r Could not read today's scan date. Open the Auction House and try again.")
             return
         end
 
@@ -3111,7 +3111,8 @@ function MarketSync.BroadcastRecentData()
         end
         local success, err = coroutine.resume(co)
         if not success then
-            print("|cFFFF0000[MarketSync] Sync Error:|r", err)
+            print("|cFFFF0000[MarketSync]|r Broadcast stopped unexpectedly. Try again. If it keeps happening, report it.")
+            Debug("Broadcast error: " .. tostring(err))
             broadcastInProgress = false
             ticker:Cancel()
             ScheduleDeferredADVProcessing()
@@ -3148,43 +3149,3 @@ function MarketSync.BroadcastRecentData()
     return MarketSync.ScheduleDirectedPull("M", 0, localIdentity, revision, scanTime)
 end
 
--- ================================================================
--- SEARCH (CLI)
--- ================================================================
-function MarketSync.SearchLocalDB(query)
-    if not Auctionator or not Auctionator.Database or not Auctionator.Database.db then
-        print("|cFFFF0000[MarketSync]|r Auctionator Database not found.")
-        return
-    end
-
-    query = query:lower()
-    local found = 0
-    print(string.format("|cFF00FF00[MarketSync]|r Search results for '%s':", query))
-
-    for dbKey, data in pairs(Auctionator.Database.db) do
-        local itemID = nil
-        if type(dbKey) == "number" then
-            itemID = dbKey
-        elseif type(dbKey) == "string" then
-            local idStr = dbKey:match("(%d+)")
-            if idStr then itemID = tonumber(idStr) end
-        end
-
-        if itemID then
-            local name, link = MarketSync.GetItemInfo(itemID)
-            if name and name:lower():find(query) then
-                local price = Auctionator.Database:GetPrice(dbKey)
-                local age = Auctionator.Database:GetPriceAge(dbKey)
-                if price then
-                    print(string.format("  %s: %s (%s)", link or name, FormatMoney(price), MarketSync.FormatAge(age)))
-                    found = found + 1
-                    if found >= 20 then
-                        print("  ... and more.")
-                        break
-                    end
-                end
-            end
-        end
-    end
-    if found == 0 then print("  No results found.") end
-end

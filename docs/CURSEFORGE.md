@@ -69,7 +69,7 @@ Full scans follow the client's Auction House cooldown. Native item searches wait
 
 ### Using Auctionator
 
-When Auctionator is installed, MarketSync normally lets it handle scanning and hides the duplicate Scanner tab. Change **Settings → Use Auctionator scanning** to choose MarketSync's native scanner instead.
+When Auctionator is installed, MarketSync normally lets it handle scanning and hides the duplicate Scanner tab. Change **Settings → Use Auctionator Scanning (if present)** to choose MarketSync's native scanner instead.
 
 MarketSync can import supported Auctionator scan observations into its own records. Received guild prices remain cumulative market data rather than being written back as personal Auctionator scans.
 
@@ -152,7 +152,7 @@ MarketSync automatically strips trailing numeric shard suffixes (`%d+$`) across 
 | `/ms craft` (or `/mscraft`, `/craftmanager`, `/crafts`) | Open Crafting & Materials Manager |
 | `/ms sidecar` (or `/sidecar`, `/mssidecar`) | Toggle AH Shopping & Bag Selling drawer |
 | `/ms ledger` (or `/ledger`, `/msledger`) | Open the optional Item Ledger when enabled |
-| `/ms search` or `/ms browse` | Open the offline market browser |
+| `/ms search` or `/ms browse` (also `/ms ui`, `/ms open`, `/ms toggle`) | Toggle the main MarketSync window, same as `/ms` |
 | `/ms theme [forever\|legacy\|auto]` | Switch UI window styling |
 | `/ms config` (or `/ms settings`, `/ms options`) | Open AddOn settings panel |
 | `/ms block <player>` | Block a specific sync sender |

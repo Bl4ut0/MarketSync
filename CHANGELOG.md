@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.8-rc1] - 2026-11-25
 
 ### Fixed
 - Honor secret-string rejection in inventory, crafting and purchase chat handlers. A string type fallback can no longer override the safety check, preventing restricted system/loot/modifier messages from being compared or parsed. The receipt parser also rejects restricted strings directly; readable trade and purchase confirmations retain their normal routing.
@@ -13,7 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Advance transmitted record counts only after acceptance. Refused immediate directed PULL requests enter the bounded control queue instead of being silently lost.
 - Limit controls to 64 queued entries, expire old controls and obsolete session messages, and retain deduplication and reserved control slots.
 
+### Added
+- Shopping lists import and export as `!MS1!` strings (`MarketSync/ListCodec.lua`). The payload is JSON with a CRC32 check, encoded in pure Lua 5.1, and imports are strictly validated.
+- Posting warning (`MarketSync/PostingWarning.lua`): before posting, a confirmation prompt appears when the unit price is at or below 60% of the median of recent comparable listings (at least three, seen within five minutes). The player can keep the price.
+- Optional **MarketSyncLedger 1.0.1** companion (`MarketSync/Ledger/`) for transactions, FIFO costs and craft jobs. It requires MarketSync and is built as its own package (`tools/package.py --ledger`) by the release workflow.
+
 ### Changed
+- Split inventory tracking: character inventory snapshots for tooltips stay in the core addon (`MarketSync/InventoryTracking.lua`), while the transactional ledger lives in the Ledger companion.
 - Extend Legacy styling through features added after the original releases: scanner backgrounds and checkboxes, live Search rows, category filters, chart backgrounds and grids, pagers and scrollbars, crafting headers, settings cards, breakout tabs and alert import. Use Classic knob/arrow artwork for Legacy while retaining navigation and purchase behavior.
 - Restore the original Classic Auction House artwork from the 0.4-0.7 beta releases for the Legacy theme, replacing grey/slate styling. Main, crafting, ledger and wide dialogs use the archived portrait surround, borders and footer; smaller windows and the breakout panel use matching warm textured frames. Preserve the current features and Forever theme, keep artwork behind controls, and provide a complete fallback when Classic textures are unavailable.
 - Normalize traffic measurements by actual elapsed time and distinguish MarketSync's accepted/refused API calls from other addons' unknown-result attempts. Report per-transport attempts and exclude all MarketSync data prefixes from external load.
@@ -65,8 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Upgraded content insets (`craftInset`, `listInset`, `sellInset`) with `UI-DialogBox-Background-Dark` and `UI-Tooltip-Border`.
   - Added Blizzard quickslot item borders (`Interface\Buttons\UI-Quickslot2`) for all item slots in the Bag Selling grid.
   - Added hover highlights to shopping list rows.
-- **Client Manifest & Release Upgrade**:
-  - Promoted release candidate to `0.9.7-rc5` across all manifests and client distributions.
 
 ## [0.9.7-rc4-local21] - 2026-11-10
 
@@ -205,7 +209,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
-- Reorganized all Ledger and Inventory Tracking modules into a dedicated `MarketSync/Ledger/` subfolder (`CraftLedger.lua`, `PurchaseList.lua`, `ItemLedger.lua`, `InventoryTracking.lua`, `UI_CraftManager.lua`, `UI_ItemLedger.lua`, `UI_PurchaseList.lua`) with dedicated entry points: Minimap Right-Click (Shift-Right-Click for Settings), optional 2nd Ledger Minimap icon (`MarketSyncDB.EnableLedgerMinimapIcon`), a `Ledger` header bar button on the main MarketSync window, and `/ledger` / `/msledger` / `/ms ledger` slash commands.
+- Reorganized the Ledger modules into a dedicated `MarketSync/Ledger/` subfolder (`CraftLedger.lua`, `PurchaseList.lua`, `ItemLedger.lua`, `UI_CraftManager.lua`, `UI_ItemLedger.lua`, `UI_PurchaseList.lua`); `InventoryTracking.lua` remains at `MarketSync/InventoryTracking.lua` with dedicated entry points: Minimap Right-Click (Shift-Right-Click for Settings), optional 2nd Ledger Minimap icon (`MarketSyncDB.EnableLedgerMinimapIcon`), a `Ledger` header bar button on the main MarketSync window, and `/ledger` / `/msledger` / `/ms ledger` slash commands.
 - Upgraded `UI_ItemLedger.lua` to **Design C (Progressive Hybrid)** featuring 4 top-level KPI summary cards, 3 view tabs (`In / Out Activity`, `Character Stock & Lots`, `Needs Review`), an In/Out direction filter (`Flow: In & Out`, `+In Only`, `-Out Only`), an inline Per-Item In/Out History drawer, and dedicated inspector cards for Auto-Tagged Materials, Zero-Cost Guild Crafts, Crafting Value Gained vs. Raw Mat AH Value, and Compacted Historical Rollups.
 - Added automatic material tagging (`ItemLedger.AutoTagMaterials`) to automatically tag confirmed incoming materials against active craft orders needing those reagents.
 - Added automatic zero-cost guild craft round-trip linking (`ItemLedger.AutoMatchGuildCraft` and `ItemLedger.LinkGuildCraft`) that detects 0-cost incoming materials from a counterparty, a matching craft, and output return to the same counterparty within 30 minutes, recording a zero-cost guild craft (`0c` material expense) and capturing any tip as service profit.

@@ -2,12 +2,26 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ADDON = "MarketSync"
+DEFAULT_ZIP_TIME = (2026, 9, 17, 0, 0, 0)
+
+# Client build each game type is verified against (matches the TOC Interface lists).
+CLIENT_VERSIONS = {"camelot": "1.60.1", "classic": "1.15.9", "tbc": "2.5.6"}
+
+
+def zip_time():
+    """Use SOURCE_DATE_EPOCH for reproducible archives when it is set."""
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch is None or epoch.strip() == "":
+        return DEFAULT_ZIP_TIME
+    return time.gmtime(int(epoch))[:6]
 
 
 FLAVORS = {
@@ -74,14 +88,14 @@ def build(output, interface=None, game_type=None, flavor=None, *, ledger=False):
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, contents in sorted(files.items()):
-            info = zipfile.ZipInfo(name, date_time=(2026, 9, 17, 0, 0, 0))
+            info = zipfile.ZipInfo(name, date_time=zip_time())
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, contents)
 
     manifest = {
         "addon": archive_addon,
         "version": version,
-        "targetVersion": "1.60.1" if game_type in (None, "camelot") else game_type,
+        "targetVersion": CLIENT_VERSIONS[game_type or "camelot"],
         "targetBuild": "70205" if game_type in (None, "camelot") else None,
         "gameType": game_type or "multi",
         "flavor": flavor or "multi",

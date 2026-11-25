@@ -665,9 +665,9 @@ function S.StartScan(itemsOrKeys, label)
     if S.Active then S.Cancel("replaced by new scan") end
     if BlockNativeScan() then return false end
     if not S.IsAvailable() then
-        S.Status = "Auctioneer must be open to scan"
+        S.Status = "Open the Auction House to scan."
         S.Notify()
-        print("|cFFFF4444[MarketSync]|r Auctioneer must be open to scan.")
+        print("|cFFFF4444[MarketSync]|r Open the Auction House to scan.")
         return false
     end
 
@@ -791,9 +791,9 @@ function S.StartFullScan()
     if S.Active then S.Cancel("replaced by new scan") end
     if BlockNativeScan() then return false end
     if not S.IsAvailable() then
-        S.Status = "Auctioneer must be open to scan"
+        S.Status = "Open the Auction House to scan."
         S.Notify()
-        print("|cFFFF4444[MarketSync]|r Auctioneer must be open to scan.")
+        print("|cFFFF4444[MarketSync]|r Open the Auction House to scan.")
         return false
     end
 
@@ -809,11 +809,11 @@ function S.StartFullScan()
 
     local replFunc, getNumFunc, getInfoFunc = GetReplicateFuncs()
     if not replFunc or not getNumFunc or not getInfoFunc then
-        S.Status = "Full scan (ReplicateItems) not supported on this client"
+        S.Status = "Full AH Scan is not available on this client. Use Scan Watched or Scan Lists."
         S.Progress.current = 0
         S.Progress.total = 0
         S.Notify()
-        print("|cFFFF4444[MarketSync]|r Full AH scan (ReplicateItems) not supported on this client. Use Scan Watched or Scan Lists instead.")
+        print("|cFFFF4444[MarketSync]|r Full AH Scan is not available on this client. Use Scan Watched or Scan Lists.")
         return false
     end
 
@@ -936,6 +936,18 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         local aggregateKeys = {}
         local scanGeneration = S.Generation
 
+        -- Batch callbacks run from C_Timer with no caller pcall. If one errors, the
+        -- scan stays flagged as processing, so reset it through Cancel and report once.
+        local function GuardBatch(fn)
+            return function()
+                local ok, err = pcall(fn)
+                if ok then return end
+                MarketSync.Debug("Full scan batch error: " .. tostring(err))
+                print("|cFFFF4444[MarketSync]|r Full AH scan stopped after an internal error. Run the scan again.")
+                S.Cancel("Full scan stopped by an internal error")
+            end
+        end
+
         local function FinishFullScan()
             local finishTime = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
             local scope = S.ScanScope or "main"
@@ -972,7 +984,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             S.Notify()
         end
 
-        local function ProcessRecordBatch()
+        local ProcessRecordBatch
+        local function ProcessRecordBatchBody()
             if not S.Active or S.Generation ~= scanGeneration then return end
 
             local stopIndex = math.min(#aggregateKeys, currentIndex + WRITE_BATCH_SIZE)
@@ -995,7 +1008,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             C_Timer.After(0.01, ProcessRecordBatch)
         end
 
-        local function ProcessReadBatch()
+        ProcessRecordBatch = GuardBatch(ProcessRecordBatchBody)
+
+        local ProcessReadBatch
+        local function ProcessReadBatchBody()
             if not S.Active or S.Generation ~= scanGeneration then return end
 
             local stopIndex = math.min(totalItems, currentIndex + READ_BATCH_SIZE)
@@ -1084,6 +1100,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 C_Timer.After(0.01, ProcessReadBatch)
             end
         end
+
+        ProcessReadBatch = GuardBatch(ProcessReadBatchBody)
 
         currentIndex = 0
         ProcessReadBatch()

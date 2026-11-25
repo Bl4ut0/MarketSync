@@ -67,7 +67,7 @@ for(const kind of ['BEGIN','DATA','END']){
  assert(#Accepted('END')==0 and MarketSync.TxCount==0,'Refused sends must not claim success')
  assert(MarketSync.SyncQueueStats.aborted==1)
  local begin=0;for _,a in ipairs(attempts) do if a.payload:match('^BEGIN;') then begin=begin+1 end end
- assert(begin<=6,'Attempts bounded')
+ assert(begin==5,'Exactly five refused BEGIN attempts before the 20-second abort')
  `);console.log('PASS permanent refusal aborts without false completion');
 }
 {

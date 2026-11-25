@@ -1,7 +1,10 @@
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
+from unittest import mock
 import zipfile
 import re
 
@@ -32,6 +35,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("MarketSync/AuctionHouse.lua", names)
                 self.assertIn("MarketSync/UI_AHScanner.lua", names)
                 self.assertIn("MarketSync/InventoryTracking.lua", names)
+                self.assertIn("MarketSync/Media/LegacyStoneCanvas.tga", names)
                 self.assertFalse(any(name.startswith("MarketSync/Ledger/") for name in names))
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
                 self.assertIn("## AllowLoadGameType: camelot, classic, tbc", toc)
@@ -75,6 +79,7 @@ class PackageTests(unittest.TestCase):
             output = Path(folder) / "MarketSync-Era.zip"
             manifest = module.build(output, 11509, "classic")
             self.assertEqual(manifest["gameType"], "classic")
+            self.assertEqual(manifest["targetVersion"], "1.15.9")
             self.assertIsNone(manifest["targetBuild"])
             with zipfile.ZipFile(output) as archive:
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
@@ -99,6 +104,7 @@ class PackageTests(unittest.TestCase):
                     manifest = module.build(output, interface=interface, flavor=flavor)
                     self.assertEqual(manifest["flavor"], flavor)
                     self.assertEqual(manifest["gameType"], game_type)
+                    self.assertEqual(manifest["targetVersion"], {"camelot": "1.60.1", "classic": "1.15.9", "tbc": "2.5.6"}[game_type])
                     self.assertEqual(manifest["embeddedAuctionHousePanel"], embedded)
                     self.assertEqual(manifest["interface"], interface)
                     with zipfile.ZipFile(output) as archive:
@@ -117,6 +123,38 @@ class PackageTests(unittest.TestCase):
                             self.assertIn("MarketSync/" + entry.replace("\\", "/"), names)
                     self.assertTrue(output.with_suffix(".zip.sha256").exists())
                     self.assertTrue(output.with_suffix(".zip.manifest.json").exists())
+
+    def test_zip_timestamp_follows_source_date_epoch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pinned = Path(folder) / "pinned.zip"
+            with mock.patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1700000000"}):
+                module.build(pinned)
+            with zipfile.ZipFile(pinned) as archive:
+                self.assertEqual(archive.infolist()[0].date_time, time.gmtime(1700000000)[:6])
+            fallback = Path(folder) / "fallback.zip"
+            with mock.patch.dict(os.environ, {}):
+                os.environ.pop("SOURCE_DATE_EPOCH", None)
+                module.build(fallback)
+            with zipfile.ZipFile(fallback) as archive:
+                self.assertEqual(archive.infolist()[0].date_time, (2026, 9, 17, 0, 0, 0))
+
+    def test_lua_texture_paths_resolve_in_repo(self):
+        # Textures referenced by the addon Lua that are not shipped yet. Remove an entry once the asset exists.
+        known_missing = {"Media/MarketSyncIcon"}
+        pattern = re.compile(r'Interface\\\\AddOns\\\\MarketSync\\\\([^"]+)"')
+        addon_dir = module.ROOT / "MarketSync"
+        references = set()
+        for lua in addon_dir.rglob("*.lua"):
+            for match in pattern.finditer(lua.read_text(encoding="utf-8")):
+                references.add(match.group(1).replace("\\\\", "/"))
+        self.assertTrue(references, "No MarketSync texture paths were found in the Lua source")
+        missing = set()
+        for rel in references:
+            target = addon_dir / rel
+            candidates = [target] + [target.with_name(target.name + ext) for ext in (".tga", ".blp", ".png", ".jpg")]
+            if not any(candidate.is_file() for candidate in candidates):
+                missing.add(rel)
+        self.assertEqual(missing, known_missing, "Texture paths in Lua must resolve to files in MarketSync/")
 
     def test_flavor_cannot_conflict_with_game_type(self):
         with tempfile.TemporaryDirectory() as folder:

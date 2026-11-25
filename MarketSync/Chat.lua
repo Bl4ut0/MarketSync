@@ -8,6 +8,13 @@ local Debug = MarketSync.Debug
 local FormatMoney = MarketSync.FormatMoney
 local FormatAge = MarketSync.FormatAge
 
+-- Turns guild sync off after a newer peer is seen, and says which setting changed.
+local function DisablePassiveSyncForOutdatedVersion(localVersion, peerName, peerVersion)
+    if not (MarketSyncDB and MarketSyncDB.PassiveSync) then return end
+    MarketSyncDB.PassiveSync = false
+    print(string.format("|cFFFF0000[MarketSync]|r Guild sync was turned off because your version (v%s) is older than %s's (v%s). Update MarketSync, then turn it back on with 'Enable Guild Sync' in /ms settings.", tostring(localVersion), tostring(peerName or "Unknown"), tostring(peerVersion or "unknown")))
+end
+
 -- Protocol-2 sessions stage raw DATA strings until END proves that every
 -- sequence exists.  Main and neutral state remain isolated even though the
 -- guild uses a single physical transfer lane.
@@ -321,73 +328,6 @@ local function AllowPriceCheckRequest(senderKey)
     end
 
     return true
-end
-
-function MarketSync.ProcessDeferredADV()
-    if not MarketSync.CanSync or not MarketSync.CanSync() then return false end
-    if MarketSync.IsSyncBusy and MarketSync.IsSyncBusy() then return false end
-
-    if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
-    local localVersion = MarketSync.GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
-
-    -- Process standard deferred ADV first.
-    if pendingFreshADV then
-        local adv = pendingFreshADV
-        pendingFreshADV = nil
-
-        if MarketSync.IsSameSyncMarketRealm(adv.realm, MarketSync.myRealm) then
-            local cmp = CompareVersions(adv.version or "0.4.0-beta", localVersion)
-            if cmp > 0 then
-                if MarketSyncDB and MarketSyncDB.PassiveSync then
-                    MarketSyncDB.PassiveSync = false
-                    print(string.format("|cFFFF0000[MarketSync]|r Sync Disabled! You are running an outdated version (v%s). %s is running v%s. Please update your addon.", localVersion, adv.sender or "Unknown", adv.version or "unknown"))
-                end
-                return false
-            elseif cmp == 0 then
-                local isFresher, ourDay, ourItemCount, ourScanTime = ComputeFreshness(adv.scanDay or 0, adv.itemCount or 0, adv.scanTime or 0)
-                if isFresher then
-                    Debug(string.format("Processing deferred ADV from %s (Day %d vs %d, Time %d vs %d, Items %d vs %d)",
-                        adv.sender or "Unknown", adv.scanDay or 0, ourDay, adv.scanTime or 0, ourScanTime, adv.itemCount or 0, ourItemCount))
-                    if MarketSync.LogNetworkEvent then
-                        MarketSync.LogNetworkEvent(string.format("|cff00ccff[Deferred ADV]|r Pulling freshest queued source: %s (Day %d, TSF %d).", adv.sender or "Unknown", adv.scanDay or 0, adv.scanTime or 0))
-                    end
-                    if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), "Receiving") end
-                    if MarketSync.BeginGuildSync then
-                        MarketSync.BeginGuildSync()
-                    end
-                    MarketSync.SendPullRequest(ourDay)
-                    return true
-                end
-            end
-        end
-    end
-
-    -- Then process neutral deferred ADV.
-    if pendingFreshNeutralADV then
-        local adv = pendingFreshNeutralADV
-        pendingFreshNeutralADV = nil
-        if not MarketSync.IsSameSyncMarketRealm(adv.realm, MarketSync.myRealm) then return false end
-
-        local cmp = CompareVersions(adv.version or "0.4.0-beta", localVersion)
-        if cmp ~= 0 then return false end
-
-        local isFresher, ourDay = ComputeNeutralFreshness(adv.scanDay or 0, adv.itemCount or 0, adv.scanTime or 0)
-        if not isFresher then return false end
-
-        if MarketSync.LogNetworkEvent then
-            MarketSync.LogNetworkEvent(string.format("|cff00ccff[Deferred NADV]|r Pulling freshest queued neutral source: %s (Day %d, TSF %d).", adv.sender or "Unknown", adv.scanDay or 0, adv.scanTime or 0))
-        end
-        if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(UnitName("player"), "Receiving Neutral") end
-        if MarketSync.BeginNeutralSync then
-            MarketSync.BeginNeutralSync()
-        end
-        if MarketSync.SendNeutralPullRequest then
-            MarketSync.SendNeutralPullRequest(ourDay)
-            return true
-        end
-    end
-
-    return false
 end
 
 -- ================================================================
@@ -1296,8 +1236,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if cmp > 0 then
                 -- They are newer. We must disable our sync and warn the user to update.
                 if MarketSyncDB and MarketSyncDB.PassiveSync then
-                    MarketSyncDB.PassiveSync = false
-                    print(string.format("|cFFFF0000[MarketSync]|r Sync Disabled! You are running an outdated version (v%s). %s is running v%s. Please update your addon.", localVersion, senderName, advVersion))
+                    DisablePassiveSyncForOutdatedVersion(localVersion, senderName, advVersion)
                     if MarketSync.LogNetworkEvent then
                         MarketSync.LogNetworkEvent(string.format("|cffff0000[Error]|r Outdated addon version! Disabled sync to prevent data corruption. (New version: v%s)", advVersion))
                     end
@@ -1376,10 +1315,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local localVersion = MarketSync.GetAddOnMetadata("MarketSync", "Version") or "0.0.0"
             local cmp = CompareVersions(advVersion, localVersion)
             if cmp > 0 then
-                if MarketSyncDB and MarketSyncDB.PassiveSync then
-                    MarketSyncDB.PassiveSync = false
-                    print(string.format("|cFFFF0000[MarketSync]|r Sync Disabled! You are running an outdated version (v%s). %s is running v%s. Please update your addon.", localVersion, senderName, advVersion))
-                end
+                DisablePassiveSyncForOutdatedVersion(localVersion, senderName, advVersion)
                 return
             elseif cmp < 0 then
                 if MarketSync.UpdateSwarmUI then
@@ -1445,7 +1381,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if MarketSync.UpdateSwarmUI then MarketSync.UpdateSwarmUI(senderName, "Receiving") end
             
             if MarketSync.SchedulePullResponse then
-                MarketSync.SchedulePullResponse(sinceBucket, senderName)
+                local scheduled = MarketSync.SchedulePullResponse(sinceBucket, senderName)
+                if scheduled == false then Debug("Legacy PULL from " .. tostring(senderName) .. " not scheduled (legacy responder unavailable)") end
             end
 
         elseif msgType == "NPULL" then
@@ -1462,7 +1399,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 MarketSync.UpdateSwarmUI(senderName, "Receiving Neutral")
             end
             if MarketSync.ScheduleNeutralPullResponse then
-                MarketSync.ScheduleNeutralPullResponse(sinceDay, senderName)
+                local scheduled = MarketSync.ScheduleNeutralPullResponse(sinceDay, senderName)
+                if scheduled == false then Debug("Legacy NPULL from " .. tostring(senderName) .. " not scheduled (legacy responder unavailable)") end
             end
 
         elseif msgType == "ACCEPT" then
@@ -1472,7 +1410,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if not MarketSync.IsSameSyncMarketRealm(acceptRealm, MarketSync.myRealm) then return end
             
             if MarketSync.RegisterPullAccept then
-                MarketSync.RegisterPullAccept(sinceDay, senderName)
+                local registered = MarketSync.RegisterPullAccept(sinceDay, senderName)
+                if registered == false then Debug("Legacy ACCEPT from " .. tostring(senderName) .. " not registered (legacy responder unavailable)") end
             end
 
         elseif msgType == "NACCEPT" then
@@ -1481,7 +1420,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if not MarketSync.myRealm then MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName() end
             if not MarketSync.IsSameSyncMarketRealm(acceptRealm, MarketSync.myRealm) then return end
             if MarketSync.RegisterNeutralPullAccept then
-                MarketSync.RegisterNeutralPullAccept(sinceDay, senderName)
+                local registered = MarketSync.RegisterNeutralPullAccept(sinceDay, senderName)
+                if registered == false then Debug("Legacy NACCEPT from " .. tostring(senderName) .. " not registered (legacy responder unavailable)") end
             end
 
         elseif msgType == "REQ" then
@@ -1669,7 +1609,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     local jitter = math.random(1, 20)
                     C_Timer.After(jitter, function()
                         if IsInGuild() then
-                            MarketSync.SendAddonMessage("MSync", string.format("ACK;%d;%s", rxCount, myName), "GUILD")
+                            MarketSync.SendAddonMessage(PREFIX, string.format("ACK;%d;%s", rxCount, myName), "GUILD")
                         end
                     end)
                 end

@@ -4,7 +4,8 @@
 -- ================================================================
 
 MarketSync = MarketSync or {}
-local ADDON_NAME = MarketSync.ADDON_NAME or "MarketSync"
+local addonName = ...
+local ADDON_NAME = addonName or "MarketSync"
 
 local AuctionatorProvider = {}
 

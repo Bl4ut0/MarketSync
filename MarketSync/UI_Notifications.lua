@@ -2073,12 +2073,6 @@ function MarketSync.ToggleNotificationsManager()
     end
 end
 
-function MarketSync.RefreshNotificationUndercutButtons()
-    for _, p in ipairs(registeredNotificationPanels) do
-        if p.RefreshUndercutButtons then p.RefreshUndercutButtons() end
-    end
-end
-
 function MarketSync.OpenAlertEditorWithItem(itemRef, price)
     if AuctionFrame and AuctionFrame:IsShown() and MarketSync.AuctionHouse and MarketSync.AuctionHouse.SelectTab then
         MarketSync.AuctionHouse.SelectTab("alerts")

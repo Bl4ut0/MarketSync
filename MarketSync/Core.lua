@@ -881,9 +881,9 @@ if MarketSync.Theme then MarketSync.Theme.Register(panel) end
 -- ================================================================
 -- STAGED INITIALIZATION
 -- ================================================================
--- Stage 1 (immediate):  DB defaults + minimap â€” zero DB iteration
--- Stage 2 (45s):        Passive sync â€” lightweight guild advertisements
--- Stage 3 (90s):        Search index cache â€” heavy coroutine, only if enabled
+-- Stage 1 (immediate):  DB defaults + minimap - zero DB iteration
+-- Stage 2 (45s):        Passive sync - lightweight guild advertisements
+-- Stage 3 (90s):        Search index cache - heavy coroutine, only if enabled
 -- On-Demand:            Opening the Browse UI always triggers cache build
 -- ================================================================
 local auctionatorDBUpdateRegistered = false
@@ -1370,7 +1370,7 @@ local function HandleAuctionatorScannerDetection()
     end
     if not MarketSyncDB.AuctionatorScannerNoticeShown then
         MarketSyncDB.AuctionatorScannerNoticeShown = true
-        print("|cFF00FF00[MarketSync]|r Auctionator detected. MarketSync scanning is disabled. To re-enable it, turn off 'Use Auctionator scanning' in MarketSync Settings.")
+        print("|cFF00FF00[MarketSync]|r Auctionator detected. MarketSync scanning is disabled. To re-enable it, turn off 'Use Auctionator Scanning (if present)' in MarketSync Settings.")
     end
 end
 SafeRegisterEvent(eventFrame, "ADDON_LOADED")
@@ -1398,7 +1398,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- forcibly snapshot whatever exists in their Live Auctionator DB into the mirror pool right now.
         -- This guarantees new users don't see an empty "Personal Snapshot" screen if they've used Auctionator before.
         -- IMPORTANT: If PersonalScanTime exists, the user has already done a real AH scan and their
-        -- PersonalData is sacred â€” never overwrite it on boot (guild sync grows the live DB, which
+        -- PersonalData is sacred - never overwrite it on boot (guild sync grows the live DB, which
         -- would otherwise trigger the migration check every login).
         C_Timer.After(5, function()
             local hasPersonalScan = MarketSyncDB and MarketSync.GetRealmDB().PersonalScanTime
@@ -1442,7 +1442,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end)
 
-        -- STAGE 2: Passive sync (45s) â€” sets up guild advertisement ticker
+        -- STAGE 2: Passive sync (45s) - sets up guild advertisement ticker
         C_Timer.After(45, function()
             -- ... (rest of stage 2)
             MarketSync.myRealm = GetNormalizedRealmName() or GetRealmName()
@@ -1452,7 +1452,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end)
 
-        -- STAGE 2.5: Metadata pruning (60s) â€” trim stale ItemMetadata to prevent RAM bloat
+        -- STAGE 2.5: Metadata pruning (60s) - trim stale ItemMetadata to prevent RAM bloat
         C_Timer.After(60, function()
             if MarketSync.PruneMetadata then
                 MarketSync.PruneMetadata()
@@ -1462,7 +1462,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             end
         end)
 
-        -- STAGE 3: Search index cache (90s) â€” only if user opted in
+        -- STAGE 3: Search index cache (90s) - only if user opted in
         C_Timer.After(90, function()
             if MarketSyncDB and MarketSyncDB.BuildCacheOnStartup then
                 if MarketSyncDB.DebugMode then
@@ -1701,9 +1701,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                     if reason == "" then reason = "Smart Rules" end
 
                     if MarketSync.LogNetworkEvent then
-                        MarketSync.LogNetworkEvent("|cffff4444[Smart Rules]|r Sync |cffff4444DISABLED|r â€” " .. reason)
+                        MarketSync.LogNetworkEvent("|cffff4444[Smart Rules]|r Sync |cffff4444DISABLED|r - " .. reason)
                     end
-                    MarketSync.Debug("Smart Rules: Sync DISABLED â€” " .. reason)
+                    MarketSync.Debug("Smart Rules: Sync DISABLED - " .. reason)
                     if MarketSync.UpdateSwarmUI then
                         MarketSync.UpdateSwarmUI(UnitName("player"), "Paused (" .. reason .. ")")
                     end
@@ -1721,9 +1721,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                     end
 
                     if MarketSync.LogNetworkEvent then
-                        MarketSync.LogNetworkEvent("|cff44ff44[Smart Rules]|r Sync |cff44ff44ENABLED|r â€” " .. reason)
+                        MarketSync.LogNetworkEvent("|cff44ff44[Smart Rules]|r Sync |cff44ff44ENABLED|r - " .. reason)
                     end
-                    MarketSync.Debug("Smart Rules: Sync ENABLED â€” " .. reason)
+                    MarketSync.Debug("Smart Rules: Sync ENABLED - " .. reason)
                     if MarketSync.UpdateSwarmUI then
                         MarketSync.UpdateSwarmUI(UnitName("player"), nil)
                     end
@@ -1805,7 +1805,7 @@ SlashCmdList["MarketSync"] = function(msg)
                 end,
             })
         else
-            print("Usage: /ms import <!MS1!...>")
+            print("|cFF00FF00[MarketSync]|r Usage: /ms import <!MS1!...>")
         end
     elseif cmd == "export" then
         local targetList = arg
@@ -1842,31 +1842,33 @@ SlashCmdList["MarketSync"] = function(msg)
             MarketSync.SetUITheme(arg)
         else
             print("|cFF00FF00[MarketSync]|r Current theme: " .. MarketSync.GetUIThemePreference() .. " (active: " .. MarketSync.GetUITheme() .. ")")
-            print("  Usage: /ms theme [legacy|forever|auto]")
+            print("|cFF00FF00[MarketSync]|r Usage: /ms theme [legacy|forever|auto]")
         end
     elseif cmd == "stats" or cmd == "config" or cmd == "options" or cmd == "settings" then
-        if Settings and Settings.OpenToCategory then
+        if Settings and Settings.OpenToCategory and category then
             Settings.OpenToCategory(category:GetID())
-        else
-            InterfaceOptionsFrame_OpenToCategory(panel)
+        elseif InterfaceOptionsFrame_OpenToCategory then
+            InterfaceOptionsFrame_OpenToCategory(panel.name)
         end
     elseif cmd == "block" then
-        if #arg > 0 then MarketSync.ToggleBlock(arg) else print("Usage: /ms block [playername]") end
+        if #arg > 0 then MarketSync.ToggleBlock(arg, "block") else print("|cFF00FF00[MarketSync]|r Usage: /ms block [playername]") end
     elseif cmd == "unblock" then
-        if #arg > 0 then MarketSync.ToggleBlock(arg) else print("Usage: /ms unblock [playername]") end
+        if #arg > 0 then MarketSync.ToggleBlock(arg, "unblock") else print("|cFF00FF00[MarketSync]|r Usage: /ms unblock [playername]") end
     else
         print("|cFF00FF00[MarketSync]|r Commands:")
-        print("  /ms - Toggle main MarketSync window.")
-        print("  /ms craft (or /mscraft) - Open Crafting & Materials Manager.")
+        print("  /ms [search|browse] (also /marketsync, /aucann) - Toggle main MarketSync window.")
+        print("  /ms craft (or /mscraft, /crafts) - Open Crafting & Materials Manager.")
         if MarketSync.RunLedgerCommand then
-            print("  /ms ledger (or /ledger) - Open Item & Gold Ledger.")
+            print("  /ms ledger (or /msledger, /ledger) - Open Item & Gold Ledger.")
         end
-        print("  /ms sidecar (or /sidecar) - Toggle Shopping Lists & Bag Selling drawer.")
+        print("  /ms sidecar (or /sidecar, /mssidecar) - Toggle Shopping Lists & Bag Selling drawer.")
         print("  /ms import [string] - Import a !MS1! shopping list string (or open dialog).")
         print("  /ms export [list] - Export a shopping list to a !MS1! string.")
         print("  /ms theme [legacy|forever|auto] - Switch UI theme.")
-        print("  /ms config - Open settings panel.")
+        print("  /ms config (or /ms stats) - Open settings panel.")
         print("  /ms block [name] - Block a sender.")
+        print("  /ms unblock [name] - Unblock a sender.")
+        print("  /msdata - Review MarketSync data.")
     end
 end
 
