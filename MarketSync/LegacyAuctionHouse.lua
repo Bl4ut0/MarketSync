@@ -1,7 +1,8 @@
 -- Classic-family native Auction House tabs and the shared sidecar.
+-- Dispatch (AH.ShowAuctionHousePanel), tab visibility (AH.TabVisibility) and
+-- the AH event listener live in AuctionHouse.lua so both clients share them.
 local AH = MarketSync and MarketSync.AuctionHouse
 if not AH then return end
-local modernShowPanel = AH.ShowAuctionHousePanel
 
 local function HidePanels()
     for _, host in pairs(AH.LegacyHosts or {}) do host:Hide() end
@@ -23,7 +24,7 @@ end
 
 function AH.AttachLegacy()
     if AH.LegacyAttached then return true end
-    if not (MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH) then return false end
+    if not AH.IsLegacyClient() then return false end
     local auctionFrame = _G.AuctionFrame
     if not auctionFrame or not auctionFrame.numTabs then return false end
     local factories = {
@@ -165,16 +166,10 @@ function AH.AttachLegacy()
         tab:SetScript("OnClick", function() Select(kind) end)
     end
 
-    function AH.RefreshTabVisibility()
-        local useAuctionator = MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true
-            and Auctionator and Auctionator.Database
-        local visible = {
-            search = true,
-            scanner = not useAuctionator,
-            processing = MarketSyncDB and MarketSyncDB.EnableProcessingTab == true,
-            alerts = MarketSyncDB and MarketSyncDB.EnableAlertsTab == true,
-            analytics = not MarketSyncDB or MarketSyncDB.EnableAnalyticsTab ~= false,
-        }
+    -- Shows or hides each Classic tab from the shared visibility table and
+    -- re-chains the visible tabs. Retail uses AH.RefreshModernTabs instead.
+    AH.RefreshLegacyTabs = function()
+        local visible = AH.TabVisibility()
         local firstTab = tabs.search
         local previous = firstTab and _G["AuctionFrameTab" .. (firstTab:GetID() - 1)]
             or _G.AuctionFrameTab3
@@ -193,7 +188,7 @@ function AH.AttachLegacy()
             end
         end
     end
-    AH.RefreshTabVisibility()
+    AH.RefreshLegacyTabs()
 
     if type(hooksecurefunc) == "function" and type(AuctionFrameTab_OnClick) == "function" then
         hooksecurefunc("AuctionFrameTab_OnClick", function(tab)
@@ -232,15 +227,6 @@ function AH.AttachLegacy()
     return true
 end
 
-function AH.ShowAuctionHousePanel(targetTab)
-    if MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH then
-        if not AH.AttachLegacy() then return false end
-        local kind = type(targetTab) == "string" and targetTab:lower() or "scanner"
-        return AH.ShowLegacyPanel(kind)
-    end
-    return modernShowPanel and modernShowPanel(targetTab) or false
-end
-
 MarketSync.OpenLegacySearch = function(query)
     if not AH.AttachLegacy() then return false end
     if type(query) == "table" then
@@ -259,12 +245,3 @@ MarketSync.OpenLegacySearch = function(query)
     if not AH.ShowLegacyPanel("search") then return false end
     return MarketSync.Scanner.StartLiveSearch(query)
 end
-
-local listener = CreateFrame("Frame")
-listener:RegisterEvent("AUCTION_HOUSE_SHOW")
-listener:RegisterEvent("ADDON_LOADED")
-listener:SetScript("OnEvent", function(_, event, name)
-    if event == "AUCTION_HOUSE_SHOW" or (event == "ADDON_LOADED" and name == "Blizzard_AuctionUI") then
-        AH.AttachLegacy()
-    end
-end)

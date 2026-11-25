@@ -1,6 +1,9 @@
 -- ================================================================
--- MarketSync - Embedded Auction House Tab & Lifecycle
--- Hooks AuctionHouseFrame to add MarketSync directly into the native AH
+-- MarketSync - Auction House Tabs & Lifecycle (shared core)
+-- This file owns the single entry points for the native Auction House
+-- integration. Retail (AuctionHouseFrame, LibAHTab tabs) is built here.
+-- Classic-family clients (AuctionFrame) are built in LegacyAuctionHouse.lua.
+-- Both read the same tab-visibility table and use the same dispatchers.
 -- ================================================================
 
 MarketSync = MarketSync or {}
@@ -8,8 +11,36 @@ MarketSync.AuctionHouse = MarketSync.AuctionHouse or {}
 
 local AH = MarketSync.AuctionHouse
 
+-- True on Classic-family clients, where the native frame is AuctionFrame.
+function AH.IsLegacyClient()
+    return (MarketSync.Scanner and MarketSync.Scanner.IsLegacyAH) and true or false
+end
+
+-- Single source of truth for which MarketSync tabs are enabled. Both tab
+-- strips read this, so the two clients cannot drift apart.
+function AH.TabVisibility()
+    local db = MarketSyncDB or {}
+    local useAuctionatorScan = db.UseAuctionatorScanner == true
+        and Auctionator ~= nil and Auctionator.Database ~= nil
+    return {
+        search = true,
+        scanner = not useAuctionatorScan,
+        processing = db.EnableProcessingTab == true,
+        alerts = db.EnableAlertsTab == true,
+        analytics = db.EnableAnalyticsTab ~= false,
+    }
+end
+
+-- Shared entry point for every caller. Refreshes whichever tab strip is
+-- attached for this client. Attach functions call their own refresh directly
+-- because they run before the attached flags are set.
 function AH.RefreshTabVisibility()
-    -- Stub until attached to AuctionHouseFrame
+    if AH.LegacyAttached and AH.RefreshLegacyTabs then
+        return AH.RefreshLegacyTabs()
+    end
+    if AH.Attached and AH.RefreshModernTabs then
+        return AH.RefreshModernTabs()
+    end
 end
 
 local function GetBuyFrameItem(buyFrame)
@@ -70,7 +101,27 @@ local function AttachBuyAnalyticsButton(buyFrame, btnName)
     buyFrame[btnName] = btn
 end
 
-function AH.ShowAuctionHousePanel(targetTab)
+function AH.HideAuctionHousePanel()
+    if AH.ScannerPanel then
+        AH.ScannerPanel:Hide()
+        if AH.ScannerPanel.Content and AH.ScannerPanel.Content.Hide then AH.ScannerPanel.Content:Hide() end
+    end
+    if AH.ProcessingPanel then
+        AH.ProcessingPanel:Hide()
+        if AH.ProcessingPanel.Content and AH.ProcessingPanel.Content.Hide then AH.ProcessingPanel.Content:Hide() end
+    end
+    if AH.AlertsPanel then
+        AH.AlertsPanel:Hide()
+        if AH.AlertsPanel.Content and AH.AlertsPanel.Content.Hide then AH.AlertsPanel.Content:Hide() end
+    end
+    if AH.AnalyticsPanel then
+        AH.AnalyticsPanel:Hide()
+        if AH.AnalyticsPanel.Content and AH.AnalyticsPanel.Content.Hide then AH.AnalyticsPanel.Content:Hide() end
+    end
+end
+
+-- Shows a retail panel. Classic clients go through AH.ShowAuctionHousePanel.
+local function ShowModernPanel(targetTab)
     if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then return false end
     if not AH.Attach() then return false end
     if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
@@ -94,23 +145,66 @@ function AH.ShowAuctionHousePanel(targetTab)
     return true
 end
 
-function AH.HideAuctionHousePanel()
-    if AH.ScannerPanel then
-        AH.ScannerPanel:Hide()
-        if AH.ScannerPanel.Content and AH.ScannerPanel.Content.Hide then AH.ScannerPanel.Content:Hide() end
+-- The one public entry point for opening an Auction House panel. It picks
+-- the native frame for this client. Callers never reassign these functions.
+function AH.ShowAuctionHousePanel(targetTab)
+    if AH.IsLegacyClient() then
+        if not AH.AttachLegacy() then return false end
+        local kind = type(targetTab) == "string" and targetTab:lower() or "scanner"
+        return AH.ShowLegacyPanel(kind)
     end
-    if AH.ProcessingPanel then
-        AH.ProcessingPanel:Hide()
-        if AH.ProcessingPanel.Content and AH.ProcessingPanel.Content.Hide then AH.ProcessingPanel.Content:Hide() end
+    return ShowModernPanel(targetTab)
+end
+
+-- Builds a hidden panel anchored to the retail AH frame, leaving the native
+-- footer visible.
+local function CreateTabPanel(frame, name)
+    local panel = CreateFrame("Frame", name, frame)
+    panel:Hide()
+    local footer = frame.MoneyFrameBorder
+    if footer then
+        -- Blizzard anchors Sell and Auctions two pixels above the money border.
+        panel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -34)
+        panel:SetPoint("BOTTOMLEFT", footer, "TOPLEFT", 7, 2)
+        panel.MarketSyncNativeAuctionFooter = true
+    else
+        panel:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
+        panel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
     end
-    if AH.AlertsPanel then
-        AH.AlertsPanel:Hide()
-        if AH.AlertsPanel.Content and AH.AlertsPanel.Content.Hide then AH.AlertsPanel.Content:Hide() end
+    return panel
+end
+
+-- Builds one retail panel. Showing it hides the MarketSync main window, sets
+-- the breakout sidecar, and shows its content. afterShow (optional) runs
+-- after the content has been shown.
+local function BuildModernPanel(frame, name, factory, sidecarVisible, afterShow)
+    local panel = CreateTabPanel(frame, name)
+    if factory then
+        panel.Content = factory(panel)
     end
-    if AH.AnalyticsPanel then
-        AH.AnalyticsPanel:Hide()
-        if AH.AnalyticsPanel.Content and AH.AnalyticsPanel.Content.Hide then AH.AnalyticsPanel.Content:Hide() end
-    end
+    panel:SetScript("OnShow", function()
+        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
+            MarketSync.MainFrame:Hide()
+        end
+        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
+            MarketSync.AHSidecar.SetVisibleForAH(sidecarVisible)
+        end
+        local content = panel.Content
+        if content then
+            if content.Show then content:Show() end
+            local onShow = content.OnShow or (content.GetScript and content:GetScript("OnShow"))
+            if onShow then
+                onShow(content)
+            end
+            if afterShow then afterShow(content) end
+        end
+    end)
+    panel:SetScript("OnHide", function()
+        if panel.Content and panel.Content.Hide then
+            panel.Content:Hide()
+        end
+    end)
+    return panel
 end
 
 function AH.Attach()
@@ -120,153 +214,37 @@ function AH.Attach()
     end
     if AH.Attached then return true end
 
-    local function CreateTabPanel(name)
-        local panel = CreateFrame("Frame", name, frame)
-        panel:Hide()
-        local footer = frame.MoneyFrameBorder
-        if footer then
-            -- Blizzard anchors Sell and Auctions two pixels above the money border.
-            panel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -34)
-            panel:SetPoint("BOTTOMLEFT", footer, "TOPLEFT", 7, 2)
-            panel.MarketSyncNativeAuctionFooter = true
-        else
-            panel:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -34)
-            panel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 32)
+    -- Analytics opened from a buy frame or the search box loads that item.
+    local function AutoLoadAnalytics(content)
+        local activeID, activeLink = nil, nil
+        if frame.CommoditiesBuyFrame and frame.CommoditiesBuyFrame:IsShown() then
+            activeID, activeLink = GetBuyFrameItem(frame.CommoditiesBuyFrame)
+        elseif frame.ItemBuyFrame and frame.ItemBuyFrame:IsShown() then
+            activeID, activeLink = GetBuyFrameItem(frame.ItemBuyFrame)
         end
-        return panel
+        if activeID or activeLink then
+            if content.ShowItem then
+                content:ShowItem(activeID or activeLink, activeLink)
+            end
+        elseif frame.SearchBar and frame.SearchBar.SearchBox then
+            local txt = frame.SearchBar.SearchBox:GetText()
+            if txt and txt ~= "" and content.SelectByNameOrQuery then
+                content:SelectByNameOrQuery(txt)
+            end
+        end
     end
 
-    -- 1. Scanner Panel Container
-    local panelScanner = CreateTabPanel("MarketSyncAHScannerPanel")
+    -- The four retail panels. Only the scanner keeps the sidecar visible.
+    local panelScanner = BuildModernPanel(frame, "MarketSyncAHScannerPanel", MarketSync.CreateAHScannerPanel, true)
     AH.ScannerPanel = panelScanner
-
-    if MarketSync.CreateAHScannerPanel then
-        panelScanner.Content = MarketSync.CreateAHScannerPanel(panelScanner)
-    end
-    panelScanner:SetScript("OnShow", function()
-        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
-            MarketSync.MainFrame:Hide()
-        end
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-            MarketSync.AHSidecar.SetVisibleForAH(true)
-        end
-        if panelScanner.Content then
-            if panelScanner.Content.Show then panelScanner.Content:Show() end
-            local onShow = panelScanner.Content.OnShow or (panelScanner.Content.GetScript and panelScanner.Content:GetScript("OnShow"))
-            if onShow then
-                onShow(panelScanner.Content)
-            end
-        end
-    end)
-    panelScanner:SetScript("OnHide", function()
-        if panelScanner.Content and panelScanner.Content.Hide then
-            panelScanner.Content:Hide()
-        end
-    end)
-
-    -- 2. Processing Panel Container
-    local panelProcessing = CreateTabPanel("MarketSyncAHProcessingPanel")
+    local panelProcessing = BuildModernPanel(frame, "MarketSyncAHProcessingPanel", MarketSync.CreateProcessingPanel, false)
     AH.ProcessingPanel = panelProcessing
-
-    if MarketSync.CreateProcessingPanel then
-        panelProcessing.Content = MarketSync.CreateProcessingPanel(panelProcessing)
-    end
-    panelProcessing:SetScript("OnShow", function()
-        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
-            MarketSync.MainFrame:Hide()
-        end
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-            MarketSync.AHSidecar.SetVisibleForAH(false)
-        end
-        if panelProcessing.Content then
-            if panelProcessing.Content.Show then panelProcessing.Content:Show() end
-            local onShow = panelProcessing.Content.OnShow or (panelProcessing.Content.GetScript and panelProcessing.Content:GetScript("OnShow"))
-            if onShow then
-                onShow(panelProcessing.Content)
-            end
-        end
-    end)
-    panelProcessing:SetScript("OnHide", function()
-        if panelProcessing.Content and panelProcessing.Content.Hide then
-            panelProcessing.Content:Hide()
-        end
-    end)
-
-    -- 3. Alerts Panel Container
-    local panelAlerts = CreateTabPanel("MarketSyncAHAlertsPanel")
+    local panelAlerts = BuildModernPanel(frame, "MarketSyncAHAlertsPanel", MarketSync.CreateNotificationsPanel, false)
     AH.AlertsPanel = panelAlerts
-
-    if MarketSync.CreateNotificationsPanel then
-        panelAlerts.Content = MarketSync.CreateNotificationsPanel(panelAlerts)
-    end
-    panelAlerts:SetScript("OnShow", function()
-        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
-            MarketSync.MainFrame:Hide()
-        end
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-            MarketSync.AHSidecar.SetVisibleForAH(false)
-        end
-        if panelAlerts.Content then
-            if panelAlerts.Content.Show then panelAlerts.Content:Show() end
-            local onShow = panelAlerts.Content.OnShow or (panelAlerts.Content.GetScript and panelAlerts.Content:GetScript("OnShow"))
-            if onShow then
-                onShow(panelAlerts.Content)
-            end
-        end
-    end)
-    panelAlerts:SetScript("OnHide", function()
-        if panelAlerts.Content and panelAlerts.Content.Hide then
-            panelAlerts.Content:Hide()
-        end
-    end)
-
-    -- 4. Analytics Panel Container
-    local panelAnalytics = CreateTabPanel("MarketSyncAHAnalyticsPanel")
+    local panelAnalytics = BuildModernPanel(frame, "MarketSyncAHAnalyticsPanel", MarketSync.CreateAnalyticsPanel, false, AutoLoadAnalytics)
     AH.AnalyticsPanel = panelAnalytics
 
-    if MarketSync.CreateAnalyticsPanel then
-        panelAnalytics.Content = MarketSync.CreateAnalyticsPanel(panelAnalytics)
-    end
-    panelAnalytics:SetScript("OnShow", function()
-        if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
-            MarketSync.MainFrame:Hide()
-        end
-        if MarketSync.AHSidecar and MarketSync.AHSidecar.SetVisibleForAH then
-            MarketSync.AHSidecar.SetVisibleForAH(false)
-        end
-        if panelAnalytics.Content then
-            if panelAnalytics.Content.Show then panelAnalytics.Content:Show() end
-            local onShow = panelAnalytics.Content.OnShow or (panelAnalytics.Content.GetScript and panelAnalytics.Content:GetScript("OnShow"))
-            if onShow then
-                onShow(panelAnalytics.Content)
-            end
-
-            -- Auto-load active item from BuyFrame or SearchBox if user navigated to Analytics
-            local activeID, activeLink = nil, nil
-            if frame.CommoditiesBuyFrame and frame.CommoditiesBuyFrame:IsShown() then
-                activeID, activeLink = GetBuyFrameItem(frame.CommoditiesBuyFrame)
-            elseif frame.ItemBuyFrame and frame.ItemBuyFrame:IsShown() then
-                activeID, activeLink = GetBuyFrameItem(frame.ItemBuyFrame)
-            end
-            if activeID or activeLink then
-                if panelAnalytics.Content.ShowItem then
-                    panelAnalytics.Content:ShowItem(activeID or activeLink, activeLink)
-                end
-            elseif frame.SearchBar and frame.SearchBar.SearchBox then
-                local txt = frame.SearchBar.SearchBox:GetText()
-                if txt and txt ~= "" and panelAnalytics.Content.SelectByNameOrQuery then
-                    panelAnalytics.Content:SelectByNameOrQuery(txt)
-                end
-            end
-        end
-    end)
-    panelAnalytics:SetScript("OnHide", function()
-        if panelAnalytics.Content and panelAnalytics.Content.Hide then
-            panelAnalytics.Content:Hide()
-        end
-    end)
-
-    -- Register 4 tabs via LibAHTab-1-0 (Scanner, Processing, Alerts, Analytics)
+    -- Register the four tabs via LibAHTab-1-0 (Scanner, Processing, Alerts, Analytics)
     local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
     if libAHTab then
         if not libAHTab:DoesIDExist("MarketSyncScanner") then
@@ -312,19 +290,18 @@ function AH.Attach()
         end
     end
 
-    -- Dynamically re-anchor visible LibAHTab tabs cleanly without gaps
-    function AH.RefreshTabVisibility()
+    -- Re-anchor the visible LibAHTab tabs without gaps.
+    AH.RefreshModernTabs = function()
         local libAHTab = LibStub and LibStub("LibAHTab-1-0", true)
         if not libAHTab or not libAHTab.internalState or not libAHTab.internalState.rootFrame then return end
 
         local offsetX = (WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE) and -14 or 3
-        local useAuctionatorScan = MarketSyncDB and MarketSyncDB.UseAuctionatorScanner == true
-            and Auctionator and Auctionator.Database
+        local visible = AH.TabVisibility()
         local tabConfigs = {
-            { id = "MarketSyncScanner", btn = AH.ScannerTab, enabled = not useAuctionatorScan },
-            { id = "MarketSyncProcessing", btn = AH.ProcessingTab, enabled = (MarketSyncDB and MarketSyncDB.EnableProcessingTab == true) },
-            { id = "MarketSyncAlerts", btn = AH.AlertsTab, enabled = (MarketSyncDB and MarketSyncDB.EnableAlertsTab == true) },
-            { id = "MarketSyncAnalytics", btn = AH.AnalyticsTab, enabled = (MarketSyncDB and MarketSyncDB.EnableAnalyticsTab ~= false) },
+            { id = "MarketSyncScanner", btn = AH.ScannerTab, enabled = visible.scanner },
+            { id = "MarketSyncProcessing", btn = AH.ProcessingTab, enabled = visible.processing },
+            { id = "MarketSyncAlerts", btn = AH.AlertsTab, enabled = visible.alerts },
+            { id = "MarketSyncAnalytics", btn = AH.AnalyticsTab, enabled = visible.analytics },
         }
 
         local lastVisible = nil
@@ -365,10 +342,7 @@ function AH.Attach()
             end
         end
     end
-
-    if AH.RefreshTabVisibility then
-        AH.RefreshTabVisibility()
-    end
+    AH.RefreshModernTabs()
 
     -- Attach MarketSync Breakout Sidecar to AuctionHouseFrame
     if MarketSync.CreateAHSidecar then
@@ -413,9 +387,7 @@ function AH.Attach()
 
     frame:HookScript("OnShow", function()
         MarketSync.IsAuctionHouseOpen = true
-        if AH.RefreshTabVisibility then
-            AH.RefreshTabVisibility()
-        end
+        AH.RefreshTabVisibility()
         if MarketSync.MainFrame and MarketSync.MainFrame:IsShown() then
             MarketSync.MainFrame:Hide()
         end
@@ -453,15 +425,21 @@ function AH.Attach()
     return true
 end
 
--- Hook ADDON_LOADED or AUCTION_HOUSE_SHOW
+-- One listener for both clients. Each attach function returns false on the
+-- client it does not apply to, so a single event can safely call both.
 local ahLoader = CreateFrame("Frame")
 pcall(ahLoader.RegisterEvent, ahLoader, "ADDON_LOADED")
 pcall(ahLoader.RegisterEvent, ahLoader, "AUCTION_HOUSE_SHOW")
-ahLoader:SetScript("OnEvent", function(self, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == "Blizzard_AuctionHouseUI" then
-        AH.Attach()
+ahLoader:SetScript("OnEvent", function(_, event, arg1)
+    if event == "ADDON_LOADED" then
+        if arg1 == "Blizzard_AuctionHouseUI" then
+            AH.Attach()
+        elseif arg1 == "Blizzard_AuctionUI" and AH.AttachLegacy then
+            AH.AttachLegacy()
+        end
     elseif event == "AUCTION_HOUSE_SHOW" then
         MarketSync.IsAuctionHouseOpen = true
         AH.Attach()
+        if AH.AttachLegacy then AH.AttachLegacy() end
     end
 end)

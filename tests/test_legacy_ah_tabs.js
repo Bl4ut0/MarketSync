@@ -75,6 +75,8 @@ run(`
   end
   MarketSync.CreateAHSidecar = function() return CreateFrame('Frame') end
 `);
+// Load in TOC order: the shared core (AuctionHouse.lua) before the Classic file.
+run(fs.readFileSync(path.join(__dirname, '../MarketSync/AuctionHouse.lua'), 'utf8'));
 run(fs.readFileSync(path.join(__dirname, '../MarketSync/LegacyAuctionHouse.lua'), 'utf8'));
 run(`
   local ah = MarketSync.AuctionHouse
