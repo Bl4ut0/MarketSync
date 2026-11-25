@@ -555,8 +555,6 @@ function MarketSync.InitializeDB()
             EnableNotificationSounds = true,
             BuildCacheOnStartup = false,
             LowRamMode = true,
-            PartialLowRamKeepLatest = true,
-            KeepSecondaryIndexesLoaded = false,
             OnDemandPersonal = true,
             OnDemandGuild = true,
             OnDemandNeutral = true,
@@ -603,8 +601,6 @@ function MarketSync.InitializeDB()
     end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.LowRamMode == nil then MarketSyncDB.LowRamMode = true end
-    if MarketSyncDB.PartialLowRamKeepLatest == nil then MarketSyncDB.PartialLowRamKeepLatest = true end
-    if MarketSyncDB.KeepSecondaryIndexesLoaded == nil then MarketSyncDB.KeepSecondaryIndexesLoaded = false end
     if MarketSyncDB.OnDemandPersonal == nil then MarketSyncDB.OnDemandPersonal = true end
     if MarketSyncDB.OnDemandGuild == nil then MarketSyncDB.OnDemandGuild = true end
     if MarketSyncDB.OnDemandNeutral == nil then MarketSyncDB.OnDemandNeutral = true end

@@ -87,11 +87,11 @@ local function CreateMinimapButton()
             elseif button == "MiddleButton" then
                 if MarketSync_ToggleUI then
                     MarketSync_ToggleUI()
-                    -- Switch to Alerts tab (Tab 5)
+                    -- Switch to Alerts tab (Tab 6)
                     if MarketSync.SelectMainFrameTab then
-                        MarketSync.SelectMainFrameTab(5)
-                    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[5] then
-                        MarketSyncMainFrame.tabs[5]:Click()
+                        MarketSync.SelectMainFrameTab(6)
+                    elseif MarketSyncMainFrame and MarketSyncMainFrame.tabs and MarketSyncMainFrame.tabs[6] then
+                        MarketSyncMainFrame.tabs[6]:Click()
                     end
                 end
             else
@@ -339,43 +339,23 @@ local function PopulateAddonSettings(panel)
     local chkStartup
 
     local chkLowRam = CreateOptCheckbox(cardMemory, 16, -58, "Enable Low RAM Mode (Default: ON)",
-        "Conserves memory by keeping secondary scan sources (Personal, Guild, Data Pack, Neutral) on-demand instead of loading duplicate full tables at once.",
+        "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Automatically loads caches on demand.",
         "LowRamMode", true, function(val)
             if not val and MarketSync.BuildSearchIndex then
                 MarketSync.BuildSearchIndex()
-            elseif val and MarketSync.ReleaseSecondaryBrowseCaches then
-                MarketSync.ReleaseSecondaryBrowseCaches()
             end
             if UpdateMemoryCardLayout then UpdateMemoryCardLayout() end
         end)
 
-    local chkKeepLatest = CreateOptCheckbox(cardMemory, 16, -88, "Smart Partial Low RAM: Keep 'Latest' Main AH Ready (Default: ON)",
-        "Keeps only the unified 'Latest' Main AH index in memory for instant searches while leaving Personal, Guild, Data Pack, and Neutral views on-demand.",
-        "PartialLowRamKeepLatest", true, function(val)
-            if val and MarketSync.MainFrame and MarketSync.MainFrame:IsShown() and MarketSync.LoadLatestCache then
-                MarketSync.LoadLatestCache()
-            elseif not val and MarketSyncDB and MarketSyncDB.LowRamMode and MarketSync.InvalidateIndexCache then
-                MarketSync.InvalidateIndexCache()
-            end
-        end)
-
-    local chkKeepSecondary = CreateOptCheckbox(cardMemory, 16, -118, "Retain Secondary Views in Memory After Loading",
-        "When enabled, secondary source views (Personal, Guild, Data Pack, Neutral, or historical scan snapshots) remain cached in memory for the session instead of freeing when closed.",
-        "KeepSecondaryIndexesLoaded", false, function(val)
-            if not val and MarketSyncDB and MarketSyncDB.LowRamMode and MarketSync.ReleaseSecondaryBrowseCaches then
-                MarketSync.ReleaseSecondaryBrowseCaches()
-            end
-        end)
-
-    chkStartup = CreateOptCheckbox(cardMemory, 16, -148, "Pre-Build All Search Indexes on Startup",
-        "Pre-indexes stored auction data shortly after login. Available when full Low RAM mode is disabled.",
+    chkStartup = CreateOptCheckbox(cardMemory, 16, -88, "Pre-Build Search Index on Startup",
+        "Pre-indexes stored auction data shortly after login. When Low RAM mode is enabled, on-demand indexing is recommended instead.",
         "BuildCacheOnStartup", false, function(val)
             if val and MarketSync.BuildSearchIndex then MarketSync.BuildSearchIndex() end
         end)
 
     -- Cache Build Speed Slider
     local speedHeader = cardMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    speedHeader:SetPoint("TOPLEFT", 16, -182)
+    speedHeader:SetPoint("TOPLEFT", 16, -122)
     speedHeader:SetText("|cffffd700Cache Build Speed:|r")
 
     local speedSlider = CreateFrame("Slider", "MarketSyncAddonSpeedSlider", cardMemory, "OptionsSliderTemplate")
@@ -433,18 +413,16 @@ local function PopulateAddonSettings(panel)
 
     UpdateMemoryCardLayout = function()
         local isLowRam = MarketSyncDB and (MarketSyncDB.LowRamMode ~= false)
-        if chkKeepLatest then chkKeepLatest:SetShown(true) end
-        if chkKeepSecondary then chkKeepSecondary:SetShown(true) end
         if isLowRam then
             if chkStartup then chkStartup:Hide() end
             speedHeader:ClearAllPoints()
-            speedHeader:SetPoint("TOPLEFT", 16, -152)
-            cardMemory:SetHeight(250)
+            speedHeader:SetPoint("TOPLEFT", 16, -92)
+            cardMemory:SetHeight(190)
         else
             if chkStartup then chkStartup:Show() end
             speedHeader:ClearAllPoints()
-            speedHeader:SetPoint("TOPLEFT", 16, -182)
-            cardMemory:SetHeight(280)
+            speedHeader:SetPoint("TOPLEFT", 16, -122)
+            cardMemory:SetHeight(220)
         end
         UpdateCanvasHeight()
     end

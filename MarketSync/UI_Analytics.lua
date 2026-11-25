@@ -325,111 +325,16 @@ function MarketSync.CreateAnalyticsPanel(parent)
     local compactLegacy = parent.MarketSyncCompactLegacyLayout == true
     local isLegacyMain = not isEmbedded and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
     local LEFT_X = isEmbedded and 6 or (isLegacyMain and 25 or 20)
-    local TOP_Y = isEmbedded and -36 or -68
+    local TOP_Y = isEmbedded and -6 or -68
     local BOTTOM_Y = parent.MarketSyncNativeAuctionFooter and 0 or (isEmbedded and 6 or (isLegacyMain and 40 or 35))
     local RIGHT_X = isEmbedded and -6 or (isLegacyMain and -16 or -20)
     local LEFT_W = 240
-    local GRAPH_H = isEmbedded and 202 or 155
+    local GRAPH_H = isEmbedded and 230 or 155
     local BANNER_H = isEmbedded and 46 or 44
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     panel.isEmbedded = isEmbedded
-    panel.analyticsFilter = {
-        localScan = true,
-        guildSync = true,
-        dataPack = true,
-        market = "main", -- "main" or "neutral"
-    }
-
-    -- ================================================================
-    -- TOP HEADER STRIP: DATA SOURCE TOGGLES & MARKET SCOPE (Main / Neutral)
-    -- ================================================================
-    local topStripY = isEmbedded and -7 or -39
-    local topStripLeft = isEmbedded and 58 or 70
-    local srcLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    srcLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", topStripLeft, topStripY - 4)
-    srcLabel:SetText("Data Sources:")
-
-    local function MakeTogglePill(labelText, width, tooltipTitle, tooltipBody)
-        local btn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-        btn:SetSize(width, 22)
-        btn._marketSyncSkipTheme = true
-        if btn.SetBackdrop then
-            btn:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8X8",
-                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                edgeSize = 10,
-                insets = { left = 2, right = 2, top = 2, bottom = 2 },
-            })
-        end
-        btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        btn.label:SetPoint("CENTER", 0, 0)
-        btn.baseLabel = labelText
-        btn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(tooltipTitle, 1, 0.82, 0)
-            GameTooltip:AddLine(tooltipBody, 0.85, 0.85, 0.85, true)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        return btn
-    end
-
-    local btnLocalSrc = MakeTogglePill("Local Scan", 92, "Local / Personal Scans",
-        "Include price observations recorded directly by your own Auction House scans.")
-    btnLocalSrc:SetPoint("LEFT", srcLabel, "RIGHT", 8, 0)
-
-    local btnGuildSrc = MakeTogglePill("Guild Sync", 90, "Guild Sync Data",
-        "Include price observations received from guildmates via MarketSync swarm sync.")
-    btnGuildSrc:SetPoint("LEFT", btnLocalSrc, "RIGHT", 5, 0)
-
-    local btnPackSrc = MakeTogglePill("Data Pack", 88, "MarketSyncData Daily Pack",
-        "Include baseline historical prices from the daily compiled MarketSyncData addon.")
-    btnPackSrc:SetPoint("LEFT", btnGuildSrc, "RIGHT", 5, 0)
-
-    local btnScopeNeutral = MakeTogglePill("Neutral AH", 88, "Neutral Auction House",
-        "Inspect isolated Neutral Auction House trends (Booty Bay, Gadgetzan, Everlook).")
-    btnScopeNeutral:SetPoint("TOPRIGHT", panel, "TOPRIGHT", RIGHT_X, topStripY)
-
-    local btnScopeMain = MakeTogglePill("Main AH", 78, "Main Faction Auction House",
-        "Inspect your main faction Auction House combining enabled Local, Guild, and Data Pack sources.")
-    btnScopeMain:SetPoint("RIGHT", btnScopeNeutral, "LEFT", -4, 0)
-
-    panel.sourceButtons = { localScan = btnLocalSrc, guildSync = btnGuildSrc, dataPack = btnPackSrc }
-    panel.scopeButtons = { main = btnScopeMain, neutral = btnScopeNeutral }
-
-    local RefreshSourceStripVisuals
-    RefreshSourceStripVisuals = function()
-        local f = panel.analyticsFilter
-        local isNeutral = (f.market == "neutral")
-        local function StylePill(btn, active, disabledLook, accentR, accentG, accentB)
-            if disabledLook then
-                if btn.SetBackdropColor then btn:SetBackdropColor(0.06, 0.06, 0.06, 0.65) end
-                if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.6) end
-                btn.label:SetText("|cff666666" .. btn.baseLabel .. "|r")
-            elseif active then
-                if btn.SetBackdropColor then btn:SetBackdropColor(MarketSync.GetThemeColor("hover")) end
-                if btn.SetBackdropBorderColor then
-                    btn:SetBackdropBorderColor(accentR or 0.90, accentG or 0.74, accentB or 0.28, 0.98)
-                end
-                local prefix = (btn == btnScopeMain or btn == btnScopeNeutral) and "" or "|cff40cf78✓|r "
-                local col = (btn == btnScopeNeutral) and "|cff00ccff" or "|cffffd700"
-                btn.label:SetText(prefix .. col .. btn.baseLabel .. "|r")
-            else
-                if btn.SetBackdropColor then btn:SetBackdropColor(MarketSync.GetThemeColor("header")) end
-                if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(0.32, 0.28, 0.22, 0.85) end
-                btn.label:SetText("|cff999999" .. btn.baseLabel .. "|r")
-            end
-        end
-        StylePill(btnLocalSrc, f.localScan, isNeutral)
-        StylePill(btnGuildSrc, f.guildSync, isNeutral)
-        StylePill(btnPackSrc, f.dataPack, isNeutral)
-        StylePill(btnScopeMain, not isNeutral, false)
-        StylePill(btnScopeNeutral, isNeutral, false, 0.15, 0.75, 0.95)
-        srcLabel:SetText(isNeutral and "|cff00ccffNeutral Scope:|r" or "Data Sources:")
-    end
-    RefreshSourceStripVisuals()
 
     -- Left Inset: Search, Item Drop & List of Recent/Tracked Items (240px)
     local leftInset = MarketSync.CreateModernInset and MarketSync.CreateModernInset(panel, LEFT_X, TOP_Y, LEFT_W, nil, "controls")
@@ -678,59 +583,26 @@ function MarketSync.CreateAnalyticsPanel(parent)
                 end
             end
             if MarketSyncDB and MarketSync.GetRealmDB then
-                local realmDB = MarketSync.GetRealmDB()
-                local f = panel.analyticsFilter
-                if f.market == "neutral" then
-                    for dbKey, entry in pairs(realmDB.NeutralData or {}) do
-                        if type(entry) == "table" and (tonumber(entry.m) or 0) > 0 then
-                            Consider({
-                                dbKey = tostring(dbKey),
-                                observedAt = tonumber(entry.observedAt)
-                                    or ((tonumber(entry.d) or 0) * 86400),
-                                price = entry.m,
-                            })
-                        end
+                for dbKey, entry in pairs(MarketSync.GetRealmDB().PersonalData or {}) do
+                    if type(entry) == "table" then
+                        Consider({
+                            dbKey = tostring(dbKey),
+                            observedAt = tonumber(entry.observedAt)
+                                or ((tonumber(entry.d) or 0) * 86400),
+                            price = entry.m,
+                        })
                     end
-                else
-                    if f.localScan then
-                        for dbKey, entry in pairs(realmDB.PersonalData or {}) do
-                            if type(entry) == "table" and (tonumber(entry.m) or 0) > 0 then
-                                Consider({
-                                    dbKey = tostring(dbKey),
-                                    observedAt = tonumber(entry.observedAt)
-                                        or ((tonumber(entry.d) or 0) * 86400),
-                                    price = entry.m,
-                                })
-                            end
-                        end
-                        local recent = (MarketSync.Scanner and MarketSync.Scanner.RecentResults) or {}
-                        for _, result in ipairs(recent) do
-                            if result.itemID then
-                                Consider({
-                                    dbKey = tostring(result.dbKey or result.itemID),
-                                    observedAt = tonumber(result.time) or 0,
-                                    live = result,
-                                    price = result.unitPrice,
-                                })
-                            end
-                        end
-                    end
-                    if f.guildSync or f.dataPack then
-                        for dbKey, entry in pairs(realmDB.GuildData or {}) do
-                            if type(entry) == "table" and (tonumber(entry.m) or 0) > 0 then
-                                local isPack = (entry.src == "DataPack")
-                                    or (MarketSync.IsWebAuctionRecord and MarketSync.IsWebAuctionRecord(entry))
-                                if (isPack and f.dataPack) or (not isPack and f.guildSync) then
-                                    Consider({
-                                        dbKey = tostring(dbKey),
-                                        observedAt = tonumber(entry.observedAt)
-                                            or ((tonumber(entry.d) or 0) * 86400),
-                                        price = entry.m,
-                                    })
-                                end
-                            end
-                        end
-                    end
+                end
+            end
+            local recent = (MarketSync.Scanner and MarketSync.Scanner.RecentResults) or {}
+            for _, result in ipairs(recent) do
+                if result.itemID then
+                    Consider({
+                        dbKey = tostring(result.dbKey or result.itemID),
+                        observedAt = tonumber(result.time) or 0,
+                        live = result,
+                        price = result.unitPrice,
+                    })
                 end
             end
             table.sort(candidates, function(a, b)
@@ -1442,76 +1314,48 @@ function MarketSync.CreateAnalyticsPanel(parent)
         end
         self.subtitle:SetText(subText)
 
-        -- Retrieve History Data filtered by active Data Sources / Market Scope
-        local f = self.analyticsFilter
-        local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key, f) or {}
+        self.mPrice:SetText(FormatMoney(marketPrice))
+
+        -- Retrieve History Data
+        local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key) or {}
         self.currentHistory = history
         self.graph:Plot(history, self.graphPointLimit)
         self:UpdateVisibleRange()
 
-        -- Update displayed Market Value to match the active Market Scope / Source toggles
-        local effectivePrice = (#history > 0 and tonumber(history[1].price)) or 0
-        if effectivePrice <= 0 then
-            if f.market == "neutral" then
-                local nEntry = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().NeutralData
-                    and MarketSync.GetRealmDB().NeutralData[key]
-                effectivePrice = (nEntry and tonumber(nEntry.m)) or 0
-            elseif f.localScan and f.guildSync and f.dataPack then
-                effectivePrice = marketPrice
-            end
-        end
-        self.mPrice:SetText(effectivePrice > 0 and FormatMoney(effectivePrice) or "|cff888888No data|r")
-
         -- Evaluate Data Freshness & Source Distribution
         local latestAge = 0
-        local personal, guild, pack = 0, 0, 0
+        local personal, guild = 0, 0
         if #history > 0 then
             local curDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0
             latestAge = math.max(0, curDay - (history[1].day or curDay))
             for i = 1, math.min(#history, 30) do
-                local orig = history[i].origin or history[i].source
-                if orig == "Personal" then
+                if history[i].source == "Personal" then
                     personal = personal + 1
-                elseif orig == "DataPack" then
-                    pack = pack + 1
                 else
                     guild = guild + 1
                 end
             end
         end
 
-        if f.market == "neutral" then
-            self.mSource:SetText(#history > 0 and "|cff00ccffNeutral AH|r (Isolated)" or "|cff888888No Neutral records|r")
-        else
-            local total = personal + guild + pack
-            if total > 0 then
-                local pPct = math.floor(personal / total * 100 + 0.5)
-                local gPct = math.floor(guild / total * 100 + 0.5)
-                local dPct = math.max(0, 100 - pPct - gPct)
-                self.mSource:SetText(string.format("Local: %d%% · Guild: %d%% · Pack: %d%%", pPct, gPct, dPct))
-            else
-                self.mSource:SetText("|cff888888No matching source data|r")
+        local total = personal + guild
+        local pPct = total > 0 and math.floor(personal / total * 100) or 0
+        local gPct = total > 0 and (100 - pPct) or 0
+        self.mSource:SetText(string.format("Personal: %d%% | Guild: %d%%", pPct, gPct))
+
+        local ageStr = (latestAge == 0) and "Today" or (latestAge .. "d ago")
+        if latestAge == 0 and history[1] and history[1].source == "Personal" then
+            local pTime = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalScanTime
+            if pTime and pTime > 0 and MarketSync.FormatRealmTime then
+                ageStr = "Today (" .. MarketSync.FormatRealmTime(pTime) .. ")"
             end
         end
 
-        if #history == 0 then
-            self.mAge:SetText("|cff888888N/A|r")
-            self.mStatus:SetText("|cff888888NO DATA|r")
-        else
-            local ageStr = (latestAge == 0) and "Today" or (latestAge .. "d ago")
-            if latestAge == 0 and f.market ~= "neutral" and history[1] and (history[1].origin or history[1].source) == "Personal" then
-                local pTime = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalScanTime
-                if pTime and pTime > 0 and MarketSync.FormatRealmTime then
-                    ageStr = "Today (" .. MarketSync.FormatRealmTime(pTime) .. ")"
-                end
-            end
-            local isStale = (latestAge > 3)
-            self.mAge:SetText((isStale and "|cffff2020" or "|cff00ff00") .. ageStr .. "|r")
-            self.mStatus:SetText(isStale and "|cffff2020STALE|r" or "|cff00ff00GOOD|r")
-        end
+        local isStale = (latestAge > 3)
+        self.mAge:SetText((isStale and "|cffff4444" or "|cff00ff00") .. ageStr .. "|r")
+        self.mStatus:SetText(isStale and "|cffff4444STALE|r" or "|cff00ff00GOOD|r")
 
         -- Evaluate Intraday Analytics (30-Minute Buckets)
-        local granular = MarketSync.GetGranularHistory and MarketSync.GetGranularHistory(key, f) or {}
+        local granular = MarketSync.GetGranularHistory and MarketSync.GetGranularHistory(key) or {}
         self.mDataPoints:SetText(#granular > 0 and (#granular .. " snapshots") or "|cff888888None|r")
 
         if #granular >= 3 then
@@ -1593,64 +1437,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
         return false
     end
 
-    local function ReapplyAnalyticsFilters()
-        RefreshSourceStripVisuals()
-        RefreshItemsList()
-        if panel.currentItem then
-            local cur = panel.currentItem
-            panel:ShowItem(cur.dbKey, cur.link, cur.name, cur.icon, cur.price)
-        elseif #itemsList > 0 then
-            local first = itemsList[1]
-            panel:ShowItem(tostring(first.dbKey or first.itemID), nil, first.name, first.icon, first.price)
-        else
-            ShowEmptyState()
-        end
-    end
-
-    local function ToggleMainSource(field)
-        if panel.analyticsFilter.market == "neutral" then
-            panel.analyticsFilter.market = "main"
-            panel.analyticsFilter[field] = true
-        else
-            panel.analyticsFilter[field] = not panel.analyticsFilter[field]
-            if not panel.analyticsFilter.localScan
-                and not panel.analyticsFilter.guildSync
-                and not panel.analyticsFilter.dataPack then
-                panel.analyticsFilter[field] = true
-            end
-        end
-        ReapplyAnalyticsFilters()
-    end
-
-    btnLocalSrc:SetScript("OnClick", function() ToggleMainSource("localScan") end)
-    btnGuildSrc:SetScript("OnClick", function() ToggleMainSource("guildSync") end)
-    btnPackSrc:SetScript("OnClick", function() ToggleMainSource("dataPack") end)
-
-    function panel:SetMarketScope(scope)
-        local target = (scope == "neutral") and "neutral" or "main"
-        if self.analyticsFilter.market ~= target then
-            self.analyticsFilter.market = target
-            RefreshSourceStripVisuals()
-            RefreshItemsList()
-        end
-    end
-
-    btnScopeMain:SetScript("OnClick", function()
-        if panel.analyticsFilter.market ~= "main" then
-            panel.analyticsFilter.market = "main"
-            ReapplyAnalyticsFilters()
-        end
-    end)
-    btnScopeNeutral:SetScript("OnClick", function()
-        if panel.analyticsFilter.market ~= "neutral" then
-            panel.analyticsFilter.market = "neutral"
-            ReapplyAnalyticsFilters()
-        end
-    end)
-
     function panel:OnShow()
         if self.FitLegacyChart then self.FitLegacyChart() end
-        RefreshSourceStripVisuals()
         RefreshItemsList()
         if panel.currentItem then
             panel:ShowItem(panel.currentItem.dbKey, panel.currentItem.link, panel.currentItem.name, panel.currentItem.icon, panel.currentItem.price)
@@ -1673,7 +1461,7 @@ end
 -- GLOBAL ENTRY POINT: MarketSync.ShowAnalytics
 -- Switches to AH Analytics tab if AH is open, or MainFrame if standalone
 -- ================================================================
-function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price, marketScope)
+function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price)
     -- 1. If native AH is open, activate AH Analytics tab
     if ((AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (AuctionFrame and AuctionFrame:IsShown()))
         and MarketSync.AuctionHouse and MarketSync.AuctionHouse.ShowAuctionHousePanel then
@@ -1683,17 +1471,14 @@ function MarketSync.ShowAnalytics(dbKey, itemLink, name, icon, price, marketScop
             MarketSync.MainFrame:Show()
         end
         if MarketSync.SelectMainFrameTab then
-            MarketSync.SelectMainFrameTab(3)
-        elseif MarketSync.MainFrame.tabs and MarketSync.MainFrame.tabs[3] then
-            MarketSync.MainFrame.tabs[3]:Click()
+            MarketSync.SelectMainFrameTab(4)
+        elseif MarketSync.MainFrame.tabs and MarketSync.MainFrame.tabs[4] then
+            MarketSync.MainFrame.tabs[4]:Click()
         end
     end
 
     -- 2. Dispatch to all registered analytics panels
     for _, p in ipairs(registeredPanels) do
-        if marketScope and p.SetMarketScope then
-            p:SetMarketScope(marketScope)
-        end
         if p.ShowItem then
             p:ShowItem(dbKey, itemLink, name, icon, price)
         end

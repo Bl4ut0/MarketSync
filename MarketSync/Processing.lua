@@ -3525,57 +3525,39 @@ local function ResolveHistoryDBKey(input)
     return input
 end
 
-local function IsDataPackEntry(record)
-    if type(record) ~= "table" then return false end
-    if record.src == "DataPack" then return true end
-    if MarketSync.IsWebAuctionRecord and MarketSync.IsWebAuctionRecord(record) then return true end
-    return false
-end
+function MarketSync.GetItemHistory(dbKey)
+    dbKey = ResolveHistoryDBKey(dbKey)
+    local pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
+    local priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
+    if (not priceData or not priceData.h) and (not pData or not pData.h) then return {} end
 
-local function UnpackHistoryRecord(record, defaultOrigin, meta, FromBase36, outHistory, coveredDays)
-    if type(record) ~= "table" then return end
-    if record.h then
-        for dayStr, histVal in pairs(record.h) do
-            if type(histVal) == "number" then
-                local day = tonumber(dayStr)
-                if day and not coveredDays[dayStr] then
-                    coveredDays[dayStr] = true
-                    local lowPrice = record.l and record.l[dayStr] or histVal
-                    local qty = record.a and record.a[dayStr] or 0
-                    local source = defaultOrigin
-                    if defaultOrigin == "Guild" and meta and meta.days and meta.days[dayStr] then
-                        local s = meta.days[dayStr].source
-                        if s then source = s:match("^([^%-]+)") or s end
-                    end
-                    table.insert(outHistory, {
-                        day = day,
-                        bucketOffset = nil,
-                        sortKey = day * 100,
-                        high = histVal,
-                        low = lowPrice,
-                        price = histVal,
-                        quantity = qty,
-                        source = source,
-                        origin = defaultOrigin,
-                        isGranular = false,
-                    })
-                end
-            elseif type(histVal) == "string" and histVal ~= "" then
-                if MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histVal) then
-                    local parsed = MarketSync.ParseCompactRecord and MarketSync.ParseCompactRecord(histVal)
+    local history = {}
+    local meta = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().ItemMetadata and MarketSync.GetRealmDB().ItemMetadata[dbKey]
+    local FromBase36 = MarketSync.FromBase36
+
+    -- Track which days have granular data so we don't double-count
+    local granularDays = {}
+
+    -- 1. Unpack granular timeseries strings and compact summaries from PersonalData
+    if pData and pData.h then
+        for dayStr, histStr in pairs(pData.h) do
+            if histStr and histStr ~= "" then
+                if MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr) then
+                    local parsed = MarketSync.ParseCompactRecord and MarketSync.ParseCompactRecord(histStr)
                     if parsed then
                         local day = tonumber(dayStr)
                         local isWeekly = false
-                        if not day and dayStr:sub(1, 2) == "W_" then
+                        if not day and type(dayStr) == "string" and dayStr:sub(1, 2) == "W_" then
                             local weekNum = tonumber(dayStr:sub(3))
                             if weekNum then
                                 day = weekNum * 7
                                 isWeekly = true
                             end
                         end
-                        if day and not coveredDays[tostring(day)] then
-                            coveredDays[tostring(day)] = true
-                            table.insert(outHistory, {
+                        if day then
+                            granularDays[tostring(day)] = true
+                            local timeLabel = isWeekly and "Weekly Avg" or "Daily Avg"
+                            table.insert(history, {
                                 day = day,
                                 bucketOffset = nil,
                                 sortKey = (day * 100) + 48,
@@ -3583,9 +3565,8 @@ local function UnpackHistoryRecord(record, defaultOrigin, meta, FromBase36, outH
                                 low = parsed.min,
                                 price = parsed.avg,
                                 quantity = parsed.volume,
-                                source = defaultOrigin,
-                                origin = defaultOrigin,
-                                timeLabel = isWeekly and "Weekly Avg" or "Daily Avg",
+                                source = "Personal",
+                                timeLabel = timeLabel,
                                 isGranular = false,
                                 isCompact = true,
                                 isWeekly = isWeekly,
@@ -3594,28 +3575,30 @@ local function UnpackHistoryRecord(record, defaultOrigin, meta, FromBase36, outH
                     end
                 else
                     local day = tonumber(dayStr)
-                    if day and not coveredDays[dayStr] then
-                        coveredDays[dayStr] = true
-                        for b_offs, p_b36, q_b36 in string.gmatch(histVal, "(%d+):([%w%-]+):([%w%-]+)") do
+                    if day then
+                        granularDays[dayStr] = true
+                        for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
                             local bucketOffset = tonumber(b_offs)
                             local price = FromBase36(p_b36)
                             local qty = FromBase36(q_b36)
                             if price and price > 0 then
-                                local source = defaultOrigin
-                                if defaultOrigin == "Guild" and meta and meta.days and meta.days[dayStr] then
+                                -- Per-day source attribution
+                                local source = "Personal"
+                                if meta and meta.days and meta.days[dayStr] then
                                     local s = meta.days[dayStr].source
                                     if s then source = s:match("^([^%-]+)") or s end
                                 end
-                                table.insert(outHistory, {
+
+                                table.insert(history, {
                                     day = day,
                                     bucketOffset = bucketOffset,
+                                    -- sortKey: scanDay * 100 + bucketOffset gives chronological ordering
                                     sortKey = (day * 100) + bucketOffset,
                                     high = price,
                                     low = price,
                                     price = price,
                                     quantity = qty,
                                     source = source,
-                                    origin = defaultOrigin,
                                     timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
                                     isGranular = true,
                                 })
@@ -3626,95 +3609,35 @@ local function UnpackHistoryRecord(record, defaultOrigin, meta, FromBase36, outH
             end
         end
     end
-    -- Fallback when a record only carries top-level m / d (e.g. lightweight DataPack or Neutral snapshot)
-    local topPrice = tonumber(record.m)
-    local topDay = tonumber(record.d) or (MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0)
-    if topPrice and topPrice > 0 and topDay > 0 and not coveredDays[tostring(topDay)] then
-        coveredDays[tostring(topDay)] = true
-        table.insert(outHistory, {
-            day = topDay,
-            bucketOffset = nil,
-            sortKey = topDay * 100,
-            high = topPrice,
-            low = topPrice,
-            price = topPrice,
-            quantity = tonumber(record.q) or 0,
-            source = defaultOrigin,
-            origin = defaultOrigin,
-            isGranular = false,
-        })
-    end
-end
 
-function MarketSync.GetItemHistory(dbKey, filterOpts)
-    dbKey = ResolveHistoryDBKey(dbKey)
-    local realmDB = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-    local FromBase36 = MarketSync.FromBase36
-    local history = {}
-    local coveredDays = {}
+    -- 2. Fill any days that DON'T have granular data with daily aggregate fallback
+    if priceData and priceData.h then
+        for dayStr, highPrice in pairs(priceData.h) do
+            local day = tonumber(dayStr)
+            if day and not granularDays[dayStr] then
+                local lowPrice = priceData.l and priceData.l[dayStr] or highPrice
+                local qty = priceData.a and priceData.a[dayStr] or 0
 
-    local market = type(filterOpts) == "table" and filterOpts.market or "main"
-    if market == "neutral" then
-        local nData = realmDB and realmDB.NeutralData and realmDB.NeutralData[dbKey]
-        local nMeta = realmDB and realmDB.NeutralMeta and realmDB.NeutralMeta[dbKey]
-        local nOrigin = (nMeta and nMeta.source) or "Neutral"
-        if nData then
-            UnpackHistoryRecord(nData, nOrigin, nil, FromBase36, history, coveredDays)
-        end
-        table.sort(history, function(a, b) return a.sortKey > b.sortKey end)
-        return history
-    end
+                local source = "Personal"
+                if meta and meta.days and meta.days[dayStr] then
+                    local s = meta.days[dayStr].source
+                    if s then source = s:match("^([^%-]+)") or s end
+                elseif day == (MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0) then
+                    source = "Personal"
+                end
 
-    local incLocal = not filterOpts or filterOpts.localScan ~= false
-    local incGuild = not filterOpts or filterOpts.guildSync ~= false
-    local incPack  = not filterOpts or filterOpts.dataPack ~= false
-
-    local meta = realmDB and realmDB.ItemMetadata and realmDB.ItemMetadata[dbKey]
-    local pData = realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey]
-    local gData = realmDB and realmDB.GuildData and realmDB.GuildData[dbKey]
-    local auctData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
-
-    -- 1. Personal / Local Scan
-    if incLocal and pData then
-        UnpackHistoryRecord(pData, "Personal", nil, FromBase36, history, coveredDays)
-    end
-
-    -- 2. Guild Sync vs Data Pack inside GuildData
-    if gData then
-        local gIsPack = IsDataPackEntry(gData)
-        if gIsPack and incPack then
-            UnpackHistoryRecord(gData, "DataPack", meta, FromBase36, history, coveredDays)
-        elseif not gIsPack and incGuild then
-            UnpackHistoryRecord(gData, "Guild", meta, FromBase36, history, coveredDays)
-        end
-    end
-
-    -- 3. Direct MarketSyncData addon fallback when DataPack is toggled ON
-    if incPack and _G.MarketSyncData and type(_G.MarketSyncData.GetCurrentMarketPrices) == "function" then
-        local okP, packPrices = pcall(_G.MarketSyncData.GetCurrentMarketPrices)
-        local pEntry = okP and type(packPrices) == "table" and (packPrices[dbKey] or packPrices[tonumber(dbKey)])
-        if type(pEntry) == "table" then
-            UnpackHistoryRecord(pEntry, "DataPack", nil, FromBase36, history, coveredDays)
-        elseif type(pEntry) == "number" and pEntry > 0 then
-            local curDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0
-            if curDay > 0 and not coveredDays[tostring(curDay)] then
-                coveredDays[tostring(curDay)] = true
                 table.insert(history, {
-                    day = curDay, sortKey = curDay * 100, high = pEntry, low = pEntry,
-                    price = pEntry, quantity = 0, source = "DataPack", origin = "DataPack", isGranular = false,
+                    day = day,
+                    bucketOffset = nil,
+                    sortKey = day * 100,
+                    high = highPrice,
+                    low = lowPrice,
+                    price = highPrice,
+                    quantity = qty,
+                    source = source,
+                    isGranular = false,
                 })
             end
-        end
-    end
-
-    -- 4. Legacy Auctionator.Database.db fallback
-    if auctData and auctData ~= gData then
-        local aIsPack = IsDataPackEntry(auctData)
-        if aIsPack and incPack then
-            UnpackHistoryRecord(auctData, "DataPack", meta, FromBase36, history, coveredDays)
-        elseif not aIsPack and (incLocal or incGuild) then
-            local fallbackOrigin = incLocal and "Personal" or "Guild"
-            UnpackHistoryRecord(auctData, fallbackOrigin, meta, FromBase36, history, coveredDays)
         end
     end
 
@@ -3726,66 +3649,45 @@ end
 -- Returns ONLY the granular 30-min data points for analytics algorithms.
 -- Compact daily/weekly records are skipped to preserve intraday accuracy.
 -- Each entry: { day, bucketOffset, price, quantity, timestamp }
-function MarketSync.GetGranularHistory(dbKey, filterOpts)
+function MarketSync.GetGranularHistory(dbKey)
     dbKey = ResolveHistoryDBKey(dbKey)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-    local market = type(filterOpts) == "table" and filterOpts.market or "main"
+    local pData = realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey]
+    if not pData or not pData.h then return {} end
+
     local FromBase36 = MarketSync.FromBase36
     local points = {}
-    local seenBuckets = {}
 
-    local function CollectGranular(record)
-        if type(record) ~= "table" or not record.h then return end
-        for dayStr, histStr in pairs(record.h) do
-            if type(histStr) == "string" and histStr ~= ""
-                and not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr))
-                and dayStr:sub(1, 2) ~= "W_" then
-                local day = tonumber(dayStr)
-                if day then
-                    for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
-                        local bucketOffset = tonumber(b_offs)
-                        local price = FromBase36(p_b36)
-                        local qty = FromBase36(q_b36)
-                        local bKey = day * 100 + (bucketOffset or 0)
-                        if price and price > 0 and not seenBuckets[bKey] then
-                            seenBuckets[bKey] = true
-                            local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
-                            if not dayTimestamp then
-                                local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
-                                    or (MarketSync and MarketSync.SCAN_DAY_0)
-                                    or 1577836800
-                                dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
-                            end
-                            local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
-                            table.insert(points, {
-                                day = day,
-                                bucketOffset = bucketOffset,
-                                price = price,
-                                quantity = qty,
-                                timestamp = pointTimestamp,
-                                timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
-                            })
+    for dayStr, histStr in pairs(pData.h) do
+        -- Skip compact summaries (not 30-min bucket points)
+        if not (MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(histStr)) and not (type(dayStr) == "string" and dayStr:sub(1, 2) == "W_") then
+            local day = tonumber(dayStr)
+            if day and histStr and histStr ~= "" then
+                for b_offs, p_b36, q_b36 in string.gmatch(histStr, "(%d+):([%w%-]+):([%w%-]+)") do
+                    local bucketOffset = tonumber(b_offs)
+                    local price = FromBase36(p_b36)
+                    local qty = FromBase36(q_b36)
+                    if price and price > 0 then
+                        -- Reconstruct approximate UNIX timestamp for this data point
+                        local dayTimestamp = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(day)
+                        if not dayTimestamp then
+                            local scan0 = (Auctionator and Auctionator.Constants and Auctionator.Constants.SCAN_DAY_0)
+                                or (MarketSync and MarketSync.SCAN_DAY_0)
+                                or 1577836800
+                            dayTimestamp = (day > 10000 and (day * 86400)) or (scan0 + (day * 86400))
                         end
+                        local pointTimestamp = dayTimestamp + (bucketOffset * 1800)
+
+                        table.insert(points, {
+                            day = day,
+                            bucketOffset = bucketOffset,
+                            price = price,
+                            quantity = qty,
+                            timestamp = pointTimestamp,
+                            timeLabel = MarketSync.BucketOffsetToTime and MarketSync.BucketOffsetToTime(bucketOffset) or "",
+                        })
                     end
                 end
-            end
-        end
-    end
-
-    if market == "neutral" then
-        CollectGranular(realmDB and realmDB.NeutralData and realmDB.NeutralData[dbKey])
-    else
-        local incLocal = not filterOpts or filterOpts.localScan ~= false
-        local incGuild = not filterOpts or filterOpts.guildSync ~= false
-        local incPack  = not filterOpts or filterOpts.dataPack ~= false
-        if incLocal then
-            CollectGranular(realmDB and realmDB.PersonalData and realmDB.PersonalData[dbKey])
-        end
-        local gData = realmDB and realmDB.GuildData and realmDB.GuildData[dbKey]
-        if gData then
-            local gIsPack = IsDataPackEntry(gData)
-            if (gIsPack and incPack) or (not gIsPack and incGuild) then
-                CollectGranular(gData)
             end
         end
     end

@@ -111,42 +111,30 @@ local RARITY_COLORS = {
 -- 3. GuildIncoming: Staging buffer for new sync data (merged when ready)
 -- ================================================================
 
-local LatestIndex = {}
 local PersonalIndex = {}
 local GuildIndex = {}
-local DataPackIndex = {}
 local NeutralIndex = {}
-local SnapshotIndex = {}
-local SnapshotIndexKey = nil
 local GuildIncomingBuffer = {}
 local NeutralIncomingBuffer = {}
 
-local LatestIndexReady = false
 local PersonalIndexReady = false
 local PersonalIndexBuilding = false
 local GuildIndexReady = false
-local DataPackIndexReady = false
 local NeutralIndexReady = false
 local IndexCallbacks = {}
 
 -- Tracking for background resolution
-local LatestPending = {}      -- { dbKey = itemID }
 local PersonalPending = {}    -- { dbKey = itemID }
 local PersonalDirtyKeys = {}
 local personalRefreshScheduled = false
 local browsePanels = setmetatable({}, { __mode = "k" })
 local unresolvedBrowseEntries = {}
 local GuildPending = {}       -- { dbKey = itemID }
-local DataPackPending = {}    -- { dbKey = itemID }
 local NeutralPending = {}     -- { dbKey = itemID }
-local LatestTotal = 0
-local LatestResolved = 0
 local PersonalTotal = 0
 local PersonalResolved = 0
 local GuildTotal = 0
 local GuildResolved = 0
-local DataPackTotal = 0
-local DataPackResolved = 0
 local NeutralTotal = 0
 local NeutralResolved = 0
 local GuildIncomingCount = 0
@@ -303,11 +291,6 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
         if age == 0 or (type(age) == "number" and age < 1) then
             exactTime = tonumber(data.observedAt)
         end
-    elseif sourceMode == "datapack" then
-        local currentDay = MarketSync.GetCurrentScanDay()
-        age = math.max(0, currentDay - dbDay)
-        source = "DataPack"
-        exactTime = (type(data) == "table" and (tonumber(data.observedAt) or tonumber(data.t))) or nil
     elseif sourceMode == "neutral" then
         local currentDay = MarketSync.GetCurrentScanDay()
         age = math.max(0, currentDay - dbDay)
@@ -357,11 +340,8 @@ local function BuildIndexEntry(dbKey, itemID, data, sourceMode, allowFallback)
 
     if sourceMode ~= "neutral" then
         local record = type(data) == "table" and data or {}
-        if record.src == "DataPack" then
-            source = "DataPack"
-            exactTime = tonumber(record.t) or tonumber(record.observedAt) or exactTime
-        elseif MarketSync.IsWebAuctionRecord and MarketSync.IsWebAuctionRecord(record) then
-            source = "DataPack"
+        if MarketSync.IsWebAuctionRecord and MarketSync.IsWebAuctionRecord(record) then
+            source = "Web"
             exactTime = tonumber(record.t) or exactTime
         elseif sourceMode ~= "personal" and record.source then
             source = record.source
@@ -460,127 +440,28 @@ local function ParseItemID(dbKey)
 end
 
 -- ================================================================
-local function IsPackRecord(record)
-    if type(record) ~= "table" then return false end
-    if record.src == "DataPack" then return true end
-    if MarketSync.IsWebAuctionRecord and MarketSync.IsWebAuctionRecord(record) then return true end
-    return false
-end
-
-local function RecordTimestamp(record)
-    if type(record) == "number" then return 0 end
-    if type(record) ~= "table" then return -1 end
-    local obs = tonumber(record.observedAt) or tonumber(record.t)
-    if obs and obs > 0 then return obs end
-    local day = tonumber(record.d) or 0
-    return day * 86400
-end
-
-local function SelectLatestSourceRecord(pData, gData, packEntry)
-    local bestData, bestMode, bestStamp = nil, nil, -1
-    if pData and ((type(pData) == "table" and (tonumber(pData.m) or 0) > 0) or (type(pData) == "number" and pData > 0)) then
-        bestData = pData
-        bestMode = "personal"
-        bestStamp = RecordTimestamp(pData)
-    end
-    if gData then
-        local gPrice = (type(gData) == "table" and tonumber(gData.m)) or (gData.latest and gData.latest.minUnitPrice) or 0
-        if gPrice and gPrice > 0 then
-            local gIsPack = IsPackRecord(gData)
-            if not gIsPack or (MarketSyncDB and MarketSyncDB.PassiveSync ~= false) or gIsPack then
-                if gIsPack or not MarketSyncDB or MarketSyncDB.PassiveSync ~= false then
-                    local gStamp = RecordTimestamp(gData)
-                    if not bestData or (not gIsPack and gStamp > bestStamp) or (gIsPack and gStamp > bestStamp + 86400) then
-                        bestData = gData
-                        bestMode = gIsPack and "datapack" or "guild"
-                        bestStamp = gStamp
-                    end
-                end
-            end
-        end
-    end
-    if not bestData and packEntry then
-        local pPrice = type(packEntry) == "table" and tonumber(packEntry.m) or tonumber(packEntry)
-        if pPrice and pPrice > 0 then
-            bestData = type(packEntry) == "table" and packEntry or { m = pPrice, src = "DataPack" }
-            bestMode = "datapack"
-        end
-    end
-    return bestData, bestMode
-end
-
-function MarketSync.ReleaseSecondaryBrowseCaches(keepSource)
-    if not MarketSyncDB or not MarketSyncDB.LowRamMode or MarketSyncDB.KeepSecondaryIndexesLoaded then
-        return
-    end
-    if keepSource ~= "snapshot" then
-        wipe(SnapshotIndex)
-        SnapshotIndexKey = nil
-    end
-    if keepSource ~= "personal" then
-        PersonalIndexReady = false
-        wipe(PersonalIndex)
-        wipe(PersonalPending)
-        PersonalTotal = 0
-        PersonalResolved = 0
-    end
-    if keepSource ~= "guild" then
-        GuildIndexReady = false
-        wipe(GuildIndex)
-        wipe(GuildPending)
-        GuildTotal = 0
-        GuildResolved = 0
-    end
-    if keepSource ~= "datapack" then
-        DataPackIndexReady = false
-        wipe(DataPackIndex)
-        wipe(DataPackPending)
-        DataPackTotal = 0
-        DataPackResolved = 0
-    end
-    if keepSource ~= "neutral" then
-        NeutralIndexReady = false
-        wipe(NeutralIndex)
-        wipe(NeutralPending)
-        NeutralTotal = 0
-        NeutralResolved = 0
-    end
-end
-
 function MarketSync.InvalidateIndexCache()
     wipe(unresolvedBrowseEntries)
     wipe(loadedBrowseIDs)
-    LatestIndexReady = false
     PersonalIndexReady = false
     GuildIndexReady = false
-    DataPackIndexReady = false
     NeutralIndexReady = false
     PersonalIndexBuilding = false
-    SnapshotIndexKey = nil
-    wipe(LatestIndex)
     wipe(PersonalIndex)
     wipe(GuildIndex)
-    wipe(DataPackIndex)
     wipe(NeutralIndex)
-    wipe(SnapshotIndex)
     wipe(GuildIncomingBuffer)
     wipe(NeutralIncomingBuffer)
-    wipe(LatestPending)
     wipe(PersonalPending)
     wipe(PersonalDirtyKeys)
     personalRefreshScheduled = false
     wipe(GuildPending)
-    wipe(DataPackPending)
     wipe(NeutralPending)
-    LatestTotal = 0
     PersonalTotal = 0
     GuildTotal = 0
-    DataPackTotal = 0
     NeutralTotal = 0
-    LatestResolved = 0
     PersonalResolved = 0
     GuildResolved = 0
-    DataPackResolved = 0
     NeutralResolved = 0
     GuildIncomingCount = 0
     NeutralIncomingCount = 0
@@ -605,35 +486,21 @@ local function ProcessPersonalDirtyKeys()
         return
     end
     local store = MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalData or {}
-    local gStore = MarketSync.GetRealmDB() and MarketSync.GetRealmDB().GuildData or {}
     local processed = 0
     while processed < 50 do
         local dbKey = next(PersonalDirtyKeys)
         if not dbKey then break end
         PersonalDirtyKeys[dbKey] = nil
         local itemID = ParseItemID(dbKey)
+        local wasKnown = PersonalIndex[dbKey] ~= nil or PersonalPending[dbKey] ~= nil
+        local wasResolved = PersonalIndex[dbKey] ~= nil
         local data = store[dbKey]
-        if PersonalIndexReady then
-            local wasKnown = PersonalIndex[dbKey] ~= nil or PersonalPending[dbKey] ~= nil
-            local wasResolved = PersonalIndex[dbKey] ~= nil
-            local entry = data and itemID and BuildIndexEntry(dbKey, itemID, data, "personal") or nil
-            PersonalIndex[dbKey] = entry
-            PersonalPending[dbKey] = data and itemID and not entry and itemID or nil
-            local isKnown = PersonalIndex[dbKey] ~= nil or PersonalPending[dbKey] ~= nil
-            if isKnown ~= wasKnown then PersonalTotal = PersonalTotal + (isKnown and 1 or -1) end
-            if (entry ~= nil) ~= wasResolved then PersonalResolved = PersonalResolved + (entry and 1 or -1) end
-        end
-        if LatestIndexReady then
-            local bestData, bestMode = SelectLatestSourceRecord(data, gStore[dbKey], nil)
-            local wasKnown = LatestIndex[dbKey] ~= nil or LatestPending[dbKey] ~= nil
-            local wasResolved = LatestIndex[dbKey] ~= nil
-            local lEntry = bestData and itemID and BuildIndexEntry(dbKey, itemID, bestData, bestMode or "personal") or nil
-            LatestIndex[dbKey] = lEntry
-            LatestPending[dbKey] = bestData and itemID and not lEntry and itemID or nil
-            local isKnown = LatestIndex[dbKey] ~= nil or LatestPending[dbKey] ~= nil
-            if isKnown ~= wasKnown then LatestTotal = LatestTotal + (isKnown and 1 or -1) end
-            if (lEntry ~= nil) ~= wasResolved then LatestResolved = LatestResolved + (lEntry and 1 or -1) end
-        end
+        local entry = data and itemID and BuildIndexEntry(dbKey, itemID, data, "personal") or nil
+        PersonalIndex[dbKey] = entry
+        PersonalPending[dbKey] = data and itemID and not entry and itemID or nil
+        local isKnown = PersonalIndex[dbKey] ~= nil or PersonalPending[dbKey] ~= nil
+        if isKnown ~= wasKnown then PersonalTotal = PersonalTotal + (isKnown and 1 or -1) end
+        if (entry ~= nil) ~= wasResolved then PersonalResolved = PersonalResolved + (entry and 1 or -1) end
         processed = processed + 1
     end
     if next(PersonalDirtyKeys) then
@@ -643,8 +510,7 @@ local function ProcessPersonalDirtyKeys()
     end
     personalRefreshScheduled = false
     for panel in pairs(browsePanels) do
-        if (panel.dataSource == "personal" or panel.dataSource == "main")
-            and panel.IsShown and panel:IsShown() and panel.RunSearch then
+        if panel.dataSource == "personal" and panel.IsShown and panel:IsShown() and panel.RunSearch then
             panel:RunSearch()
         end
     end
@@ -652,9 +518,9 @@ end
 
 function MarketSync.RefreshPersonalBrowseIndexKeys(keys)
     if type(keys) ~= "table" then return false end
-    if not PersonalIndexReady and not LatestIndexReady and not PersonalIndexBuilding then return true end
+    if not PersonalIndexReady and not PersonalIndexBuilding then return true end
     for dbKey in pairs(keys) do PersonalDirtyKeys[dbKey] = true end
-    if (PersonalIndexReady or LatestIndexReady) and not PersonalIndexBuilding and not personalRefreshScheduled and next(PersonalDirtyKeys) then
+    if PersonalIndexReady and not PersonalIndexBuilding and not personalRefreshScheduled and next(PersonalDirtyKeys) then
         personalRefreshScheduled = true
         if C_Timer and C_Timer.After then C_Timer.After(0, ProcessPersonalDirtyKeys)
         else ProcessPersonalDirtyKeys() end
@@ -685,15 +551,7 @@ end
 -- BUILD ALL INDICES (runs once, populates Personal + Guild)
 -- ================================================================
 local function BuildSearchIndex(callback)
-    local isLowRam = MarketSyncDB and MarketSyncDB.LowRamMode
-    local keepLatest = not isLowRam or (MarketSyncDB and MarketSyncDB.PartialLowRamKeepLatest ~= false)
-    local wantLatest = not LatestIndexReady and (keepLatest or MarketSync.ForceLatest)
-    local wantPersonal = not PersonalIndexReady and (not isLowRam or MarketSync.ForcePersonal)
-    local wantGuild = not GuildIndexReady and (not isLowRam or MarketSync.ForceGuild)
-    local wantDataPack = not DataPackIndexReady and (not isLowRam or MarketSync.ForceDataPack)
-    local wantNeutral = not NeutralIndexReady and (not isLowRam or MarketSync.ForceNeutral)
-
-    if not wantLatest and not wantPersonal and not wantGuild and not wantDataPack and not wantNeutral then
+    if PersonalIndexReady and GuildIndexReady and NeutralIndexReady then
         if callback then callback() end
         return
     end
@@ -705,91 +563,36 @@ local function BuildSearchIndex(callback)
     local speedLevel = (MarketSyncDB and MarketSyncDB.CacheSpeed) or 2
     local preset = MarketSync.CacheSpeedPresets[speedLevel] or MarketSync.CacheSpeedPresets[2]
 
-    if wantLatest then LatestTotal = 0; LatestResolved = 0 end
-    if wantPersonal then PersonalTotal = 0; PersonalResolved = 0 end
-    if wantGuild then GuildTotal = 0; GuildResolved = 0 end
-    if wantDataPack then DataPackTotal = 0; DataPackResolved = 0 end
-    if wantNeutral then NeutralTotal = 0; NeutralResolved = 0 end
+    PersonalTotal = 0
+    PersonalResolved = 0
+    GuildTotal = 0
+    GuildResolved = 0
+    NeutralTotal = 0
+    NeutralResolved = 0
 
     local co = coroutine.create(function()
-        local realmDB = MarketSync.GetRealmDB()
-        local pStore = MarketSyncDB and realmDB and realmDB.PersonalData
-        local liveStore = (realmDB and realmDB.GuildData)
+        local liveStore = MarketSync.GetRealmDB().GuildData
             or (Auctionator and Auctionator.Database and Auctionator.Database.db)
-        local directPackPrices = nil
-        if _G.MarketSyncData and type(_G.MarketSyncData.GetCurrentMarketPrices) == "function" then
-            local okP, prices = pcall(_G.MarketSyncData.GetCurrentMarketPrices)
-            if okP and type(prices) == "table" then directPackPrices = prices end
-        end
-
-        local nStore = realmDB and realmDB.NeutralData
-        if not liveStore and not pStore and not directPackPrices and not nStore then
-            if wantLatest then LatestIndexReady = true; MarketSync.ForceLatest = nil end
-            if wantPersonal then PersonalIndexReady = true; MarketSync.ForcePersonal = nil end
-            if wantGuild then GuildIndexReady = true; MarketSync.ForceGuild = nil end
-            if wantDataPack then DataPackIndexReady = true; MarketSync.ForceDataPack = nil end
-            if wantNeutral then NeutralIndexReady = true; MarketSync.ForceNeutral = nil end
+        if not liveStore and not (MarketSyncDB and MarketSync.GetRealmDB().PersonalData) then
+            PersonalIndexReady = true; GuildIndexReady = true; NeutralIndexReady = true
             PersonalIndexBuilding = false
-            for _, cb in ipairs(IndexCallbacks) do cb() end
-            wipe(IndexCallbacks)
             return
         end
         local count = 0
         local totalProcessed = 0
         local currentYieldLimit = 5 -- Start very slow to let UI render first frame instantly
         if MarketSync.LogCacheEvent then
-            MarketSync.LogCacheEvent("|cff00ff00[Start]|r Index build started.")
-        end
-
-        -- 0. BUILD UNIFIED 'LATEST' MAIN AH CACHE (Single deduplicated hot index)
-        if wantLatest then
-            local visited = {}
-            local function AddLatestKey(dbKey, pData, gData, packEntry)
-                if visited[dbKey] then return end
-                visited[dbKey] = true
-                local bestData, bestMode = SelectLatestSourceRecord(pData, gData, packEntry)
-                if not bestData then return end
-                local itemID = ParseItemID(dbKey) or (type(bestData) == "table" and bestData.key and bestData.key.itemID)
-                if itemID then
-                    LatestTotal = LatestTotal + 1
-                    local entry = BuildIndexEntry(dbKey, itemID, bestData, bestMode or "personal")
-                    if entry then
-                        LatestIndex[dbKey] = entry
-                        LatestResolved = LatestResolved + 1
-                    else
-                        LatestPending[dbKey] = itemID
-                    end
-                end
-                count = count + 1
-                totalProcessed = totalProcessed + 1
-                if count >= currentYieldLimit then
-                    coroutine.yield()
-                    count = 0
-                    currentYieldLimit = preset.yieldEvery
-                end
-            end
-            for dbKey, pData in pairs(pStore or {}) do
-                AddLatestKey(dbKey, pData, liveStore and liveStore[dbKey], directPackPrices and (directPackPrices[dbKey] or directPackPrices[tonumber(dbKey)]))
-            end
-            for dbKey, gData in pairs(liveStore or {}) do
-                AddLatestKey(dbKey, pStore and pStore[dbKey], gData, directPackPrices and (directPackPrices[dbKey] or directPackPrices[tonumber(dbKey)]))
-            end
-            for rawKey, packEntry in pairs(directPackPrices or {}) do
-                local dbKey = tostring(rawKey)
-                AddLatestKey(dbKey, pStore and pStore[dbKey], liveStore and liveStore[dbKey], packEntry)
-            end
-            LatestIndexReady = true
-            MarketSync.ForceLatest = nil
+            MarketSync.LogCacheEvent("|cff00ff00[Start]|r Index build started. Personal + Guild + Neutral caches queued.")
         end
 
         -- 1. BUILD PERSONAL CACHE
-        if pStore then
-            if isLowRam and not PersonalIndexReady and not MarketSync.ForcePersonal then
+        if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
+            if MarketSyncDB.LowRamMode and not PersonalIndexReady and not MarketSync.ForcePersonal then
                 if MarketSync.LogCacheEvent then
                     MarketSync.LogCacheEvent("|cffffff00[Personal]|r On-Demand enabled (Low RAM). Skipping Personal index build.")
                 end
             elseif not PersonalIndexReady then
-                for dbKey, data in pairs(pStore) do
+                for dbKey, data in pairs(MarketSync.GetRealmDB().PersonalData) do
                     local itemID = ParseItemID(dbKey)
                     if itemID then
                         PersonalTotal = PersonalTotal + 1
@@ -804,6 +607,9 @@ local function BuildSearchIndex(callback)
                     count = count + 1
                     totalProcessed = totalProcessed + 1
                     if count >= currentYieldLimit then
+                        if MarketSync.LogCacheEvent then
+                            MarketSync.LogCacheEvent(string.format("|cffff8800[Personal]|r Processed %d / ~%d entries (%d resolved, %d pending)", totalProcessed, PersonalTotal, PersonalResolved, PersonalTotal - PersonalResolved))
+                        end
                         coroutine.yield()
                         count = 0
                         currentYieldLimit = preset.yieldEvery
@@ -812,37 +618,41 @@ local function BuildSearchIndex(callback)
                 PersonalIndexReady = true
                 MarketSync.ForcePersonal = nil
             end
-        elseif wantPersonal then
+        else
             PersonalIndexReady = true
-            MarketSync.ForcePersonal = nil
         end
 
-        -- 2. BUILD GUILD SYNC CACHE (Pure guild-synced quotes)
-        if isLowRam and not GuildIndexReady and not MarketSync.ForceGuild then
+        if MarketSync.LogCacheEvent then
+            MarketSync.LogCacheEvent(string.format("|cff00ff00[Personal Done]|r %d items resolved, %d pending item data loads.", PersonalResolved, PersonalTotal - PersonalResolved))
+        end
+
+        -- 2. BUILD GUILD SYNC CACHE
+        if MarketSyncDB.LowRamMode and not GuildIndexReady and not MarketSync.ForceGuild then
             if MarketSync.LogCacheEvent then
                 MarketSync.LogCacheEvent("|cff88aaff[Guild]|r On-Demand enabled (Low RAM). Skipping Guild index build.")
             end
         elseif liveStore and not GuildIndexReady then
             for dbKey, data in pairs(liveStore) do
-                if not IsPackRecord(data) then
-                    local price = (type(data) == "table" and data.m) or (data and data.latest and data.latest.minUnitPrice)
-                    if price and price > 0 then
-                        local itemID = ParseItemID(dbKey) or (data.key and data.key.itemID)
-                        if itemID then
-                            GuildTotal = GuildTotal + 1
-                            local entry = BuildIndexEntry(dbKey, itemID, data, "guild")
-                            if entry then
-                                GuildIndex[dbKey] = entry
-                                GuildResolved = GuildResolved + 1
-                            else
-                                GuildPending[dbKey] = itemID
-                            end
+                local price = (type(data) == "table" and data.m) or (data and data.latest and data.latest.minUnitPrice)
+                if price and price > 0 then
+                    local itemID = ParseItemID(dbKey) or (data.key and data.key.itemID)
+                    if itemID then
+                        GuildTotal = GuildTotal + 1
+                        local entry = BuildIndexEntry(dbKey, itemID, data, "guild")
+                        if entry then
+                            GuildIndex[dbKey] = entry
+                            GuildResolved = GuildResolved + 1
+                        else
+                            GuildPending[dbKey] = itemID
                         end
                     end
                 end
                 count = count + 1
                 totalProcessed = totalProcessed + 1
                 if count >= currentYieldLimit then
+                    if MarketSync.LogCacheEvent then
+                        MarketSync.LogCacheEvent(string.format("|cff88aaff[Guild]|r Processed %d entries so far (%d resolved).", totalProcessed, GuildResolved))
+                    end
                     coroutine.yield()
                     count = 0
                     currentYieldLimit = preset.yieldEvery
@@ -850,63 +660,6 @@ local function BuildSearchIndex(callback)
             end
             GuildIndexReady = true
             MarketSync.ForceGuild = nil
-        elseif wantGuild then
-            GuildIndexReady = true
-            MarketSync.ForceGuild = nil
-        end
-
-        -- 2b. BUILD DATA PACK CACHE (On-Demand daily compiled pack quotes)
-        if wantDataPack and not DataPackIndexReady then
-            local seenPack = {}
-            for dbKey, data in pairs(liveStore or {}) do
-                if IsPackRecord(data) then
-                    seenPack[dbKey] = true
-                    local price = tonumber(data.m) or 0
-                    local itemID = ParseItemID(dbKey)
-                    if price > 0 and itemID then
-                        DataPackTotal = DataPackTotal + 1
-                        local entry = BuildIndexEntry(dbKey, itemID, data, "datapack")
-                        if entry then
-                            DataPackIndex[dbKey] = entry
-                            DataPackResolved = DataPackResolved + 1
-                        else
-                            DataPackPending[dbKey] = itemID
-                        end
-                    end
-                    count = count + 1
-                    if count >= currentYieldLimit then
-                        coroutine.yield()
-                        count = 0
-                        currentYieldLimit = preset.yieldEvery
-                    end
-                end
-            end
-            for rawKey, packEntry in pairs(directPackPrices or {}) do
-                local dbKey = tostring(rawKey)
-                if not seenPack[dbKey] then
-                    local pPrice = type(packEntry) == "table" and tonumber(packEntry.m) or tonumber(packEntry)
-                    local itemID = ParseItemID(dbKey)
-                    if pPrice and pPrice > 0 and itemID then
-                        DataPackTotal = DataPackTotal + 1
-                        local norm = type(packEntry) == "table" and packEntry or { m = pPrice, src = "DataPack" }
-                        local entry = BuildIndexEntry(dbKey, itemID, norm, "datapack")
-                        if entry then
-                            DataPackIndex[dbKey] = entry
-                            DataPackResolved = DataPackResolved + 1
-                        else
-                            DataPackPending[dbKey] = itemID
-                        end
-                    end
-                    count = count + 1
-                    if count >= currentYieldLimit then
-                        coroutine.yield()
-                        count = 0
-                        currentYieldLimit = preset.yieldEvery
-                    end
-                end
-            end
-            DataPackIndexReady = true
-            MarketSync.ForceDataPack = nil
         end
 
         -- 3. BUILD NEUTRAL CACHE
@@ -946,7 +699,7 @@ local function BuildSearchIndex(callback)
 
         -- Final pass complete
         PersonalIndexBuilding = false
-        if (PersonalIndexReady or LatestIndexReady) and next(PersonalDirtyKeys) and not personalRefreshScheduled then
+        if PersonalIndexReady and next(PersonalDirtyKeys) and not personalRefreshScheduled then
             personalRefreshScheduled = true
             C_Timer.After(0, ProcessPersonalDirtyKeys)
         end
@@ -995,53 +748,13 @@ local function BuildSearchIndex(callback)
 
     local function ProcessPendingBatch(forceFallback)
         local processed = 0
-        local latestRemove = {}
         local personalRemove = {}
         local guildRemove = {}
-        local packRemove = {}
         local neutralRemove = {}
         local pStore = MarketSyncDB and MarketSync.GetRealmDB().PersonalData
         local nStore = MarketSyncDB and MarketSync.GetRealmDB().NeutralData
         local gStore = MarketSync.GetRealmDB().GuildData
             or (Auctionator and Auctionator.Database and Auctionator.Database.db)
-
-        -- Resolve Latest pending
-        for dbKey, itemID in pairs(LatestPending) do
-            if processed >= retryBatchSize then break end
-            local bestData, bestMode = SelectLatestSourceRecord(pStore and pStore[dbKey], gStore and gStore[dbKey], nil)
-            if bestData then
-                pendingRetryAttempts[dbKey] = (pendingRetryAttempts[dbKey] or 0) + 1
-                local allowFallback = forceFallback or (pendingRetryAttempts[dbKey] > 8)
-                local entry = BuildIndexEntry(dbKey, itemID, bestData, bestMode or "personal", allowFallback)
-                if entry then
-                    LatestIndex[dbKey] = entry
-                    LatestResolved = LatestResolved + 1
-                    table.insert(latestRemove, dbKey)
-                end
-            else
-                table.insert(latestRemove, dbKey)
-            end
-            processed = processed + 1
-        end
-
-        -- Resolve DataPack pending
-        for dbKey, itemID in pairs(DataPackPending) do
-            if processed >= retryBatchSize then break end
-            local data = gStore and gStore[dbKey]
-            if data then
-                pendingRetryAttempts[dbKey] = (pendingRetryAttempts[dbKey] or 0) + 1
-                local allowFallback = forceFallback or (pendingRetryAttempts[dbKey] > 8)
-                local entry = BuildIndexEntry(dbKey, itemID, data, "datapack", allowFallback)
-                if entry then
-                    DataPackIndex[dbKey] = entry
-                    DataPackResolved = DataPackResolved + 1
-                    table.insert(packRemove, dbKey)
-                end
-            else
-                table.insert(packRemove, dbKey)
-            end
-            processed = processed + 1
-        end
 
         -- Resolve Personal pending
         for dbKey, itemID in pairs(PersonalPending) do
@@ -1109,13 +822,11 @@ local function BuildSearchIndex(callback)
             processed = processed + 1
         end
 
-        for _, key in ipairs(latestRemove) do LatestPending[key] = nil; pendingRetryAttempts[key] = nil end
         for _, key in ipairs(personalRemove) do PersonalPending[key] = nil; pendingRetryAttempts[key] = nil end
         for _, key in ipairs(guildRemove) do GuildPending[key] = nil; pendingRetryAttempts[key] = nil end
-        for _, key in ipairs(packRemove) do DataPackPending[key] = nil; pendingRetryAttempts[key] = nil end
         for _, key in ipairs(neutralRemove) do NeutralPending[key] = nil; pendingRetryAttempts[key] = nil end
 
-        return processed, #latestRemove + #personalRemove + #guildRemove + #packRemove + #neutralRemove
+        return processed, #personalRemove + #guildRemove + #neutralRemove
     end
 
     local resolveDelay = preset.resolveDelay or 0.5
@@ -1134,10 +845,8 @@ local function BuildSearchIndex(callback)
 
             -- Check if all items are resolved
             local pRemaining, gRemaining, nRemaining = 0, 0, 0
-            for _ in pairs(LatestPending) do pRemaining = pRemaining + 1 end
             for _ in pairs(PersonalPending) do pRemaining = pRemaining + 1 end
             for _ in pairs(GuildPending) do gRemaining = gRemaining + 1 end
-            for _ in pairs(DataPackPending) do gRemaining = gRemaining + 1 end
             for _ in pairs(NeutralPending) do nRemaining = nRemaining + 1 end
             if pRemaining == 0 and gRemaining == 0 and nRemaining == 0 then
                 self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
@@ -1159,10 +868,8 @@ local function BuildSearchIndex(callback)
     activePeriodicRetry = C_Timer.NewTicker(preset.interval, function()
         if not MarketSync.CanBuildCache() then return end
         local pRemaining, gRemaining, nRemaining = 0, 0, 0
-        for _ in pairs(LatestPending) do pRemaining = pRemaining + 1 end
         for _ in pairs(PersonalPending) do pRemaining = pRemaining + 1 end
         for _ in pairs(GuildPending) do gRemaining = gRemaining + 1 end
-        for _ in pairs(DataPackPending) do gRemaining = gRemaining + 1 end
         for _ in pairs(NeutralPending) do nRemaining = nRemaining + 1 end
 
         if pRemaining == 0 and gRemaining == 0 and nRemaining == 0 then
@@ -1175,11 +882,6 @@ local function BuildSearchIndex(callback)
         local forceFallback = (periodicCycleCount >= 6)
 
         local requested = 0
-        for _, itemID in pairs(LatestPending) do
-            if requested >= preset.requests then break end
-            MarketSync.RequestItemData(itemID)
-            requested = requested + 1
-        end
         for dbKey, itemID in pairs(PersonalPending) do
             if requested >= preset.requests then break end
             MarketSync.RequestItemData(itemID)
@@ -1219,7 +921,7 @@ end
 
 -- Called by sync module for each item received during sync
 function MarketSync.AddToGuildIncoming(dbKey)
-    if not GuildIndexReady and not LatestIndexReady then return end
+    if not GuildIndexReady then return end  -- Index hasn't been built yet
     local liveStore = MarketSync.GetRealmDB().GuildData
         or (Auctionator and Auctionator.Database and Auctionator.Database.db)
     if not liveStore then return end
@@ -1238,68 +940,39 @@ function MarketSync.AddToGuildIncoming(dbKey)
             GuildIncomingBuffer[dbKey] = entry
             GuildIncomingCount = GuildIncomingCount + 1
         else
-            if GuildIndexReady then
-                local isNewGuild = not GuildIndex[dbKey]
-                GuildIndex[dbKey] = entry
-                if isNewGuild then
-                    GuildTotal = GuildTotal + 1
-                    GuildResolved = GuildResolved + 1
-                end
-            end
-            if LatestIndexReady then
-                local pStore = MarketSyncDB and MarketSync.GetRealmDB().PersonalData
-                local bestData, bestMode = SelectLatestSourceRecord(pStore and pStore[dbKey], data, nil)
-                if bestData == data then
-                    local isNewLatest = not LatestIndex[dbKey]
-                    LatestIndex[dbKey] = BuildIndexEntry(dbKey, itemID, bestData, bestMode or "guild") or entry
-                    if isNewLatest then
-                        LatestTotal = LatestTotal + 1
-                        LatestResolved = LatestResolved + 1
-                    end
-                end
+            -- No active sync, update guild index directly
+            local isNewGuild = not GuildIndex[dbKey]
+            GuildIndex[dbKey] = entry
+            if isNewGuild then
+                GuildTotal = GuildTotal + 1
+                GuildResolved = GuildResolved + 1
             end
         end
     else
         -- Not cached yet, request it
         if GuildSyncActive then
-            if GuildIndexReady then GuildPending[dbKey] = itemID end
-            if LatestIndexReady then LatestPending[dbKey] = itemID end
+            -- Mark for incoming resolution
+            GuildPending[dbKey] = itemID
         end
         MarketSync.RequestItemData(itemID)
     end
 end
 
--- Called when sync session ends — merge incoming buffer into live Guild & Latest indices
+-- Called when sync session ends â€” merge incoming buffer into live Guild index
 function MarketSync.CommitGuildSync()
     local merged = 0
     local removed = 0
-    local pStore = MarketSyncDB and MarketSync.GetRealmDB().PersonalData
-    local liveStore = MarketSync.GetRealmDB().GuildData
     for dbKey, entry in pairs(GuildIncomingBuffer) do
         if entry then
-            if GuildIndexReady then
-                GuildIndex[dbKey] = entry
-            end
-            if LatestIndexReady then
-                local bestData, bestMode = SelectLatestSourceRecord(pStore and pStore[dbKey], liveStore and liveStore[dbKey], nil)
-                if bestData then
-                    local itemID = ParseItemID(dbKey)
-                    LatestIndex[dbKey] = (itemID and BuildIndexEntry(dbKey, itemID, bestData, bestMode or "guild")) or entry
-                end
-            end
+            GuildIndex[dbKey] = entry
             merged = merged + 1
         else
             -- entry is false -> Removal
-            if GuildIndexReady and GuildIndex[dbKey] then
+            if GuildIndex[dbKey] then
                 GuildIndex[dbKey] = nil
                 removed = removed + 1
             end
         end
-    end
-
-    if LatestIndexReady then
-        LatestTotal = 0; LatestResolved = 0
-        for _ in pairs(LatestIndex) do LatestTotal = LatestTotal + 1; LatestResolved = LatestResolved + 1 end
     end
 
     -- Recount guild totals
@@ -1399,34 +1072,23 @@ end
 -- STATUS API for UI
 -- ================================================================
 MarketSync.GetIndexStatus = function()
-    local lPending, pPending, gPending, dPending, nPending = 0, 0, 0, 0, 0
-    for _ in pairs(LatestPending) do lPending = lPending + 1 end
+    local pPending, gPending, nPending = 0, 0, 0
     for _ in pairs(PersonalPending) do pPending = pPending + 1 end
     for _ in pairs(GuildPending) do gPending = gPending + 1 end
-    for _ in pairs(DataPackPending) do dPending = dPending + 1 end
     for _ in pairs(NeutralPending) do nPending = nPending + 1 end
     return {
-        latestReady = LatestIndexReady,
-        latestBuilding = PersonalIndexBuilding,
-        latestTotal = LatestTotal,
-        latestResolved = LatestResolved,
-        latestPending = lPending,
         personalReady = PersonalIndexReady,
         personalBuilding = PersonalIndexBuilding,
         personalTotal = PersonalTotal,
         personalResolved = PersonalResolved,
         personalPending = pPending,
         guildReady = GuildIndexReady,
-        guildBuilding = PersonalIndexBuilding,
+        guildBuilding = PersonalIndexBuilding, -- single build pipeline drives both caches
         guildTotal = GuildTotal,
         guildResolved = GuildResolved,
         guildPending = gPending,
         guildSyncActive = GuildSyncActive,
         guildIncoming = GuildIncomingCount,
-        dataPackReady = DataPackIndexReady,
-        dataPackTotal = DataPackTotal,
-        dataPackResolved = DataPackResolved,
-        dataPackPending = dPending,
         neutralReady = NeutralIndexReady,
         neutralBuilding = PersonalIndexBuilding,
         neutralTotal = NeutralTotal,
@@ -1438,13 +1100,10 @@ MarketSync.GetIndexStatus = function()
 end
 
 -- Processing consumes only rows already resolved by the throttled Browse
--- index build. Reuses LatestIndex when Smart Partial Low RAM keeps only Latest loaded.
+-- index build. Never hand it the raw Auctionator DB or pending item IDs.
 MarketSync.GetProcessingIndexSources = function()
-    if PersonalIndexBuilding or (not LatestIndexReady and not PersonalIndexReady and not GuildIndexReady) then return nil end
-    if PersonalIndexReady or GuildIndexReady then
-        return PersonalIndexReady and PersonalIndex or {}, GuildIndexReady and GuildIndex or (LatestIndexReady and LatestIndex or nil)
-    end
-    return LatestIndex, nil
+    if PersonalIndexBuilding or (not PersonalIndexReady and not GuildIndexReady) then return nil end
+    return PersonalIndexReady and PersonalIndex or {}, GuildIndexReady and GuildIndex or nil
 end
 
 -- Expose for use by Frame module and startup trigger
@@ -1522,173 +1181,13 @@ local function StyleModernPillButton(btn, text, isGold)
     return btn
 end
 
-local SOURCE_LABELS = {
-    latest   = "Latest",
-    personal = "Personal",
-    guild    = "Guild",
-    datapack = "Data Pack",
-    neutral  = "Neutral",
-}
-
-local function ExtractHistoricalDayPrice(record, dayNum)
-    if type(record) ~= "table" or not dayNum then return nil end
-    local dayStr = tostring(dayNum)
-    if type(record.h) == "table" then
-        local val = record.h[dayStr] or record.h[dayNum]
-        if type(val) == "number" and val > 0 then
-            return val
-        elseif type(val) == "string" and val ~= "" then
-            if MarketSync.IsCompactRecord and MarketSync.IsCompactRecord(val) and MarketSync.ParseCompactRecord then
-                local parsed = MarketSync.ParseCompactRecord(val)
-                if parsed and ((parsed.min and parsed.min > 0) or (parsed.avg and parsed.avg > 0)) then
-                    return (parsed.min and parsed.min > 0) and parsed.min or parsed.avg
-                end
-            else
-                local lastPrice
-                for _, b36p in val:gmatch("(%d+):([%w%-]+):[%w%-]+") do
-                    local p = MarketSync.FromBase36 and MarketSync.FromBase36(b36p) or tonumber(b36p)
-                    if p and p > 0 then lastPrice = p end
-                end
-                if lastPrice and lastPrice > 0 then return lastPrice end
-                local numVal = tonumber(val)
-                if numVal and numVal > 0 then return numVal end
-            end
-        end
-    end
-    if tonumber(record.d) == dayNum and tonumber(record.m) and tonumber(record.m) > 0 then
-        return tonumber(record.m)
-    end
-    return nil
-end
-
-function MarketSync.GetAvailableScanDays(sourceMode)
-    local mode = type(sourceMode) == "string" and sourceMode:lower() or "latest"
-    local realmDB = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-    if not realmDB then return {} end
-
-    local countsByDay = {}
-    local function ScanStore(store, filterFn)
-        if type(store) ~= "table" then return end
-        for _, rec in pairs(store) do
-            if type(rec) == "table" and (not filterFn or filterFn(rec)) then
-                local seenDays = {}
-                if type(rec.h) == "table" then
-                    for dKey, val in pairs(rec.h) do
-                        local dNum = tonumber(dKey)
-                        if dNum and dNum > 0 and val ~= nil and val ~= "" then
-                            seenDays[dNum] = true
-                        end
-                    end
-                end
-                local topDay = tonumber(rec.d)
-                if topDay and topDay > 0 and tonumber(rec.m) and tonumber(rec.m) > 0 then
-                    seenDays[topDay] = true
-                end
-                for dNum in pairs(seenDays) do
-                    countsByDay[dNum] = (countsByDay[dNum] or 0) + 1
-                end
-            end
-        end
-    end
-
-    if mode == "neutral" then
-        ScanStore(realmDB.NeutralData)
-    elseif mode == "personal" then
-        ScanStore(realmDB.PersonalData)
-    elseif mode == "guild" then
-        ScanStore(realmDB.GuildData, function(r) return not IsPackRecord(r) end)
-    elseif mode == "datapack" then
-        ScanStore(realmDB.GuildData, function(r) return IsPackRecord(r) end)
-    else
-        ScanStore(realmDB.PersonalData)
-        ScanStore(realmDB.GuildData)
-    end
-
-    local curDay = MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0
-    local out = {}
-    for dNum, itemCount in pairs(countsByDay) do
-        local dateStr = MarketSync.ScanDayToDate and MarketSync.ScanDayToDate(dNum) or ("Day " .. tostring(dNum))
-        local diff = math.max(0, curDay - dNum)
-        local relLabel = diff == 0 and "Today" or (diff == 1 and "Yesterday" or (tostring(diff) .. "d ago"))
-        table.insert(out, {
-            day = dNum,
-            count = itemCount,
-            dateText = dateStr,
-            label = string.format("%s (%s)", dateStr, relLabel),
-        })
-    end
-    table.sort(out, function(a, b) return a.day > b.day end)
-    while #out > 20 do table.remove(out) end
-    return out
-end
-
-local function BuildHistoricalSnapshotIndex(sourceMode, targetDay)
-    local mode = type(sourceMode) == "string" and sourceMode:lower() or "latest"
-    local dayNum = tonumber(targetDay)
-    if not dayNum then return SnapshotIndex end
-    local snapKey = mode .. ":" .. tostring(dayNum)
-    if SnapshotIndexKey == snapKey and next(SnapshotIndex) ~= nil then
-        return SnapshotIndex
-    end
-    wipe(SnapshotIndex)
-    SnapshotIndexKey = snapKey
-
-    local realmDB = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-    if not realmDB then return SnapshotIndex end
-
-    local function PopulateFromStore(store, storeMode, filterFn)
-        if type(store) ~= "table" then return end
-        for dbKey, rec in pairs(store) do
-            if type(rec) == "table" and (not filterFn or filterFn(rec)) then
-                local dayPrice = ExtractHistoricalDayPrice(rec, dayNum)
-                local itemID = ParseItemID(dbKey)
-                if dayPrice and dayPrice > 0 and itemID then
-                    local snapRecord = {
-                        m = dayPrice,
-                        d = dayNum,
-                        src = IsPackRecord(rec) and "DataPack" or rec.src,
-                        observedAt = MarketSync.ScanDayToTimestamp and MarketSync.ScanDayToTimestamp(dayNum) or nil,
-                    }
-                    local entryMode = (storeMode == "guild" and IsPackRecord(rec)) and "datapack" or storeMode
-                    local entry = BuildIndexEntry(dbKey, itemID, snapRecord, entryMode, true)
-                    if entry then
-                        local existing = SnapshotIndex[dbKey]
-                        if not existing or entry.price < existing.price then
-                            SnapshotIndex[dbKey] = entry
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    if mode == "neutral" then
-        PopulateFromStore(realmDB.NeutralData, "neutral")
-    elseif mode == "personal" then
-        PopulateFromStore(realmDB.PersonalData, "personal")
-    elseif mode == "guild" then
-        PopulateFromStore(realmDB.GuildData, "guild", function(r) return not IsPackRecord(r) end)
-    elseif mode == "datapack" then
-        PopulateFromStore(realmDB.GuildData, "datapack", function(r) return IsPackRecord(r) end)
-    else
-        PopulateFromStore(realmDB.PersonalData, "personal")
-        PopulateFromStore(realmDB.GuildData, "guild")
-    end
-
-    return SnapshotIndex
-end
-
 -- ================================================================
 -- CREATE BROWSE PANEL
 -- ================================================================
 function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
-    panel.isMainUnified = (dataSourceName == "main")
-    panel.hasTimeframePicker = panel.isMainUnified or (dataSourceName == "neutral")
     panel.dataSource = dataSourceName
-    panel.activeSource = panel.isMainUnified and "latest" or dataSourceName
-    panel.selectedScanDay = nil
     browsePanels[panel] = true
     local nativeStyle = MarketSync.IsForeverAuctionStyle and MarketSync.IsForeverAuctionStyle()
     local isLegacyBrowse = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
@@ -1702,12 +1201,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         panel.nameLabel = nameLabel
     end
 
-    local searchBoxWidth = isLegacyBrowse
-        and (panel.isMainUnified and 164 or 180)
-        or (panel.hasTimeframePicker and 186 or 220)
     local searchBox = (createNativeControl and createNativeControl("EditBox", panel, "SearchBoxTemplate"))
         or CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    searchBox:SetSize(searchBoxWidth, isLegacyBrowse and 18 or 20)
+    searchBox:SetSize(isLegacyBrowse and 180 or 220, isLegacyBrowse and 18 or 20)
     searchBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 80, isLegacyBrowse and -52 or -46)
     searchBox:SetAutoFocus(false)
     searchBox:SetScript("OnEscapePressed", function(self)
@@ -1736,7 +1232,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     -- Search Button (right side on Classic to match BrowseSearchButton)
     local searchBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    searchBtn:SetSize(isLegacyBrowse and 80 or (panel.hasTimeframePicker and 80 or 84), isLegacyBrowse and 21 or 22)
+    searchBtn:SetSize(isLegacyBrowse and 80 or 84, isLegacyBrowse and 21 or 22)
     if isLegacyBrowse then
         searchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -44, -38)
     else
@@ -1748,7 +1244,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     -- Reset Button (above category sidebar on Classic to match BrowseResetButton)
     local resetBtn = (createNativeControl and createNativeControl("Button", panel, "UIMenuButtonStretchTemplate"))
         or CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    resetBtn:SetSize(isLegacyBrowse and 82 or (panel.hasTimeframePicker and 68 or 74), 22)
+    resetBtn:SetSize(isLegacyBrowse and 82 or 74, 22)
     if isLegacyBrowse then
         resetBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 37, -79)
     else
@@ -1765,10 +1261,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         panel.maxLevelFilter = nil
         panel.rarityFilter = nil
         panel.groupByCategory = false
-        if panel.selectedScanDay ~= nil and panel.SetScanTimeframe then
-            panel:SetScanTimeframe(nil)
-            return
-        end
         if panel.RefreshAdvancedFilters then panel:RefreshAdvancedFilters() end
         panel:RebuildFilters()
         panel:RunSearch()
@@ -1778,9 +1270,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     -- guild, and neutral results without issuing extra AH or item-info queries.
     local nativeFilter = createNativeControl and createNativeControl("Button", panel, "UIMenuButtonStretchTemplate")
     local filterBtn = nativeFilter or CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    filterBtn:SetSize(isLegacyBrowse and (panel.isMainUnified and 74 or 80) or (panel.hasTimeframePicker and 72 or 76), 22)
+    filterBtn:SetSize(isLegacyBrowse and 80 or 76, 22)
     if isLegacyBrowse then
-        filterBtn:SetPoint("LEFT", searchBox, "RIGHT", panel.isMainUnified and 8 or 14, 0)
+        filterBtn:SetPoint("LEFT", searchBox, "RIGHT", 14, 0)
     else
         filterBtn:SetPoint("LEFT", resetBtn, "RIGHT", 6, 0)
     end
@@ -1791,159 +1283,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
         arrow:SetSize(10, 12)
         arrow:SetPoint("RIGHT", -5, 0)
-    end
-
-    -- --- SOURCE & SCAN TIMEFRAME SELECTORS ---
-    local dropdownAnchor = filterBtn
-    local function UpdateSourceAndTimeframeButtons()
-        if panel.sourceBtn then
-            local sLabel = SOURCE_LABELS[panel.activeSource] or "Latest"
-            panel.sourceBtn:SetText("Source: " .. sLabel .. " v")
-        end
-        if panel.timeframeBtn then
-            if panel.selectedScanDay then
-                local dText = MarketSync.ScanDayToDate and MarketSync.ScanDayToDate(panel.selectedScanDay) or tostring(panel.selectedScanDay)
-                panel.timeframeBtn:SetText("Scan: " .. dText .. " v")
-            else
-                panel.timeframeBtn:SetText("Scan: Latest v")
-            end
-        end
-    end
-
-    if panel.isMainUnified then
-        local nativeSrc = createNativeControl and createNativeControl("Button", panel, "UIMenuButtonStretchTemplate")
-        local sourceBtn = nativeSrc or CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        sourceBtn:SetSize(isLegacyBrowse and 126 or 134, 22)
-        sourceBtn:SetPoint("LEFT", dropdownAnchor, "RIGHT", 8, 0)
-        if nativeSrc and sourceBtn.SetNormalFontObject then
-            sourceBtn:SetNormalFontObject(GameFontNormalSmall)
-        end
-        if isLegacyBrowse then
-            local srcLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            srcLbl:SetPoint("BOTTOMLEFT", sourceBtn, "TOPLEFT", 2, 3)
-            srcLbl:SetText("Source")
-            panel.sourceLabel = srcLbl
-        end
-        local sourceDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
-        sourceBtn:SetScript("OnClick", function(self)
-            if UIDropDownMenu_Initialize and ToggleDropDownMenu then
-                UIDropDownMenu_Initialize(sourceDropdown, function()
-                    local options = {
-                        { value = "latest",   text = "Latest (Combined)", desc = "Single deduplicated hot index across Personal, Guild & Data Pack" },
-                        { value = "personal", text = "Personal Scan",     desc = "Only your own local Auction House scans (on-demand)" },
-                        { value = "guild",    text = "Guild Sync",        desc = "Only composite quotes synced from guildmates (on-demand)" },
-                        { value = "datapack", text = "Data Pack",         desc = "Only compiled MarketSyncData baseline quotes (on-demand)" },
-                    }
-                    for _, opt in ipairs(options) do
-                        local info = UIDropDownMenu_CreateInfo()
-                        info.text = opt.text
-                        info.value = opt.value
-                        info.checked = (panel.activeSource == opt.value)
-                        info.tooltipTitle = opt.text
-                        info.tooltipText = opt.desc
-                        info.tooltipOnButton = true
-                        info.func = function()
-                            if CloseDropDownMenus then CloseDropDownMenus() end
-                            panel:SetSourceMode(opt.value)
-                        end
-                        UIDropDownMenu_AddButton(info)
-                    end
-                end, "MENU")
-                ToggleDropDownMenu(1, nil, sourceDropdown, self, 0, 0)
-            end
-        end)
-        sourceBtn:SetScript("OnEnter", function(self)
-            if GameTooltip then
-                GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:SetText("Main AH Data Source", 1, 0.82, 0)
-                GameTooltip:AddLine("'Latest' keeps one deduplicated Main AH index ready. Specific sources (Personal, Guild, Data Pack) load on demand.", 0.9, 0.9, 0.9, true)
-                GameTooltip:Show()
-            end
-        end)
-        sourceBtn:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-        panel.sourceBtn = sourceBtn
-        dropdownAnchor = sourceBtn
-    end
-
-    if panel.hasTimeframePicker then
-        local nativeTf = createNativeControl and createNativeControl("Button", panel, "UIMenuButtonStretchTemplate")
-        local timeframeBtn = nativeTf or CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        timeframeBtn:SetSize(isLegacyBrowse and 126 or 136, 22)
-        timeframeBtn:SetPoint("LEFT", dropdownAnchor, "RIGHT", isLegacyBrowse and 8 or 6, 0)
-        if nativeTf and timeframeBtn.SetNormalFontObject then
-            timeframeBtn:SetNormalFontObject(GameFontNormalSmall)
-        end
-        if isLegacyBrowse then
-            local tfLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            tfLbl:SetPoint("BOTTOMLEFT", timeframeBtn, "TOPLEFT", 2, 3)
-            tfLbl:SetText("Scan Point")
-            panel.timeframeLabel = tfLbl
-        end
-        local timeframeDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
-        timeframeBtn:SetScript("OnClick", function(self)
-            if UIDropDownMenu_Initialize and ToggleDropDownMenu then
-                UIDropDownMenu_Initialize(timeframeDropdown, function()
-                    local latestInfo = UIDropDownMenu_CreateInfo()
-                    latestInfo.text = "Latest (Current)"
-                    latestInfo.checked = (panel.selectedScanDay == nil)
-                    latestInfo.func = function()
-                        if CloseDropDownMenus then CloseDropDownMenus() end
-                        panel:SetScanTimeframe(nil)
-                    end
-                    UIDropDownMenu_AddButton(latestInfo)
-
-                    local days = MarketSync.GetAvailableScanDays and MarketSync.GetAvailableScanDays(panel.activeSource) or {}
-                    for _, entry in ipairs(days) do
-                        local info = UIDropDownMenu_CreateInfo()
-                        info.text = string.format("%s  |cffaaaaaa(%d)|r", entry.label, entry.count)
-                        info.checked = (panel.selectedScanDay == entry.day)
-                        info.func = function()
-                            if CloseDropDownMenus then CloseDropDownMenus() end
-                            panel:SetScanTimeframe(entry.day)
-                        end
-                        UIDropDownMenu_AddButton(info)
-                    end
-                end, "MENU")
-                ToggleDropDownMenu(1, nil, timeframeDropdown, self, 0, 0)
-            end
-        end)
-        timeframeBtn:SetScript("OnEnter", function(self)
-            if GameTooltip then
-                GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:SetText("Historical Scan Snapshot", 1, 0.82, 0)
-                GameTooltip:AddLine("Inspect market prices from a specific recorded scan date without keeping historical indexes in memory.", 0.9, 0.9, 0.9, true)
-                GameTooltip:Show()
-            end
-        end)
-        timeframeBtn:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-        panel.timeframeBtn = timeframeBtn
-    end
-    UpdateSourceAndTimeframeButtons()
-
-    function panel:SetSourceMode(mode)
-        local normalized = type(mode) == "string" and mode:lower() or "latest"
-        if normalized ~= "latest" and normalized ~= "personal" and normalized ~= "guild" and normalized ~= "datapack" and normalized ~= "neutral" then
-            normalized = "latest"
-        end
-        self.activeSource = normalized
-        self.selectedScanDay = nil
-        if MarketSync.ReleaseSecondaryBrowseCaches then
-            MarketSync.ReleaseSecondaryBrowseCaches(normalized)
-        end
-        UpdateSourceAndTimeframeButtons()
-        if self.RefreshStatusFooter then self:RefreshStatusFooter() end
-        self:RunSearch()
-    end
-
-    function panel:SetScanTimeframe(scanDay)
-        local dayNum = tonumber(scanDay)
-        self.selectedScanDay = (dayNum and dayNum > 0) and dayNum or nil
-        if not self.selectedScanDay and MarketSync.ReleaseSecondaryBrowseCaches then
-            MarketSync.ReleaseSecondaryBrowseCaches(self.activeSource)
-        end
-        UpdateSourceAndTimeframeButtons()
-        if self.RefreshStatusFooter then self:RefreshStatusFooter() end
-        self:RunSearch()
     end
 
     local filterPopup = CreateFrame("Frame", nil, panel, "BackdropTemplate")
@@ -2470,31 +1809,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     btnLoad:SetPoint("BOTTOMRIGHT", lowRamNotice, "BOTTOM", -8, 16)
     btnLoad:SetText("⚡ Load Scan Data")
     if StyleModernPillButton then StyleModernPillButton(btnLoad, "⚡ Load Scan Data", true) end
-    local function GetEffectivePanelSource(self)
-        return self.activeSource or self.dataSource or "personal"
-    end
-
-    local function IsEffectiveSourceReady(self)
-        if self.selectedScanDay then return true end
-        local src = GetEffectivePanelSource(self)
-        if src == "latest" then return LatestIndexReady
-        elseif src == "guild" then return GuildIndexReady
-        elseif src == "datapack" then return DataPackIndexReady
-        elseif src == "neutral" then return NeutralIndexReady
-        else return PersonalIndexReady end
-    end
-
-    local function ShouldAutoBuildSource(self)
-        if not MarketSyncDB or not MarketSyncDB.LowRamMode then
-            return true
-        end
-        local src = GetEffectivePanelSource(self)
-        if src == "latest" and MarketSyncDB.PartialLowRamKeepLatest ~= false then
-            return true
-        end
-        return false
-    end
-
     btnLoad:SetScript("OnClick", function()
         btnLoad:SetText("Loading...")
         if btnLoad.SetEnabled then btnLoad:SetEnabled(false) end
@@ -2502,17 +1816,11 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         local onDone = function()
             btnLoad:SetText("⚡ Load Scan Data")
             if btnLoad.SetEnabled then btnLoad:SetEnabled(true) end
-            if panel.RefreshStatusFooter then panel:RefreshStatusFooter() end
             panel:RunSearch()
         end
-        local src = GetEffectivePanelSource(panel)
-        if src == "latest" then
-            MarketSync.LoadLatestCache(onDone)
-        elseif src == "guild" then
+        if panel.dataSource == "guild" then
             MarketSync.LoadGuildCache(onDone)
-        elseif src == "datapack" then
-            MarketSync.LoadDataPackCache(onDone)
-        elseif src == "neutral" then
+        elseif panel.dataSource == "neutral" then
             MarketSync.LoadNeutralCache(onDone)
         else
             MarketSync.LoadPersonalCache(onDone)
@@ -2522,7 +1830,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         if GameTooltip then
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText("Load Cache on Demand", 1, 0.82, 0)
-            GameTooltip:AddLine("Loads scan data for this source into memory on demand.", 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine("Loads scan data for this tab into memory for the current session.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end
     end)
@@ -2545,7 +1853,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         if GameTooltip then
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText("Addon Settings", 1, 0.82, 0)
-            GameTooltip:AddLine("Opens Settings to configure Smart Partial Low RAM or retain secondary views in memory.", 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine("Opens Settings to disable Low RAM Mode for instant searches across all tabs.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end
     end)
@@ -2581,72 +1889,31 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.itemCountText:SetJustifyH("CENTER")
     if panel.itemCountText.SetWordWrap then panel.itemCountText:SetWordWrap(false) end
 
-    function panel:RefreshStatusFooter()
-        local src = GetEffectivePanelSource(self)
-        local realmDB = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-        if self.selectedScanDay then
-            local dText = MarketSync.ScanDayToDate and MarketSync.ScanDayToDate(self.selectedScanDay) or ("Day " .. tostring(self.selectedScanDay))
-            self.statusText:SetText("|cff00ccffSnapshot: " .. dText .. "|r")
-            self.syncLabel:SetText("|cffffd700" .. (SOURCE_LABELS[src] or "Main AH") .. " History|r")
-            local sCount = 0
-            for _ in pairs(SnapshotIndex) do sCount = sCount + 1 end
-            self.itemCountText:SetText("|cffffd700" .. sCount .. "|r items")
-            return
-        end
-
-        local statusScope = (src == "latest" or src == "datapack") and "all" or src
-        local status, label = MarketSync.FormatAuctionScanStatus(statusScope)
-        if src == "datapack" then
-            label = "|cffcc88ffData Pack Quotes|r"
-        elseif src == "latest" and label == "" then
-            label = "|cff00ff00Latest Combined|r"
-        end
-        self.statusText:SetText(status)
-        self.syncLabel:SetText(label)
-
-        if src == "latest" then
-            local count = LatestIndexReady and LatestResolved or 0
-            if count == 0 and realmDB then
-                local seen = {}
-                for k in pairs(realmDB.PersonalData or {}) do seen[k] = true; count = count + 1 end
-                for k in pairs(realmDB.GuildData or {}) do if not seen[k] then seen[k] = true; count = count + 1 end end
-            end
-            self.itemCountText:SetText("|cffffd700" .. count .. "|r items")
-        elseif src == "personal" then
-            local totalItems = 0
-            if realmDB and realmDB.PersonalData then
-                for _ in pairs(realmDB.PersonalData) do totalItems = totalItems + 1 end
-            end
-            self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
-        elseif src == "guild" then
-            local gCount = GuildIndexReady and GuildResolved or 0
-            if gCount == 0 and realmDB and realmDB.GuildData then
-                for _, rec in pairs(realmDB.GuildData) do
-                    if not IsPackRecord(rec) then gCount = gCount + 1 end
-                end
-            end
-            self.itemCountText:SetText("|cffffd700" .. gCount .. "|r items")
-        elseif src == "datapack" then
-            local pCount = DataPackIndexReady and DataPackResolved or 0
-            if pCount == 0 and realmDB and realmDB.GuildData then
-                for _, rec in pairs(realmDB.GuildData) do
-                    if IsPackRecord(rec) then pCount = pCount + 1 end
-                end
-            end
-            self.itemCountText:SetText("|cffffd700" .. pCount .. "|r items")
-        elseif src == "neutral" then
-            local nCount = 0
-            if realmDB and realmDB.NeutralData then
-                for _ in pairs(realmDB.NeutralData) do nCount = nCount + 1 end
-            end
-            self.itemCountText:SetText("|cffffd700" .. nCount .. "|r items")
-        end
-    end
-
     -- --- OnShow: Update status bar and run initial search ---
     panel:SetScript("OnShow", function(self)
         self:RunSearch()
-        self:RefreshStatusFooter()
+        local status, label = MarketSync.FormatAuctionScanStatus(self.dataSource)
+        self.statusText:SetText(status)
+        self.syncLabel:SetText(label)
+        if self.dataSource == "personal" then
+            local totalItems = 0
+            if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
+                for _ in pairs(MarketSync.GetRealmDB().PersonalData) do
+                    totalItems = totalItems + 1
+                end
+            end
+
+            self.itemCountText:SetText("|cffffd700" .. totalItems .. "|r items")
+
+        elseif self.dataSource == "guild" then
+            self.itemCountText:SetText("|cffffd700" .. GuildResolved .. "|r items")
+        elseif self.dataSource == "neutral" then
+            local nCount = 0
+            for _ in pairs(MarketSync.GetRealmDB().NeutralData or {}) do
+                nCount = nCount + 1
+            end
+            self.itemCountText:SetText("|cffffd700" .. nCount .. "|r items")
+        end
     end)
 
     -- --- RESULT ROWS ---
@@ -2756,8 +2023,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 GameTooltip:SetHyperlink(row.link)
                 if row.itemData then ScheduleBrowseItemResolution(row.itemData.itemID) end
                 GameTooltip:AddLine(" ")
-                if GetEffectivePanelSource(panel) == "neutral" then
-                    GameTooltip:AddLine("|cff00ccffClick to view Neutral AH analytics|r", 1, 1, 1)
+                if panel.dataSource == "neutral" then
+                    GameTooltip:AddLine("|cff00ccffNeutral cache item|r", 1, 1, 1)
                 else
                     GameTooltip:AddLine("|cff00ff00Click to view price history|r", 1, 1, 1)
                 end
@@ -2780,15 +2047,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     dbKey = row.itemData.dbKey,
                 })
             elseif row.link and (HandleModifiedItemClick(row.link) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(row.link))) then
-            elseif row.itemData and MarketSync.ShowItemHistory then
-                local scope = (GetEffectivePanelSource(panel) == "neutral") and "neutral" or "main"
+            elseif panel.dataSource ~= "neutral" and row.itemData and MarketSync.ShowItemHistory then
                 MarketSync.ShowItemHistory(
                     row.itemData.dbKey,
                     row.itemData.link,
                     row.itemData.name,
                     row.itemData.icon,
-                    row.itemData.price,
-                    scope
+                    row.itemData.price
                 )
             end
         end)
@@ -2806,15 +2071,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     dbKey = self.itemData.dbKey,
                 })
             elseif self.link and (HandleModifiedItemClick(self.link) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(self.link))) then
-            elseif self.itemData and MarketSync.ShowItemHistory then
-                local scope = (GetEffectivePanelSource(panel) == "neutral") and "neutral" or "main"
+            elseif panel.dataSource ~= "neutral" and self.itemData and MarketSync.ShowItemHistory then
                 MarketSync.ShowItemHistory(
                     self.itemData.dbKey,
                     self.itemData.link,
                     self.itemData.name,
                     self.itemData.icon,
-                    self.itemData.price,
-                    scope
+                    self.itemData.price
                 )
             end
         end)
@@ -2827,8 +2090,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 GameTooltip:SetHyperlink(self.link)
                 if self.itemData then ScheduleBrowseItemResolution(self.itemData.itemID) end
                 GameTooltip:AddLine(" ")
-                if GetEffectivePanelSource(panel) == "neutral" then
-                    GameTooltip:AddLine("|cff00ccffClick to view Neutral AH analytics|r", 1, 1, 1)
+                if panel.dataSource == "neutral" then
+                    GameTooltip:AddLine("|cff00ccffNeutral cache item|r", 1, 1, 1)
                 else
                     GameTooltip:AddLine("|cff00ff00Click to view price history|r", 1, 1, 1)
                 end
@@ -2870,13 +2133,12 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         self.currentResults = {}
         self.page = 0
 
-        local effSource = GetEffectivePanelSource(self)
-        local isGuild = (effSource == "guild")
-        local isNeutral = (effSource == "neutral")
-        local isReady = IsEffectiveSourceReady(self)
+        local isGuild = self.dataSource == "guild"
+        local isNeutral = self.dataSource == "neutral"
+        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady) or (not isGuild and not isNeutral and PersonalIndexReady)
 
         if not isReady then
-            if not ShouldAutoBuildSource(self) then
+            if MarketSyncDB and MarketSyncDB.LowRamMode then
                 if self.noResultsText then self.noResultsText:Hide() end
                 self:UpdateResults()
                 return
@@ -2884,21 +2146,15 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                 self.noResultsText:SetText("Building index, please wait...")
                 self.noResultsText:Show()
                 self:UpdateResults()
-                if effSource == "datapack" then
-                    MarketSync.ForceDataPack = true
-                elseif effSource == "latest" then
-                    MarketSync.ForceLatest = true
-                end
-                BuildSearchIndex(function()
-                    if self.RefreshStatusFooter then self:RefreshStatusFooter() end
-                    self:RunSearch()
-                end)
+                BuildSearchIndex(function() self:RunSearch() end)
                 return
             end
         end
 
         local activeCat = self.activeCategory
         local activeSub = self.activeSubCategory
+        local isGuild = self.dataSource == "guild"
+        local isNeutral = self.dataSource == "neutral"
         local exactQuery = query:match('^"(.-)"$')
         local isExact = exactQuery ~= nil
         if isExact then
@@ -2907,17 +2163,10 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
         local minQueryLen = isExact and 1 or 2
 
-        -- Use the appropriate index for this source / historical timeframe
+        -- Use the appropriate index for this tab
         local index = PersonalIndex
-        if self.selectedScanDay then
-            index = BuildHistoricalSnapshotIndex(effSource, self.selectedScanDay)
-            if self.RefreshStatusFooter then self:RefreshStatusFooter() end
-        elseif effSource == "latest" then
-            index = LatestIndex
-        elseif isGuild then
+        if isGuild then
             index = GuildIndex
-        elseif effSource == "datapack" then
-            index = DataPackIndex
         elseif isNeutral then
             index = NeutralIndex
         end
@@ -2972,19 +2221,13 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         self:ApplySort()
 
         if #self.currentResults == 0 then
-            if self.selectedScanDay then
-                self.noResultsText:SetText("No recorded items found for this historical scan date.")
-            elseif isGuild and GuildSyncActive then
+            if isGuild and GuildSyncActive then
                 self.noResultsText:SetText("Guild sync in progress... browsing available data.")
             elseif isNeutral and NeutralSyncActive then
                 self.noResultsText:SetText("Neutral sync in progress... browsing available data.")
             elseif isNeutral and NeutralTotal == 0 then
                 self.noResultsText:SetText("No neutral scan data found. Visit a neutral auction house and run a scan.")
-            elseif effSource == "datapack" and DataPackTotal == 0 then
-                self.noResultsText:SetText("No Data Pack records loaded. Install or enable MarketSyncData for baseline quotes.")
-            elseif effSource == "latest" and LatestTotal == 0 then
-                self.noResultsText:SetText("No Auction House data found yet. Run a scan or sync with guildmates.")
-            elseif effSource == "personal" and PersonalTotal == 0 then
+            elseif not isGuild and PersonalTotal == 0 then
                 self.noResultsText:SetText("No personal scan data found. Please run an Auction House scan to build your offline cache.")
             else
                 self.noResultsText:SetText("No results found.")
@@ -3038,28 +2281,23 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             end
         end
 
-        local effSource = GetEffectivePanelSource(self)
         local maxPage = math.max(0, math.ceil(total / NUM_RESULTS_TO_DISPLAY) - 1)
         local statusStr = total .. " results (Page " .. (self.page+1) .. "/" .. (maxPage+1) .. ")"
         -- Show background index progress
         local idxStatus = MarketSync.GetIndexStatus and MarketSync.GetIndexStatus()
-        if idxStatus and not self.selectedScanDay then
-            local isGuild = (effSource == "guild")
-            local isNeutral = (effSource == "neutral")
+        if idxStatus then
+            local isGuild = self.dataSource == "guild"
+            local isNeutral = self.dataSource == "neutral"
             local pending = idxStatus.personalPending
-            if effSource == "latest" then
-                pending = idxStatus.latestPending or 0
-            elseif isGuild then
+            if isGuild then
                 pending = idxStatus.guildPending
-            elseif effSource == "datapack" then
-                pending = idxStatus.dataPackPending or 0
             elseif isNeutral then
                 pending = idxStatus.neutralPending
             end
             if pending > 0 then
                 statusStr = statusStr .. " |cffff8800(" .. pending .. " resolving...)|r"
             end
-            if (isGuild or effSource == "latest") and idxStatus.guildSyncActive and idxStatus.guildIncoming > 0 then
+            if isGuild and idxStatus.guildSyncActive and idxStatus.guildIncoming > 0 then
                 statusStr = statusStr .. " |cff00ff00(" .. idxStatus.guildIncoming .. " incoming)|r"
             elseif isNeutral and idxStatus.neutralSyncActive and idxStatus.neutralIncoming > 0 then
                 statusStr = statusStr .. " |cff00ccff(" .. idxStatus.neutralIncoming .. " incoming)|r"
@@ -3081,10 +2319,12 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
         if self.tableScrollBar then
             self.tableScrollBar:Update(self.page, maxPage)
         end
-        local isReady = IsEffectiveSourceReady(self)
+        local isGuild = self.dataSource == "guild"
+        local isNeutral = self.dataSource == "neutral"
+        local isReady = (isGuild and GuildIndexReady) or (isNeutral and NeutralIndexReady) or (not isGuild and not isNeutral and PersonalIndexReady)
 
         if self.lowRamNotice then
-            if not isReady and not ShouldAutoBuildSource(self) then
+            if not isReady and MarketSyncDB and MarketSyncDB.LowRamMode then
                 local estMB, totalStored = 0, 0
                 if MarketSync.GetEstimatedRAMUsage then
                     estMB, totalStored = MarketSync.GetEstimatedRAMUsage()
@@ -3098,13 +2338,10 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                         if self.lowRamNotice.btnLoad.SetEnabled then self.lowRamNotice.btnLoad:SetEnabled(false) end
                     end
                 else
-                    local srcLabel = SOURCE_LABELS[effSource] or "Selected"
-                    if self.lowRamNotice.title then
-                        self.lowRamNotice.title:SetText("|cffffd700On-Demand Source (" .. srcLabel .. ")|r")
-                    end
+                    if self.lowRamNotice.title then self.lowRamNotice.title:SetText("|cffffd700Low RAM Mode Active|r") end
                     self.lowRamNotice.text:SetText(string.format(
-                        "|cffccccccSecondary index '%s' is kept unloaded by Smart Low RAM Mode (~%.1f MB / %d items saved).\n'Latest' stays hot for instant access; click below to load this view on demand.|r",
-                        srcLabel, estMB, totalStored
+                        "|cffccccccSearch index is not loaded in memory to keep the addon lightweight.\nEstimated memory saved: ~%.1f MB (%d items stored).\nScanner, price checks, and analytics remain fully accessible.|r",
+                        estMB, totalStored
                     ))
                     if self.lowRamNotice.btnLoad then
                         self.lowRamNotice.btnLoad:SetText("⚡ Load Scan Data")
@@ -3157,15 +2394,6 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     return panel
 end
 -- Force load specific caches on demand
-function MarketSync.LoadLatestCache(callback)
-    if not LatestIndexReady then
-        MarketSync.ForceLatest = true
-        BuildSearchIndex(callback)
-    elseif callback then
-        callback()
-    end
-end
-
 function MarketSync.LoadPersonalCache(callback)
     if not PersonalIndexReady then
         MarketSync.ForcePersonal = true
@@ -3178,15 +2406,6 @@ end
 function MarketSync.LoadGuildCache(callback)
     if not GuildIndexReady then
         MarketSync.ForceGuild = true
-        BuildSearchIndex(callback)
-    elseif callback then
-        callback()
-    end
-end
-
-function MarketSync.LoadDataPackCache(callback)
-    if not DataPackIndexReady then
-        MarketSync.ForceDataPack = true
         BuildSearchIndex(callback)
     elseif callback then
         callback()
