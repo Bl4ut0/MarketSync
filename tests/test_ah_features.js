@@ -1678,6 +1678,15 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(guildLoaded == true, "Guild source must auto-load when LowRamMode is false")
     mainFrame.tabs[2]:Click()
     assert(neutralLoaded == true, "Neutral tab click must auto-preload Neutral cache when LowRamMode is false")
+    -- Phase 2b: Latest is the default source and has its own selector button
+    MarketSyncDB.MainSource = nil
+    MarketSync.ApplyMainSource(nil)
+    assert(mainFrame.mainSource == "latest", "Main tab should default to Latest")
+    assert(mainFrame.sourceButtons.latest ~= nil, "Latest source button should exist")
+    MarketSync.ApplyMainSource("personal")
+    assert(mainFrame.mainSource == "personal" and MarketSyncDB.MainSource == "personal", "Personal should be saved as the source")
+    MarketSync.ApplyMainSource("latest")
+    assert(MarketSyncDB.MainSource == "latest", "Latest should be saved as the source")
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(check)) !== 0) {
     throw new Error('MainFrame 7-tab check failed: ' + to_jsstring(lua.lua_tostring(L, -1)));

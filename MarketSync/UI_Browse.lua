@@ -1822,6 +1822,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             MarketSync.LoadGuildCache(onDone)
         elseif panel.dataSource == "neutral" then
             MarketSync.LoadNeutralCache(onDone)
+        elseif panel.dataSource == "latest" then
+            -- Latest reads both Personal and Guild, so load both before searching
+            MarketSync.LoadPersonalCache(function() MarketSync.LoadGuildCache(onDone) end)
         else
             MarketSync.LoadPersonalCache(onDone)
         end
@@ -2169,6 +2172,9 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             index = GuildIndex
         elseif isNeutral then
             index = NeutralIndex
+        elseif self.dataSource == "latest" and MarketSync.MergeLatestIndex then
+            -- Newest entry per item across Personal and Guild (phase 2a merge)
+            index = MarketSync.MergeLatestIndex(PersonalIndex, GuildIndex)
         end
 
         local uniqueResults = {}

@@ -3,7 +3,7 @@
 -- Window shell, tabs, and settings
 -- =============================================================
 
-local MainFrame, MainHost, BrowseContent, SyncContent, NeutralContent, ProcessingContent, NotificationsContent, SettingsContent
+local MainFrame, MainHost, BrowseContent, SyncContent, LatestContent, NeutralContent, ProcessingContent, NotificationsContent, SettingsContent
 local ItemHistoryPanel, AnalyticsPanel, ItemDetailPanel
 local activeBrowseTab = 1
 
@@ -491,11 +491,7 @@ local function CreateMainFrame()
         -- Only auto-preload caches on tab change when Low RAM mode is disabled
         if MarketSyncDB and not MarketSyncDB.LowRamMode then
             if id == 1 then
-                if MainFrame.mainSource == "guild" and MarketSync.LoadGuildCache then
-                    MarketSync.LoadGuildCache()
-                elseif MarketSync.LoadPersonalCache then
-                    MarketSync.LoadPersonalCache()
-                end
+                if MarketSync.PreloadMainSource then MarketSync.PreloadMainSource(MainFrame.mainSource) end
             elseif id == 2 and MarketSync.LoadNeutralCache then
                 MarketSync.LoadNeutralCache()
             end
@@ -736,6 +732,8 @@ local function CreateMainFrame()
     BrowseContent:Hide()
     SyncContent = MarketSync.CreateBrowsePanel(MainHost, "guild")
     SyncContent:Hide()
+    LatestContent = MarketSync.CreateBrowsePanel(MainHost, "latest")
+    LatestContent:Hide()
 
     -- TAB 2: NEUTRAL AH
     NeutralContent = MarketSync.CreateBrowsePanel(MainFrame, "neutral")
@@ -777,13 +775,18 @@ local function CreateMainFrame()
     end
     MakeSourceButton("Guild", "guild", -18)
     MakeSourceButton("Personal", "personal", -106)
+    MakeSourceButton("Latest", "latest", -194)
     MainHost.sourceButtons = sourceButtons
     MainFrame.sourceButtons = sourceButtons
 
     -- Shows the chosen source (personal or guild) on the Main tab. The guild
     -- source is unavailable while PassiveSync is off, so it falls back to personal.
+    -- Shows the chosen source on the Main tab: latest (newest across Personal and
+    -- Guild), personal, or guild. Guild falls back to personal while PassiveSync is off.
+    -- userChosen loads the data for that source when Low RAM mode is off.
     function MarketSync.ApplyMainSource(source, userChosen)
-        if source ~= "guild" then source = "personal" end
+        source = source or "latest"
+        if source ~= "latest" and source ~= "guild" then source = "personal" end
         if source == "guild" and MarketSyncDB and MarketSyncDB.PassiveSync == false then
             source = "personal"
         end
@@ -795,6 +798,7 @@ local function CreateMainFrame()
         end
         ShowIf(BrowseContent, source == "personal")
         ShowIf(SyncContent, source == "guild")
+        ShowIf(LatestContent, source == "latest")
         ShowIf(sourceButtons.guild, not (MarketSyncDB and MarketSyncDB.PassiveSync == false))
         for key, btn in pairs(sourceButtons) do
             if btn.LockHighlight and btn.UnlockHighlight then
@@ -802,14 +806,19 @@ local function CreateMainFrame()
             end
         end
         if userChosen and MarketSyncDB and not MarketSyncDB.LowRamMode then
-            if source == "guild" and MarketSync.LoadGuildCache then
-                MarketSync.LoadGuildCache()
-            elseif MarketSync.LoadPersonalCache then
-                MarketSync.LoadPersonalCache()
-            end
+            MarketSync.PreloadMainSource(source)
         end
     end
-    MarketSync.ApplyMainSource(MarketSyncDB and MarketSyncDB.MainSource or "personal")
+    -- Loads the caches that a source reads: latest needs both Personal and Guild.
+    function MarketSync.PreloadMainSource(source)
+        if (source == "personal" or source == "latest") and MarketSync.LoadPersonalCache then
+            MarketSync.LoadPersonalCache()
+        end
+        if (source == "guild" or source == "latest") and MarketSync.LoadGuildCache then
+            MarketSync.LoadGuildCache()
+        end
+    end
+    MarketSync.ApplyMainSource(MarketSyncDB and MarketSyncDB.MainSource or "latest")
 
     -- Global function to show item history from any browse panel (redirected to unified modern Analytics)
     function MarketSync.ShowItemHistory(dbKey, itemLink, name, icon, price, sourceTab)
