@@ -49,6 +49,7 @@ Chat.lua
 
 # UI Components: browse panel & history detail view
 UI_Analytics.lua
+LatestIndex.lua
 UI_Browse.lua
 UI_History.lua
 UI_Monitor.lua
