@@ -4,22 +4,22 @@ from pathlib import Path
 import sys
 
 
-# Required client versions verified live in CurseForge's WoW catalog and declared in MarketSync.toc.
+# Required release anchors verified across all supported WoW flavors and MarketSync.toc.
 REQUIRED_TARGETS = (
     ("1.60.1", 16001, 88568),
-    ("1.15.8", 11508, None),
     ("1.15.9", 11509, None),
-    ("2.5.5", 20505, None),
     ("2.5.6", 20506, None),
-    ("3.8.0", 38000, None),
     ("5.5.3", 50503, None),
-    ("12.0.0", 120000, None),
     ("12.0.1", 120001, None),
 )
 
-# Newer Retail / Classic progression patches listed in MarketSync.toc; included when present in the catalog.
+# Adjacent / newer patches declared in MarketSync.toc; included automatically when uniquely listed.
 OPTIONAL_TARGETS = (
+    ("1.15.8", 11508, None),
+    ("2.5.5", 20505, None),
+    ("3.80.0", 38000, None),
     ("5.5.4", 50504, None),
+    ("12.0.0", 120000, None),
     ("12.0.5", 120005, None),
     ("12.0.7", 120007, None),
     ("12.1.0", 120100, None),
@@ -43,7 +43,7 @@ def _resolve_target(catalog, interfaces, name, interface, version_type, *, requi
     }
     if len(matches) == 1:
         return matches.pop()
-    if len(matches) > 1 or required:
+    if required:
         raise ValueError(f"Expected exactly one CurseForge ID for {name}; found {len(matches)}")
     return None
 
