@@ -27,6 +27,8 @@ function AH.AttachLegacy()
     if not AH.IsLegacyClient() then return false end
     local auctionFrame = _G.AuctionFrame
     if not auctionFrame or not auctionFrame.numTabs then return false end
+    -- Every legacy client uses the shared scanner page, the same design as
+    -- Forever. The multi-item page (UI_LegacyMultiScan.lua) is kept but unused.
     local factories = {
         search = MarketSync.CreateLegacySearchPanel,
         scanner = MarketSync.CreateAHScannerPanel,
@@ -227,8 +229,32 @@ function AH.AttachLegacy()
     return true
 end
 
+-- Scans a whole list on the multi-item Scan page. items: item IDs or
+-- Favorites list entries ({ itemID, suffix, name, link }).
+MarketSync.OpenLegacyScan = function(items)
+    if not AH.AttachLegacy() then return false end
+    local panel = AH.LegacyScannerPanel
+    if not (panel and panel.AddItem and MarketSync.Scanner.StartMultiScan) then return false end
+    if not AH.ShowLegacyPanel("scanner") then return false end
+    local keys = {}
+    for _, item in ipairs(items or {}) do
+        if type(item) == "table" then
+            keys[#keys + 1] = { itemID = item.itemID, itemSuffix = item.itemSuffix or item.suffix or 0,
+                name = item.name, link = item.link }
+        else
+            keys[#keys + 1] = item
+        end
+    end
+    local started = MarketSync.Scanner.StartMultiScan(keys)
+    if panel.Refresh then panel.Refresh() end
+    return started
+end
+
 MarketSync.OpenLegacySearch = function(query)
     if not AH.AttachLegacy() then return false end
+    -- A whole list goes to the Scan page, where each item gets its own row and
+    -- listings; a single name still uses the Search tab.
+    if type(query) == "table" and MarketSync.OpenLegacyScan(query) then return true end
     if type(query) == "table" then
         if not AH.ShowLegacyPanel("search") then return false end
         if AH.LegacySearchHost.Content and AH.LegacySearchHost.Content.SetQuery then

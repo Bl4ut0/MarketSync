@@ -942,6 +942,18 @@ function MarketSync.CreateAHScannerPanel(parent)
         resultsContent:SetHeight(math.max(1, #results * rowH))
     end
 
+    -- Waiting-for-snapshot label: dots cycle 1-3 and the seconds count up, so
+    -- a long server wait is visibly still running.
+    local waitDotCount = 0
+    local function WaitingText()
+        waitDotCount = (waitDotCount % 3) + 1
+        local scanner = MarketSync.Scanner
+        local now = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+        local elapsed = (scanner and scanner.SnapshotRequestedAt) and (now - scanner.SnapshotRequestedAt) or 0
+        local dots = string.rep(".", waitDotCount) .. string.rep(" ", 3 - waitDotCount)
+        return string.format("Waiting for Blizzard snapshot%s %ds", dots, elapsed)
+    end
+
     -- Cooldown & Scanner Update Loop
     local displayedResultsRevision
     local function UpdateScannerState()
@@ -977,6 +989,8 @@ function MarketSync.CreateAHScannerPanel(parent)
                     scanner.Progress.current,
                     scanner.Progress.total,
                     math.floor((scanner.Progress.current / scanner.Progress.total) * 100)))
+            elseif scanner.IsWaitingForSnapshot and scanner.IsWaitingForSnapshot() then
+                progressLabel:SetText(WaitingText())
             else
                 progressLabel:SetText(scanner.Status or "Scanning...")
             end
@@ -1020,7 +1034,17 @@ function MarketSync.CreateAHScannerPanel(parent)
 
     -- Periodic ticker for cooldown countdown while panel is open
     local tickerTime = 0
+    local waitFrameTime = 0
     panel:SetScript("OnUpdate", function(self, elapsed)
+        -- Faster refresh only while waiting on the server, so the dots animate.
+        waitFrameTime = waitFrameTime + elapsed
+        if waitFrameTime >= 0.35 then
+            waitFrameTime = 0
+            local s = MarketSync.Scanner
+            if panel:IsShown() and s and s.IsWaitingForSnapshot and s.IsWaitingForSnapshot() then
+                UpdateScannerState()
+            end
+        end
         tickerTime = tickerTime + elapsed
         if tickerTime >= 1.0 then
             tickerTime = 0

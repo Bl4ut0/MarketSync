@@ -616,6 +616,13 @@ local function HasLegacyTradeSkillAPI()
         and type(GetTradeSkillInfo) == "function"
 end
 
+-- Classic Era and TBC show Enchanting in the older Craft window, which has
+-- its own API (GetNumCrafts / GetCraftInfo) next to the trade-skill one.
+local function HasCraftAPI()
+    return type(GetNumCrafts) == "function" and type(GetCraftInfo) == "function"
+        and type(GetCraftItemLink) == "function"
+end
+
 local function HasTradeSkillRecipeAPI()
     return HasModernTradeSkillAPI() or HasLegacyTradeSkillAPI()
 end
@@ -700,6 +707,49 @@ local function GetOpenTradeSkillProfessionName()
     return nil
 end
 
+-- Skill rank of the open trade-skill window, used to spot scans made before
+-- the character learned more recipes.
+local function GetOpenTradeSkillRank()
+    if C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo then
+        local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+        if ok and type(info) == "table" and tonumber(info.skillLevel) then
+            return tonumber(info.skillLevel), tonumber(info.maxSkillLevel)
+        end
+    end
+    if type(GetTradeSkillLine) == "function" then
+        local ok, name, rank, maxRank = pcall(GetTradeSkillLine)
+        if ok and name and name ~= "UNKNOWN" then return tonumber(rank), tonumber(maxRank) end
+    end
+    return nil
+end
+
+local function GetOpenCraftProfessionName()
+    if not HasCraftAPI() then return nil end
+    if CraftFrame and CraftFrame.IsShown and not CraftFrame:IsShown() then return nil end
+    local name, rank, maxRank
+    if type(GetCraftDisplaySkillLine) == "function" then
+        local ok, n, r, m = pcall(GetCraftDisplaySkillLine)
+        if ok then name, rank, maxRank = n, r, m end
+    end
+    if (not name or name == "") and type(GetCraftName) == "function" then
+        local ok, n = pcall(GetCraftName)
+        if ok then name = n end
+    end
+    local normalized = NormalizeProfessionName(name)
+    if not normalized then return nil end
+    return normalized, tonumber(rank), tonumber(maxRank)
+end
+
+local function ExpandCollapsedHeaders(count, getInfo, expand, kindIndex, expandedIndex)
+    if type(expand) ~= "function" then return end
+    for i = (tonumber(count()) or 0), 1, -1 do
+        local info = { pcall(getInfo, i) }
+        if info[1] and info[kindIndex + 1] == "header" and not info[expandedIndex + 1] then
+            pcall(expand, i)
+        end
+    end
+end
+
 local function GetPlayerProfessionSet()
     local out = {}
     local hasLiveSnapshot = false
@@ -766,15 +816,78 @@ function MarketSync.GetCachedCraftingProfessions()
     return SetToSortedList(store.professions), tonumber(store.updatedAt) or 0
 end
 
-local function ScanCurrentTradeSkillRecipes()
+local function CacheVendorSell(outputItemID, linkOrID)
+    local _, _, _, _, _, _, _, _, _, _, sellPrice = SafeGetItemInfo(linkOrID or outputItemID)
+    local vSell = tonumber(sellPrice)
+    if vSell and MarketSyncDB and MarketSyncDB.ItemInfoCache then
+        MarketSyncDB.ItemInfoCache[outputItemID] = MarketSyncDB.ItemInfoCache[outputItemID] or {}
+        MarketSyncDB.ItemInfoCache[outputItemID].sp = vSell
+    end
+    return vSell
+end
+
+-- Reads the Classic Craft window (Enchanting before Wrath). Enchant spells
+-- have no item output, so only rods, oils, wands and similar items count.
+local function ScanCurrentCraftRecipes()
+    local professionName, rank, maxRank = GetOpenCraftProfessionName()
+    if not professionName then return nil, {} end
+    ExpandCollapsedHeaders(GetNumCrafts, GetCraftInfo, ExpandCraftSkillLine, 3, 5)
+
+    local recipes, seen = {}, {}
+    for i = 1, (tonumber(GetNumCrafts()) or 0) do
+        local recipeName, _, craftType = GetCraftInfo(i)
+        if recipeName and craftType ~= "header" then
+            local outputLink = GetCraftItemLink(i)
+            local outputItemID = ParseItemIDFromLink(outputLink)
+            local mats = {}
+            local reagentCount = (type(GetCraftNumReagents) == "function" and tonumber(GetCraftNumReagents(i))) or 0
+            for r = 1, reagentCount do
+                local reagentLink = type(GetCraftReagentItemLink) == "function" and GetCraftReagentItemLink(i, r) or nil
+                local reagentItemID = ParseItemIDFromLink(reagentLink)
+                local qty = 1
+                if type(GetCraftReagentInfo) == "function" then
+                    local _, _, numRequired = GetCraftReagentInfo(i, r)
+                    qty = tonumber(numRequired) or 1
+                end
+                if reagentItemID then
+                    mats[#mats + 1] = { itemID = reagentItemID, qty = math.max(1, math.floor(qty)) }
+                end
+            end
+            if outputItemID and #mats > 0 then
+                local dedupeKey = tostring(outputItemID) .. ":" .. tostring(recipeName)
+                if not seen[dedupeKey] then
+                    seen[dedupeKey] = true
+                    recipes[#recipes + 1] = {
+                        name = recipeName,
+                        outputItemID = outputItemID,
+                        outputQty = 1, outputQtyMin = 1, outputQtyMax = 1,
+                        vendorSellPrice = CacheVendorSell(outputItemID, outputLink),
+                        skillType = tostring(craftType or ""),
+                        mats = mats,
+                        recipeIndex = i,
+                    }
+                end
+            end
+        end
+    end
+    return professionName, recipes, rank, maxRank
+end
+
+local function ScanCurrentTradeSkillRecipes(source)
+    if source == "craft" then
+        return ScanCurrentCraftRecipes()
+    end
     if not HasTradeSkillRecipeAPI() then
+        if source == nil then return ScanCurrentCraftRecipes() end
         return nil, {}
     end
 
     local professionName = GetOpenTradeSkillProfessionName()
     if not professionName then
+        if source == nil then return ScanCurrentCraftRecipes() end
         return nil, {}
     end
+    local skillRank, skillMax = GetOpenTradeSkillRank()
 
     local recipes = {}
     local seen = {}
@@ -928,6 +1041,8 @@ local function ScanCurrentTradeSkillRecipes()
 
     -- 2. Legacy GetTradeSkillInfo Path
     elseif HasLegacyTradeSkillAPI() then
+        -- Collapsed categories hide their recipes from GetNumTradeSkills.
+        ExpandCollapsedHeaders(GetNumTradeSkills, GetTradeSkillInfo, ExpandTradeSkillSubClass, 2, 4)
         local numSkillsRaw = (GetNumTradeSkills and GetNumTradeSkills()) or 0
         local numSkills = tonumber(numSkillsRaw) or 0
         for i = 1, numSkills do
@@ -995,29 +1110,78 @@ local function ScanCurrentTradeSkillRecipes()
         end
     end
 
-    return tostring(professionName), recipes
+    return tostring(professionName), recipes, skillRank, skillMax
 end
 
-function MarketSync.RefreshKnownCraftingRecipes()
-    local professionName, recipes = ScanCurrentTradeSkillRecipes()
+local scanInProgress = false
+local announcedScans = {}
+
+-- source: "craft" (Craft window), "trade" (trade-skill window) or nil (either).
+function MarketSync.RefreshKnownCraftingRecipes(source)
+    if scanInProgress then return false end
+    scanInProgress = true
+    local ok, professionName, recipes, rank, maxRank = pcall(ScanCurrentTradeSkillRecipes, source)
+    scanInProgress = false
     MarketSync.RefreshKnownProfessionCache()
 
-    if not professionName then
+    if not ok or not professionName then
         return false
     end
 
     local store = GetKnownCraftingStore()
     store.__clientExpansion = CLIENT_EXPANSION_LEVEL
     store.__faction = type(UnitFactionGroup) == "function" and UnitFactionGroup("player") or nil
+
+    -- Recipes are never unlearned while a profession is kept, so a scan that
+    -- sees fewer rows (search text, "Have Materials" filter) only adds to the
+    -- saved list instead of shrinking it.
+    local previous = store[professionName]
+    local merged, index, added = {}, {}, 0
+    local hadPrevious = type(previous) == "table"
+        and tonumber(previous.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION
+        and type(previous.recipes) == "table"
+    local function Key(r) return tostring(r.outputItemID) .. ":" .. tostring(r.name) end
+    if hadPrevious then
+        for _, r in ipairs(previous.recipes) do
+            if type(r) == "table" and not index[Key(r)] then
+                merged[#merged + 1] = r
+                index[Key(r)] = #merged
+            end
+        end
+    end
+    for _, r in ipairs(recipes or {}) do
+        local at = index[Key(r)]
+        if at then
+            merged[at] = r
+        else
+            merged[#merged + 1] = r
+            index[Key(r)] = #merged
+            added = added + 1
+        end
+    end
+    if not hadPrevious then added = #merged end
+
     store[professionName] = {
         cacheVersion = CRAFT_RECIPE_CACHE_VERSION,
         updatedAt = time(),
-        recipes = recipes or {},
+        recipes = merged,
+        skillRank = rank or (hadPrevious and previous.skillRank) or nil,
+        skillMax = maxRank or (hadPrevious and previous.skillMax) or nil,
+        lastSeen = #(recipes or {}),
+        lastAdded = added,
     }
     if professionName == "First Aid (Health)" then
         store["First Aid"] = store[professionName]
     end
-    return type(recipes) == "table" and #recipes > 0
+
+    -- One confirmation per profession per session, and again whenever a
+    -- later scan finds recipes the saved list did not have.
+    if #merged > 0 and (not announcedScans[professionName] or added > 0)
+        and MarketSync.OnProfessionScanned then
+        announcedScans[professionName] = true
+        pcall(MarketSync.OnProfessionScanned, professionName, #merged, hadPrevious and added or 0, source)
+    end
+    return #merged > 0
 end
 
 function MarketSync.IsProfessionResyncInProgress()
@@ -1087,7 +1251,7 @@ function MarketSync.ResyncProfessionCache(onComplete)
     -- Protected spell-cast APIs cannot be safely invoked from addon timers.
     -- Resync now captures whichever profession window is currently open.
     local scannedNow = 0
-    local openProfession = GetOpenTradeSkillProfessionName()
+    local openProfession = GetOpenTradeSkillProfessionName() or GetOpenCraftProfessionName()
     if openProfession and IsCraftingProfessionName(openProfession) then
         local ok, refreshed = pcall(MarketSync.RefreshKnownCraftingRecipes)
         if ok and refreshed == true then
@@ -1114,6 +1278,136 @@ function MarketSync.ResyncProfessionCache(onComplete)
     end
 
     return success, msg, #queue
+end
+
+local GATHERING_PROFESSIONS = { Mining = true, Herbalism = true, Skinning = true, Fishing = true }
+local STALE_SCAN_SECONDS = 7 * 86400
+
+-- Live skill ranks for the current character, keyed by normalized name.
+local function GetLiveProfessionRanks()
+    local out = {}
+    local function Add(name, rank, maxRank)
+        if type(name) ~= "string" or name == "" then return end
+        local normalized = NormalizeProfessionName(name)
+        if normalized then
+            out[normalized] = { rank = tonumber(rank), max = tonumber(maxRank) }
+        elseif GATHERING_PROFESSIONS[name] then
+            out[name] = { rank = tonumber(rank), max = tonumber(maxRank), gathering = true }
+        end
+    end
+    if type(GetProfessions) == "function" and type(GetProfessionInfo) == "function" then
+        local indexes = { GetProfessions() }
+        for i = 1, select("#", GetProfessions()) do
+            local idx = indexes[i]
+            if idx then
+                local name, _, rank, maxRank = GetProfessionInfo(idx)
+                Add(name, rank, maxRank)
+            end
+        end
+    end
+    if next(out) == nil and type(GetNumSkillLines) == "function" and type(GetSkillLineInfo) == "function" then
+        for i = 1, (tonumber(GetNumSkillLines()) or 0) do
+            local name, isHeader, _, rank, _, _, maxRank = GetSkillLineInfo(i)
+            if name and not isHeader then Add(name, rank, maxRank) end
+        end
+    end
+    return out
+end
+
+local function DisplayProfessionName(name)
+    if name == "First Aid (Health)" then return "First Aid" end
+    return name
+end
+
+-- One row per profession for a character, saying whether MarketSync has its
+-- recipes and what the player should do next.
+-- state: "ready" | "stale" | "missing" | "gathering"
+function MarketSync.GetProfessionScanStatus(characterKey)
+    local currentKey = GetCraftingCharacterKey()
+    local isCurrent = not characterKey or characterKey == currentKey
+    local store = GetKnownCraftingStore(isCurrent and nil or characterKey)
+    local live = isCurrent and GetLiveProfessionRanks() or {}
+    local names, seen = {}, {}
+    local function Add(name)
+        if name and not seen[name] then seen[name] = true; names[#names + 1] = name end
+    end
+    for name in pairs(live) do Add(name) end
+    if not isCurrent or next(live) == nil then
+        for name, payload in pairs(store) do
+            if type(name) == "string" and name ~= "First Aid" and type(payload) == "table"
+                and type(payload.recipes) == "table" then
+                Add(NormalizeProfessionName(name) or name)
+            end
+        end
+        if isCurrent then
+            for _, name in ipairs(SetToSortedList(GetKnownProfessionStore().professions)) do Add(name) end
+        end
+    end
+
+    local now = time()
+    local rows = {}
+    for _, name in ipairs(names) do
+        local liveInfo = live[name] or {}
+        local row = {
+            name = name,
+            label = DisplayProfessionName(name),
+            rank = liveInfo.rank,
+            maxRank = liveInfo.max,
+            isCurrent = isCurrent,
+        }
+        if liveInfo.gathering or GATHERING_PROFESSIONS[name] then
+            row.state = "gathering"
+            row.hint = (name == "Mining") and "Smelting shows under Process" or "Gathering skill"
+        else
+            local payload = store[name] or (name == "First Aid (Health)" and store["First Aid"])
+            local valid = type(payload) == "table"
+                and tonumber(payload.cacheVersion) == CRAFT_RECIPE_CACHE_VERSION
+                and type(payload.recipes) == "table" and #payload.recipes > 0
+            row.usesCraftWindow = name == "Enchanting" and HasCraftAPI()
+            if not valid then
+                row.state = "missing"
+                row.recipes = 0
+                row.hint = isCurrent and ("Open " .. row.label .. " to scan")
+                    or "Log in on this character and open it"
+            else
+                row.recipes = #payload.recipes
+                row.updatedAt = tonumber(payload.updatedAt) or 0
+                row.scannedRank = tonumber(payload.skillRank)
+                if not row.rank then row.rank = row.scannedRank end
+                local rankUp = isCurrent and liveInfo.rank and row.scannedRank
+                    and liveInfo.rank > row.scannedRank
+                if rankUp then
+                    row.state = "stale"
+                    row.hint = string.format("Skill went up since the scan (%d to %d). Reopen it to refresh.",
+                        row.scannedRank, liveInfo.rank)
+                elseif row.updatedAt > 0 and (now - row.updatedAt) > STALE_SCAN_SECONDS then
+                    row.state = "stale"
+                    row.hint = isCurrent and "Scanned over a week ago. Reopen it to refresh."
+                        or "Scanned over a week ago. Log in on this character to refresh."
+                else
+                    row.state = "ready"
+                    row.hint = "Up to date"
+                end
+            end
+        end
+        rows[#rows + 1] = row
+    end
+    local order = { missing = 1, stale = 2, ready = 3, gathering = 4 }
+    table.sort(rows, function(a, b)
+        if order[a.state] ~= order[b.state] then return order[a.state] < order[b.state] end
+        return a.label < b.label
+    end)
+    return rows
+end
+
+-- Counts for the header line: crafting professions ready vs needing a scan.
+function MarketSync.GetProfessionScanSummary(characterKey)
+    local ready, needs = 0, 0
+    for _, row in ipairs(MarketSync.GetProfessionScanStatus(characterKey)) do
+        if row.state == "ready" then ready = ready + 1
+        elseif row.state == "missing" or row.state == "stale" then needs = needs + 1 end
+    end
+    return ready, needs
 end
 
 local HEALTH_POTION_IDS = {
@@ -1411,6 +1705,13 @@ local function EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID, p
         highestGross and math.floor(NetMainAuctionValue(highestGross)) or nil
 end
 
+-- Forever has its own disenchant odds, which MarketSync does not have yet; its
+-- estimates come from the Classic/TBC table and are shown as approximate.
+MarketSync.FOREVER_DISENCHANT_NOTE = "Approximate: Forever uses its own disenchant table, which MarketSync does not have yet."
+function MarketSync.IsDisenchantApproximate()
+    return MarketSync.GetClientFlavor ~= nil and MarketSync.GetClientFlavor() == "forever"
+end
+
 -- Public API for UI or other modules; retain the existing positional returns.
 function MarketSync.EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID)
     return EstimateDisenchantEV(quality, itemLevel, classOrWeapon, itemID)
@@ -1694,6 +1995,16 @@ function MarketSync.UpsertProcessingCustomSelection(selection)
         marginPct = tonumber(selection.marginPct) or 0,
         minCraftMarginGold = tonumber(selection.minCraftMarginGold) or 0,
     }
+    if type(selection.filters) == "table" then
+        local f = selection.filters
+        payload.filters = {
+            onlyProfitable = f.onlyProfitable == true,
+            hideStale = f.hideStale == true,
+            madeBy = NormalizeProcessType(f.madeBy),
+            minLevel = tonumber(f.minLevel),
+            maxLevel = tonumber(f.maxLevel),
+        }
+    end
 
     for i, existing in ipairs(store) do
         if existing and existing.id == id then
@@ -3089,7 +3400,7 @@ end
 -- ================================================================
 -- TOOLTIP HOOKS (Disenchanting, Milling, Prospecting, Crafting)
 -- ================================================================
-local function OnTooltipSetItem(tooltip, data)
+local function AddPriceLines(tooltip, data)
     if not MarketSyncDB or not tooltip then return end
 
     local name, link
@@ -3151,7 +3462,13 @@ local function OnTooltipSetItem(tooltip, data)
 
     -- 0. Native MarketSync AH Price & Scan Freshness (for Standalone or unhooked items)
     if MarketSyncDB.EnableTooltipAuctionPrice ~= false then
-        local priceInfo = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(link or itemID)
+        local priceInfo = MarketSync.GetItemPriceAndScanInfo
+            and MarketSync.GetItemPriceAndScanInfo(link or itemID, { allowDataPack = true })
+        -- With the details key held, say when there is no price, so a missing line
+        -- reads as "not scanned yet" rather than as a broken tooltip.
+        if isShiftDetails and not (priceInfo and ((priceInfo.price or 0) > 0 or (priceInfo.neutralPrice or 0) > 0)) then
+            tooltip:AddDoubleLine("|cffffd700MarketSync AH:|r", "|cff888888No scan data|r")
+        end
         if priceInfo and priceInfo.price and priceInfo.price > 0 then
             local hasAuctionatorLine = false
             if Auctionator and Auctionator.API and tooltip.NumLines and tooltip.GetName then
@@ -3395,10 +3712,11 @@ local function OnTooltipSetItem(tooltip, data)
                 MarketSync.EstimateDisenchantEV(quality, ilvl, classID, itemID)
             
             local isShift = MarketSync.IsDetailsKeyDown and MarketSync.IsDetailsKeyDown()
-            
+            local approximate = MarketSync.IsDisenchantApproximate()
+
             if not isShift then
                 if ev and ev > 0 then
-                    tooltip:AddDoubleLine("|cffffd700Disenchant Value:|r",
+                    tooltip:AddDoubleLine(approximate and "|cffffd700Disenchant Value (approx.):|r" or "|cffffd700Disenchant Value:|r",
                         string.format("|cff00ff00%s|r", MarketSync.FormatMoney(ev)))
                 end
             else
@@ -3464,6 +3782,9 @@ local function OnTooltipSetItem(tooltip, data)
                             missing == 1 and "" or "s"), 1, 0.5, 0.5)
                     end
                 end
+                if approximate and (addedHeader or (ev and ev > 0)) then
+                    tooltip:AddLine(MarketSync.FOREVER_DISENCHANT_NOTE, 1, 0.67, 0, true)
+                end
             end
         end
     end
@@ -3486,15 +3807,117 @@ function MarketSync.HasExtraTooltipDetails(itemID, link)
     return false
 end
 
-if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
-    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, OnTooltipSetItem)
-else
-    if GameTooltip and GameTooltip.HookScript then
-        GameTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+-- What the price tooltip did last, for /ms tooltip.
+MarketSync.TooltipStats = MarketSync.TooltipStats or { calls = 0, installedVia = nil }
+
+local function OnTooltipSetItem(tooltip, data)
+    if not tooltip then return end
+    -- Both hook paths may fire for one tooltip on some clients; add the lines once
+    -- per item and details-key state. OnTooltipCleared and the details-key refresh
+    -- reset this.
+    local link
+    if tooltip.GetItem then
+        local _, itemLink = tooltip:GetItem()
+        link = itemLink
     end
-    if ItemRefTooltip and ItemRefTooltip.HookScript then
-        ItemRefTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+    if MarketSync.IsSecretValue and MarketSync.IsSecretValue(link) then link = nil end
+    local id = type(link) == "string" and link:match("item:([%-%d:]+)")
+    if not id and data and not (MarketSync.IsSecretValue and MarketSync.IsSecretValue(data.id)) then
+        id = data.id
     end
+    local stamp = tostring(id and tostring(id):match("^%-?%d+") or "") .. ((MarketSync.IsDetailsKeyDown
+        and MarketSync.IsDetailsKeyDown()) and ":shift" or ":norm")
+    if tooltip.MarketSyncProcessingItem == stamp then return end
+    tooltip.MarketSyncProcessingItem = stamp
+    local stats = MarketSync.TooltipStats
+    stats.calls = stats.calls + 1
+    local before = tooltip and tooltip.NumLines and tooltip:NumLines() or 0
+    local ok, err = pcall(AddPriceLines, tooltip, data)
+    local after = tooltip and tooltip.NumLines and tooltip:NumLines() or 0
+    stats.lastLinesAdded = after - before
+    stats.lastAt = GetTime and GetTime() or nil
+    if not ok then
+        stats.lastError = tostring(err)
+        if MarketSync.Debug then MarketSync.Debug("Price tooltip error: " .. tostring(err)) end
+    end
+    -- Resize for the added lines (other tooltip addons may already have shown it).
+    if after > before and tooltip.Show then tooltip:Show() end
+end
+MarketSync.PriceTooltipHook = OnTooltipSetItem
+
+-- Installed at login, after every addon has registered its own hooks.
+-- Both hook paths are installed: the Anniversary client has TooltipDataProcessor,
+-- but its item tooltips never run its callbacks (the hook ran 0 times there),
+-- while OnTooltipSetItem still fires. The stamp in OnTooltipSetItem keeps a
+-- client that fires both from adding the lines twice.
+function MarketSync.InstallPriceTooltip()
+    local stats = MarketSync.TooltipStats
+    if stats.installedVia then return end
+    local paths = {}
+    if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, OnTooltipSetItem)
+        paths[#paths + 1] = "TooltipDataProcessor"
+    end
+    for _, tip in ipairs({ GameTooltip, ItemRefTooltip }) do
+        if tip and tip.HookScript then
+            -- Modern clients refuse OnTooltipSetItem; that refusal is expected.
+            if pcall(tip.HookScript, tip, "OnTooltipSetItem", OnTooltipSetItem) then
+                if tip == GameTooltip then paths[#paths + 1] = "OnTooltipSetItem" end
+            end
+            pcall(tip.HookScript, tip, "OnTooltipCleared", function(self) self.MarketSyncProcessingItem = nil end)
+        end
+    end
+    stats.installedVia = #paths > 0 and table.concat(paths, " + ") or nil
+end
+
+-- /ms tooltip: whether the price hook is installed and running, and what the
+-- price lookup finds for the item in the open tooltip.
+function MarketSync.PrintTooltipDiagnostics()
+    local function Say(msg) print("|cffffd700[MarketSync tooltip]|r " .. msg) end
+    local stats = MarketSync.TooltipStats or { calls = 0 }
+    local now = GetTime and GetTime() or 0
+    Say(string.format("Price hook: %s; ran %d time(s)%s.",
+        stats.installedVia and ("installed via " .. stats.installedVia) or "|cffff4040not installed|r",
+        stats.calls or 0,
+        stats.lastAt and string.format("; last run %.0fs ago added %d line(s)", now - stats.lastAt, stats.lastLinesAdded or 0) or ""))
+    if stats.lastError then Say("|cffff4040Last error:|r " .. stats.lastError) end
+    local db = MarketSyncDB or {}
+    Say(string.format("Settings: auction price %s, craft cost %s, details key %s.",
+        db.EnableTooltipAuctionPrice == false and "off" or "on",
+        db.EnableTooltipCraftCost == false and "off" or "on",
+        db.TooltipModifier or "SHIFT"))
+    local name, link
+    if GameTooltip and GameTooltip.IsShown and GameTooltip:IsShown() and GameTooltip.GetItem then
+        name, link = GameTooltip:GetItem()
+    end
+    if not link then
+        Say("Hover an item so its tooltip is open, then run /ms tooltip again to check its price.")
+        return
+    end
+    local itemID = tonumber(tostring(link):match("item:(%d+)"))
+    local realmKey = MarketSync.GetFactionRealmKey and MarketSync.GetFactionRealmKey() or "?"
+    Say(string.format("Item: %s (ID %s), realm data %s.", tostring(name), tostring(itemID), tostring(realmKey)))
+    local info = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(link, { allowDataPack = true })
+    if info and info.price then
+        local format = MarketSync.FormatMoney or tostring
+        Say(string.format("Price: %s from %s, scanned %s.", format(info.price), tostring(info.source),
+            MarketSync.FormatRelativeTime and MarketSync.FormatRelativeTime(info.scanTime, info.ageDays) or "?"))
+    else
+        Say("No MarketSync price for this item in this realm's data.")
+    end
+end
+
+do
+    local installer = CreateFrame and CreateFrame("Frame")
+    if installer and installer.RegisterEvent and installer.SetScript then
+        installer:RegisterEvent("PLAYER_LOGIN")
+        installer:SetScript("OnEvent", function(self)
+            if self.UnregisterEvent then self:UnregisterEvent("PLAYER_LOGIN") end
+            MarketSync.InstallPriceTooltip()
+        end)
+    end
+    -- Loaded after login (e.g. a load-on-demand reload path): install now.
+    if IsLoggedIn and IsLoggedIn() then MarketSync.InstallPriceTooltip() end
 end
 -- ================================================================
 -- ITEM HISTORY DATA EXTRACTION
@@ -3525,21 +3948,20 @@ local function ResolveHistoryDBKey(input)
     return input
 end
 
--- Merged Data Pack record for one item, across every loaded partition.
+-- Data Pack record for one item in the partition this character plays on
+-- (e.g. "pvp@Alliance", "us@Commodities", or "pagle@CrossFaction"). Other
+-- rulesets, regions, and factions are never mixed in. h[scanDay] holds every
+-- hourly snapshot in the granular "offset:price:qty" format, so the Data Pack
+-- gets the same history as in-game scans.
 function MarketSync.GetDataPackRecord(dbKey)
-    local packDB = _G.MarketSyncDataDB
-    if type(packDB) ~= "table" then return nil end
-    local merged
-    for _, part in pairs(packDB) do
-        local rec = type(part) == "table" and part[dbKey]
-        if type(rec) == "table" and type(rec.h) == "table" then
-            merged = merged or { h = {}, l = {}, a = {} }
-            for day, price in pairs(rec.h) do merged.h[day] = price end
-            for day, low in pairs(rec.l or {}) do merged.l[day] = low end
-            for day, qty in pairs(rec.a or {}) do merged.a[day] = qty end
-        end
+    if not dbKey then return nil end
+    local part
+    if MarketSync.EnsureCurrentDataPack then
+        part = MarketSync.EnsureCurrentDataPack()
     end
-    return merged
+    local rec = type(part) == "table" and part[dbKey]
+    if type(rec) == "table" and type(rec.h) == "table" then return rec end
+    return nil
 end
 
 -- opts.source selects the history: "local" (Personal, Guild and Auctionator,
@@ -3553,7 +3975,7 @@ function MarketSync.GetItemHistory(dbKey, opts)
         pData = rdb.NeutralData and rdb.NeutralData[dbKey]
         meta = rdb.NeutralMeta and rdb.NeutralMeta[dbKey]
     elseif source == "datapack" then
-        priceData = MarketSync.GetDataPackRecord(dbKey)
+        pData = MarketSync.GetDataPackRecord(dbKey)
     else
         pData = MarketSyncDB and MarketSync.GetRealmDB and MarketSync.GetRealmDB().PersonalData and MarketSync.GetRealmDB().PersonalData[dbKey]
         priceData = Auctionator and Auctionator.Database and Auctionator.Database.db and Auctionator.Database.db[dbKey]
@@ -3670,6 +4092,10 @@ function MarketSync.GetItemHistory(dbKey, opts)
         end
     end
 
+    if source == "datapack" then
+        for _, entry in ipairs(history) do entry.source = "Data Pack" end
+    end
+
     -- Sort newest first (highest sortKey first)
     table.sort(history, function(a, b) return a.sortKey > b.sortKey end)
     return history
@@ -3723,4 +4149,116 @@ function MarketSync.GetGranularHistory(dbKey)
 
     table.sort(points, function(a, b) return a.timestamp < b.timestamp end)
     return points
+end
+
+-- ============================================================================
+-- Analytics history filter (pure functions, no frames)
+-- ============================================================================
+-- Filters the newest-first list from GetItemHistory. Modes:
+--   events  filter.count = number of newest observations (nil = all)
+--   date    filter.fromDay / filter.toDay = unix days, inclusive (nil = open end)
+--   week    filter.weekIndex = week from AnalyticsWeekIndex (Monday-based)
+--   time    filter.bucketOffset = 0..47, one half-hour slot on every day
+-- Day values use unix days, the same scale as MarketSync.ScanDayToTimestamp.
+
+local ANALYTICS_DAYS_BEFORE_MONTH = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 }
+local ANALYTICS_MONTH_LENGTH = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+
+-- Unix day for a Gregorian date (days since 1970-01-01, UTC).
+local function CivilToUnixDay(y, m, d)
+    local yy = m <= 2 and (y - 1) or y
+    local era = math.floor(yy / 400)
+    local yoe = yy - era * 400
+    local mp = (m + 9) % 12
+    local doy = math.floor((153 * mp + 2) / 5) + d - 1
+    local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+    return era * 146097 + doe - 719468
+end
+
+-- Unix day for a scan day in either scale (small values are Auctionator-epoch days).
+function MarketSync.UnixDayOfScanDay(scanDay)
+    local day = tonumber(scanDay)
+    if not day then return nil end
+    if day > 10000 then return day end
+    return math.floor(MarketSync.ScanDayToTimestamp(day) / 86400)
+end
+
+-- Parses "YYYY-MM-DD" to a unix day, or nil when the text is not a real date.
+function MarketSync.ParseAnalyticsDate(text)
+    local y, m, d = tostring(text or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return nil end
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if m < 1 or m > 12 or d < 1 then return nil end
+    local leap = (y % 4 == 0 and y % 100 ~= 0) or y % 400 == 0
+    local maxDay = ANALYTICS_MONTH_LENGTH[m] + ((m == 2 and leap) and 1 or 0)
+    if d > maxDay then return nil end
+    return CivilToUnixDay(y, m, d)
+end
+
+-- Parses "HH:MM" (UTC) to a half-hour bucket offset 0..47, or nil.
+function MarketSync.ParseAnalyticsTime(text)
+    local h, mi = tostring(text or ""):match("^(%d%d?):(%d%d)$")
+    if not h then return nil end
+    h, mi = tonumber(h), tonumber(mi)
+    if h > 23 or mi > 59 then return nil end
+    return h * 2 + math.floor(mi / 30)
+end
+
+-- Monday-based week index for a unix day (1970-01-01 was a Thursday).
+function MarketSync.AnalyticsWeekIndex(unixDay)
+    return math.floor((unixDay + 3) / 7)
+end
+
+-- Unix day of the Monday that starts a week index.
+function MarketSync.AnalyticsWeekStartDay(weekIndex)
+    return weekIndex * 7 - 3
+end
+
+-- Sorted list of week indexes that have at least one observation.
+function MarketSync.ListAnalyticsWeeks(history)
+    local seen, weeks = {}, {}
+    for _, entry in ipairs(history or {}) do
+        local unixDay = MarketSync.UnixDayOfScanDay(entry.day)
+        if unixDay then
+            local w = MarketSync.AnalyticsWeekIndex(unixDay)
+            if not seen[w] then
+                seen[w] = true
+                weeks[#weeks + 1] = w
+            end
+        end
+    end
+    table.sort(weeks)
+    return weeks
+end
+
+function MarketSync.FilterAnalyticsHistory(history, filter)
+    history = history or {}
+    filter = filter or {}
+    local mode = filter.mode or "events"
+    local out = {}
+
+    if mode == "events" then
+        local limit = filter.count or #history
+        for i = 1, math.min(limit, #history) do
+            out[#out + 1] = history[i]
+        end
+        return out
+    end
+
+    for _, entry in ipairs(history) do
+        local unixDay = MarketSync.UnixDayOfScanDay(entry.day)
+        local keep = false
+        if unixDay then
+            if mode == "date" then
+                keep = (not filter.fromDay or unixDay >= filter.fromDay)
+                    and (not filter.toDay or unixDay <= filter.toDay)
+            elseif mode == "week" then
+                keep = filter.weekIndex ~= nil and MarketSync.AnalyticsWeekIndex(unixDay) == filter.weekIndex
+            elseif mode == "time" then
+                keep = entry.isGranular == true and entry.bucketOffset == filter.bucketOffset
+            end
+        end
+        if keep then out[#out + 1] = entry end
+    end
+    return out
 end

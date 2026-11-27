@@ -868,8 +868,11 @@ function S.StartFullScan()
 
     -- Some clients accept ReplicateItems without returning data or firing the
     -- result event. Avoid leaving the scanner stuck in an active 0% state.
+    -- Forever's full snapshot can take well over 30s to arrive, so the wait
+    -- is long; closing the Auction House still cancels it at once.
     local requestGeneration = S.Generation
-    C_Timer.After(30, function()
+    S.SnapshotRequestedAt = now
+    C_Timer.After(120, function()
         if S.Active and S.Generation == requestGeneration and not S.ReplicateProcessing then
             S.Cancel("Full scan timed out waiting for the auction snapshot")
             S.Progress.current = 0
@@ -879,6 +882,12 @@ function S.StartFullScan()
     end)
 
     return true
+end
+
+-- True while a full scan has asked the server for its snapshot and the
+-- snapshot has not arrived yet. UI uses this to show a waiting animation.
+function S.IsWaitingForSnapshot()
+    return S.Active == true and S.FullScanMode == true and not S.ReplicateProcessing
 end
 
 -- ================================================================

@@ -1,8 +1,8 @@
 const path = require('path');
 const { createAddonSim } = require('./wow_addon_sim');
 const sim = createAddonSim({ flavor: 'forever', interface: 16001 });
-for (const file of ['Config.lua', 'Favorites.lua', 'Ledger/CraftLedger.lua',
-  'Ledger/PurchaseList.lua', 'Ledger/ItemLedger.lua', 'InventoryTracking.lua', 'Ledger/TransactionTracking.lua']) {
+for (const file of ['Config.lua', 'Favorites.lua', '../MarketSyncLedger/CraftLedger.lua',
+  '../MarketSyncLedger/PurchaseList.lua', '../MarketSyncLedger/ItemLedger.lua', 'InventoryTracking.lua', '../MarketSyncLedger/TransactionTracking.lua']) {
   sim.loadLuaFile(path.join(__dirname, '../MarketSync', file));
 }
 sim.run(String.raw`

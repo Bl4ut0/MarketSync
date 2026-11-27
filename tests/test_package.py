@@ -38,7 +38,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn("MarketSync/Media/LegacyStoneCanvas.tga", names)
                 self.assertFalse(any(name.startswith("MarketSync/Ledger/") for name in names))
                 toc = archive.read("MarketSync/MarketSync.toc").decode()
-                self.assertIn("## AllowLoadGameType: camelot, classic, tbc", toc)
+                self.assertIn("## AllowLoadGameType: camelot, mainline, classic, tbc, wrath, cata, mists", toc)
                 self.assertIn("LegacyScanner.lua", toc)
                 self.assertIn("MarketSync/LegacyScanner.lua", names)
                 self.assertIn("PostingWarning.lua", toc)

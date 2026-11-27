@@ -6,6 +6,15 @@ function T.IsEnabled()
     return MarketSyncDB and MarketSyncDB.ShowItemsOnOtherCharacters ~= false
 end
 
+-- Optional holdings provider (the MarketSyncLedger addon) is read at call time from
+-- MarketSync.InventoryHoldingsProvider = { IsActive = fn, Holdings = fn }. Core stays
+-- the single scanner. While the provider reports active, snapshots go to it and
+-- tooltips read from it; otherwise core keeps its own store and tooltips read that.
+local function ProviderActive()
+    local p = MarketSync.InventoryHoldingsProvider
+    return p ~= nil and p.IsActive() == true
+end
+
 local function Owner()
     local name = UnitName("player")
     local realm = GetRealmName and GetRealmName()
@@ -67,6 +76,8 @@ end
 local function Characters()
     if not MarketSyncDB then return end
     if type(MarketSyncDB.InventoryTracking) ~= "table" then
+        -- One-time migration from the legacy ledger copy. That copy stops updating once
+        -- MarketSyncLedger owns the records, so it only seeds the first run.
         local inventory = {}
         local ledger = MarketSyncDB.ItemLedger
         for _, character in pairs(type(ledger) == "table" and type(ledger.characters) == "table" and ledger.characters or {}) do
@@ -145,6 +156,7 @@ end
 function T.Holdings(itemID)
     local holdings = {}
     if not T.IsEnabled() then return holdings end
+    if ProviderActive() then return MarketSync.InventoryHoldingsProvider.Holdings(itemID) or holdings end
     for _, group in pairs(InventoryOwners(Characters() or {})) do
         for location, snapshot in pairs(group.storages) do
             local qty = snapshot.quantities[itemID]
@@ -165,11 +177,13 @@ end
 local function Save(storage, items, options)
     local owner = TrackingOwner()
     if not owner then return end
-    local characters = Characters()
-    characters[owner] = characters[owner] or {}
-    characters[owner][storage] = {
-        at = time(), complete = not options or options.complete ~= false, quantities = Quantities(items),
-    }
+    if not ProviderActive() then
+        local characters = Characters()
+        characters[owner] = characters[owner] or {}
+        characters[owner][storage] = {
+            at = time(), complete = not options or options.complete ~= false, quantities = Quantities(items),
+        }
+    end
     if T.OnSnapshot then T.OnSnapshot(storage, items, options) end
 end
 
@@ -391,10 +405,14 @@ function T.InstallTooltips()
             self.MarketSyncProcessingShift = nil
         end) end
     end
-    if TooltipDataProcessor and Enum and Enum.TooltipDataType then
+    -- Both paths: the Anniversary client has TooltipDataProcessor but its item
+    -- tooltips only fire OnTooltipSetItem. Tooltip() skips a repeat for the same
+    -- item and details-key state, so a client that fires both adds lines once.
+    if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, Tooltip)
-    else
-        for _, tip in pairs({ GameTooltip, ItemRefTooltip }) do if tip and tip.HookScript then tip:HookScript("OnTooltipSetItem", Tooltip) end end
+    end
+    for _, tip in pairs({ GameTooltip, ItemRefTooltip }) do
+        if tip and tip.HookScript then pcall(tip.HookScript, tip, "OnTooltipSetItem", Tooltip) end
     end
 end
 

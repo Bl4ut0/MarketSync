@@ -1597,7 +1597,7 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     -- Test dynamic resizing when a tab is hidden
     MarketSyncDB.PassiveSync = false
     mainFrame.RefreshTabVisibility()
-    assert(not mainFrame.sourceButtons.guild:IsShown(), "Guild source must be hidden when PassiveSync is false")
+    assert(mainFrame.sourceOptions.guild.available == false, "Guild source must be hidden when PassiveSync is false")
     assert(mainFrame.tabs[1]:IsShown(), "Main tab stays visible when PassiveSync is false")
     MarketSyncDB.PassiveSync = true
     mainFrame.RefreshTabVisibility()
@@ -1641,7 +1641,8 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     assert(type(MarketSync.OpenSettings) == "function", "OpenSettings should be exposed")
     assert(type(MarketSync.GetEstimatedRAMUsage) == "function", "GetEstimatedRAMUsage should be exposed")
     local estMB, totalItems = MarketSync.GetEstimatedRAMUsage()
-    assert(type(estMB) == "number" and estMB >= 0.5, "Estimated RAM should be a positive number >= 0.5 MB")
+    -- The estimate counts only index rows in memory, so it can be 0 before any index is built.
+    assert(type(estMB) == "number" and estMB >= 0, "Estimated RAM should be a number >= 0 MB")
     assert(type(MarketSync.ShowSmartRulesDialog) == "function", "ShowSmartRulesDialog should be exposed")
     assert(type(MarketSync.ShowUserManagementDialog) == "function", "ShowUserManagementDialog should be exposed")
     -- Call them to verify safety without crashing
@@ -1682,8 +1683,12 @@ test('MainFrame registers 7 tabs with Analytics, Processing, Alerts, and redirec
     MarketSyncDB.MainSource = nil
     MarketSync.ApplyMainSource(nil)
     assert(mainFrame.mainSource == "latest", "Main tab should default to Latest")
-    assert(mainFrame.sourceButtons.latest ~= nil, "Latest source button should exist")
+    assert(mainFrame.sourceOptions.latest ~= nil, "Latest source option should exist")
+    assert(mainFrame.sourceSelector ~= nil and mainFrame.sourceSelector._menu,
+      "The source selector is the shared native dropdown (button plus Blizzard menu)")
+    assert(mainFrame.sourceSelector:GetText():find("Latest", 1, true), "Selector shows Latest: " .. tostring(mainFrame.sourceSelector:GetText()))
     MarketSync.ApplyMainSource("personal")
+    assert(mainFrame.sourceSelector:GetText():find("Personal", 1, true), "Selector shows the chosen source")
     assert(mainFrame.mainSource == "personal" and MarketSyncDB.MainSource == "personal", "Personal should be saved as the source")
     MarketSync.ApplyMainSource("latest")
     assert(MarketSyncDB.MainSource == "latest", "Latest should be saved as the source")
@@ -1895,6 +1900,17 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     MarketSync.BuildProcessingCacheSnapshot = function()
       return { prices = { [10940] = { itemID = 10940, name = "Strange Dust", price = 100 } } }
     end
+    MarketSync.FilterAnalyticsHistory = function(history, filter)
+      local out, n = {}, (filter and filter.count) or #(history or {})
+      for i = 1, math.min(n, #(history or {})) do out[i] = history[i] end
+      return out
+    end
+    MarketSync.ListAnalyticsWeeks = function() return {} end
+    MarketSync.ParseAnalyticsDate = function() return nil end
+    MarketSync.ParseAnalyticsTime = function() return nil end
+    MarketSync.AnalyticsWeekIndex = function() return 0 end
+    MarketSync.AnalyticsWeekStartDay = function() return 0 end
+    MarketSync.UnixDayOfScanDay = function(d) return d end
     UIParent = {}
     C_Timer = { After = function() end }
     createdFrames = {}
@@ -1993,26 +2009,26 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
   const check = `
     -- Standalone MainFrame processing panel
     local procMain = MarketSync.CreateProcessingPanel(MarketSync.MainFrame)
-    assert(procMain.resultRows[1].width == 796, "MainFrame processing table should use the full content width")
-    assert(#procMain.resultRows == 6, "MainFrame processing rows should fit below the control strip")
-    assert(procMain.leftBottomBox:IsShown() == false and procMain.savedButton ~= nil,
-      "Saved analyses should be a closed popout, not a permanent sidebar")
+    -- Workbench layout: settings rail on the left, results table beside it.
+    assert(procMain.resultRows[1].width == 618, "MainFrame processing table should fill the space beside the rail, got " .. tostring(procMain.resultRows[1].width))
+    assert(#procMain.resultRows == 8, "MainFrame processing rows should fit above the footer, got " .. tostring(#procMain.resultRows))
+    assert(procMain.railBox and procMain.settingsView and procMain.detailsView,
+      "Processing needs a rail with settings and details views")
+    assert(procMain.savedBox and procMain.savedBox.parent == procMain.settingsView and procMain.saveViewButton,
+      "Saved views sit inside the rail instead of a popout")
     assert(procMain.targetInputBox.scripts.OnReceiveDrag,
       "Portable Target Material input should accept item drops")
-    assert(procMain.resultRows[1].points[1][5] == -169,
-      "Portable result rows should start below the compact control strip")
-    procMain.savedButton.scripts.OnClick()
-    assert(procMain.leftBottomBox:IsShown(), "Saved button should open the popout")
-    procMain.savedButton.scripts.OnClick()
-    assert(not procMain.leftBottomBox:IsShown(), "Saved button should close the popout")
+    assert(procMain.resultRows[1].points[1][5] == -88,
+      "Portable result rows should start below the table header, got " .. tostring(procMain.resultRows[1].points[1][5]))
+    assert(procMain.resultRows[1].points[1][4] == 200, "Rows start right of the rail")
 
     -- Embedded AH processing panel
     local ahProcContainer = CreateFrame("Frame", "AHProcContainer")
     ahProcContainer:SetSize(756, 447)
     local procAH = MarketSync.CreateProcessingPanel(ahProcContainer)
-    assert(procAH.resultRows[1].width == 722, "Embedded AH processing table should use the full content width")
-    assert(#procAH.resultRows == 7, "Embedded AH processing rows should reserve control and footer space")
-    assert(16 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
+    assert(procAH.resultRows[1].width == 546, "Embedded AH processing table should fill the space beside the rail, got " .. tostring(procAH.resultRows[1].width))
+    assert(#procAH.resultRows == 9, "Embedded AH processing rows should reserve header and footer space, got " .. tostring(#procAH.resultRows))
+    assert(196 + procAH.resultRows[1].width <= 756, "Processing table must fit inside AH width <= 756px")
 
     -- A bag item dropped on Target Material resolves by ID and searches at once.
     local droppedSearchID, clearedCursor = nil, false
@@ -2033,8 +2049,9 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     local classicHost = CreateFrame("Frame", "ClassicAHProcessingHost")
     classicHost:SetSize(900, 400)
     local classicProc = MarketSync.CreateProcessingPanel(classicHost)
-    assert(classicProc.resultRows[1].width == 866, "Classic AH processing should fill its available width")
-    assert(#classicProc.resultRows == 6, "Classic AH processing rows must stay above the footer")
+    assert(classicProc.resultRows[1].width == 690, "Classic AH processing should fill its available width, got " .. tostring(classicProc.resultRows[1].width))
+    assert(#classicProc.resultRows == 8, "Classic AH processing rows must stay above the footer, got " .. tostring(#classicProc.resultRows))
+    assert(#classicProc.customRows == 2, "The shorter Classic rail keeps two saved-view rows")
 
     -- Broad Craft Profit results use only saved item metadata. They must not
     -- request every missing reagent from the server while building rows.
@@ -2121,8 +2138,11 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
 
     -- Standalone MainFrame alerts panel
     local alertsMain = MarketSync.CreateNotificationsPanel(MarketSync.MainFrame)
-    assert(alertsMain.rows[1].width == 576, "MainFrame alerts row width should be 576, got: " .. tostring(alertsMain.rows[1].width))
-    assert(#alertsMain.rows == 9, "MainFrame alerts rows should be 9, got: " .. tostring(#alertsMain.rows))
+    -- Workbench layout: rail on the left, table beside it.
+    assert(alertsMain.rows[1].width == 610, "MainFrame alerts row width should be 610, got: " .. tostring(alertsMain.rows[1].width))
+    assert(#alertsMain.rows == 11, "MainFrame alerts rows should be 11, got: " .. tostring(#alertsMain.rows))
+    assert(alertsMain.railViews and alertsMain.railViews.watch and alertsMain.railViews.edit
+      and alertsMain.railViews.history and alertsMain.railViews.detail, "Alerts rail needs its four views")
 
     local menuButtons = 0
     local materialMenus = 0
@@ -2162,10 +2182,16 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     local ahAlertsContainer = CreateFrame("Frame", "AHAlertsContainer")
     ahAlertsContainer:SetSize(756, 447)
     local alertsAH = MarketSync.CreateNotificationsPanel(ahAlertsContainer)
-    assert(alertsAH.rows[1].width == 542, "Embedded AH alerts row width should be 542, got: " .. tostring(alertsAH.rows[1].width))
+    assert(alertsAH.rows[1].width == 538, "Embedded AH alerts row width should be 538, got: " .. tostring(alertsAH.rows[1].width))
     assert(#alertsAH.rows == 12, "Embedded AH alerts rows should be 12, got: " .. tostring(#alertsAH.rows))
-    -- Total row right offset: RESULTS_X (198) + ROW_WIDTH (550) = 748px <= 756px
-    assert(198 + alertsAH.rows[1].width <= 756, "Alerts table must fit inside AH width <= 756px")
+    -- Rows start at RESULTS_X (196) + 4 inset; the table must end inside 756px.
+    assert(200 + alertsAH.rows[1].width <= 756, "Alerts table must fit inside AH width <= 756px")
+
+    -- One price box accepts gold/silver/copper text.
+    assert(MarketSync.ParseAlertMoneyText("4g 50s") == 45000, "4g 50s should parse")
+    assert(MarketSync.ParseAlertMoneyText("450s") == 45000, "450s should parse")
+    assert(MarketSync.ParseAlertMoneyText("4.5") == 45000, "Bare numbers are gold")
+    assert(MarketSync.ParseAlertMoneyText("12c") == 12, "Copper should parse")
 
     -- List import opens a draft editor and only writes on confirmation.
     local saved = {}
@@ -2242,16 +2268,16 @@ test('Processing and Alerts panels adjust widths responsively for Auction House 
     assert(not analyticsMain.sidebarCollapsed and analyticsMain.leftInset.shown,
       "List handle should reopen the sidebar")
     analyticsMain:SetGraphZoom(12)
-    assert(analyticsMain.graphPointLimit == 12 and #analyticsMain.zoomButtons == 4,
-      "Portable Analytics should offer four chart zoom levels")
+    assert(analyticsMain.filter.mode == "events" and analyticsMain.filter.count == 12,
+      "Portable Analytics should set the Events filter to the newest 12 observations")
     MarketSync.ScanDayToDate = function(day) return tostring(day) end
     local sampleHistory = {}
     for i = 1, 30 do sampleHistory[i] = { day = i, price = 100 + i } end
     analyticsMain.currentHistory = sampleHistory
-    analyticsMain.graph:Plot(sampleHistory, analyticsMain.graphPointLimit)
+    analyticsMain:ApplyFilter()
     assert(analyticsMain.graph.dotCursor == 12, "Chart zoom should limit plotted observations")
     analyticsMain.graph.scripts.OnMouseWheel(analyticsMain.graph, -1)
-    assert(analyticsMain.graphPointLimit == 24 and analyticsMain.graph.dotCursor == 24,
+    assert(analyticsMain.filter.count == 24 and analyticsMain.graph.dotCursor == 24,
       "Mouse wheel should zoom out to more observations")
 
     -- Embedded AH analytics panel
@@ -2422,7 +2448,7 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
     realmDB.NeutralData = { ["item:1003"] = { h = {} } }
     local estMB, totalItems, pCount, gCount, nCount = MarketSync.GetEstimatedRAMUsage()
     assert(totalItems >= 3, "totalItems should be at least 3, got: " .. tostring(totalItems))
-    assert(estMB >= 0.5, "Estimated RAM should be >= 0.5 MB, got: " .. tostring(estMB))
+    assert(estMB >= 0, "Estimated RAM should be >= 0 MB, got: " .. tostring(estMB))
     local diagnostic = MarketSync.GetDiagnosticsSnapshot(true)
     assert(diagnostic.storage.personal.count == 2, "diagnostics should count personal storage")
     assert(diagnostic.storage.neutral.count == 1, "diagnostics should count neutral storage")
@@ -2477,8 +2503,10 @@ test('Low RAM mode defaults, browse notice with RAM estimate, and AddOn Settings
       local expandedHeight = _G.MarketSyncConfigCanvas.height
       MarketSyncDB.LowRamMode = true
       MarketSync.SettingsPanel.RefreshSettingsValues()
-      assert(_G.MarketSyncConfigCanvas.height == expandedHeight - 30,
-        "Scroll height must follow collapsed memory settings without clipping the final card")
+      -- Low RAM mode swaps "Pre-Build on Startup" for "Keep Main Tab Source Loaded",
+      -- so the memory card keeps the same height and nothing is clipped.
+      assert(_G.MarketSyncConfigCanvas.height == expandedHeight,
+        "Scroll height must follow the memory settings card without clipping the final card")
     end
     assert(StaticPopupDialogs.MARKETSYNC_CONFIRM_MARKET_DATA_RESET,
       "Reset Market Data must require a confirmation dialog")
@@ -2527,7 +2555,8 @@ test('Alerts scope and Craft popout controls are wired without old presets', () 
   assert(alerts.includes('SetThresholdCopper(math.floor(marketPrice))'), 'Market price default missing');
   assert(sidecar.includes('Sidecar.AddCraftRecipe') && sidecar.includes('Sidecar.ShowForMain'), 'Craft popout missing');
   assert(processing.includes('OpenCraftSidecar(row.itemID)'), 'Processing craft-list action missing');
-  assert(processing.includes('Interface\\\\Buttons\\\\UI-SortArrow'), 'Resync control should use an available UI texture');
+  assert(processing.includes('MarketSync.ShowProfessionStatus()') && !processing.includes('btnResyncProf'),
+    'Craft Profit should open the Professions window instead of the old resync icon');
   const main = fs.readFileSync(path.join(marketSyncDir, 'UI_Main.lua'), 'utf8');
   assert(main.includes('sidecarTab:SetSize(18, 38)') &&
     main.includes('sidecarArrow:SetText(">")') &&
@@ -2617,8 +2646,12 @@ test('RefreshActiveTooltip safely handles anonymous buttons, character slots, an
     throw new Error('Character slot test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
 
-  // 4. Test bag item button owner
+  // 4. Test bag item button owner whose slot holds the tooltip's item
   const testBagSlot = `
+    local slotLink = "|cffffffff|Hitem:4238::::::::60:::::|h[Linen Bag]|h|r"
+    C_Container = { GetContainerItemLink = function(bag, slot)
+      if bag == 2 and slot == 8 then return slotLink end
+    end }
     local bagButton = {
       GetBagID = function(self) return 2 end,
       GetID = function(self) return 8 end,
@@ -2627,9 +2660,39 @@ test('RefreshActiveTooltip safely handles anonymous buttons, character slots, an
     bagItemCalled = nil
     MarketSync.RefreshActiveTooltip()
     assert(bagItemCalled and bagItemCalled.bag == 2 and bagItemCalled.slot == 8, "SetBagItem must be called for bag button")
+
+    -- 5. A bag addon button with no live slot behind it (another character's bags):
+    -- the slot holds a different item, so the tooltip must reload from the link
+    -- instead of being cleared by SetBagItem.
+    slotLink = "|cffffffff|Hitem:9999::::::::60:::::|h[Other]|h|r"
+    bagItemCalled = nil
+    hyperlinkCalled = nil
+    MarketSync.RefreshActiveTooltip()
+    assert(bagItemCalled == nil, "SetBagItem must not be called when the slot holds another item")
+    assert(hyperlinkCalled ~= nil, "Tooltip must reload from the item link")
+    C_Container = nil
   `;
   if (lauxlib.luaL_dostring(L, to_luastring(testBagSlot)) !== lua.LUA_OK) {
     throw new Error('Bag slot test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
+  }
+
+  // 6. An owner under the mouse with its own OnEnter rebuilds the tooltip itself,
+  // which keeps other addons' lines.
+  const testOnEnter = `
+    local entered = 0
+    local addonButton = {
+      GetScript = function(self, name) if name == "OnEnter" then return function() entered = entered + 1 end end end,
+      IsMouseOver = function(self) return true end,
+      GetID = function(self) return 0 end,
+    }
+    GameTooltip.GetOwner = function(self) return addonButton end
+    hyperlinkCalled = nil
+    MarketSync.RefreshActiveTooltip()
+    assert(entered == 1, "Owner OnEnter must rebuild the tooltip")
+    assert(hyperlinkCalled == nil, "No link reload needed when OnEnter rebuilt the same item")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(testOnEnter)) !== lua.LUA_OK) {
+    throw new Error('OnEnter refresh test failed: ' + to_jsstring(lua.lua_tostring(L, -1)));
   }
 });
 
@@ -2714,6 +2777,53 @@ test('AST syntax check on all MarketSync Lua files', () => {
     } catch (err) {
       throw new Error(`Syntax error in ${f}: ${err.message}`);
     }
+  }
+});
+
+test('Alert sounds are real sound kits on every client and old choices migrate', () => {
+  const config = fs.readFileSync(path.join(marketSyncDir, 'Config.lua'), 'utf8');
+  const notif = fs.readFileSync(path.join(marketSyncDir, 'Notifications.lua'), 'utf8');
+  const soundStart = config.indexOf('local SOUND_CHOICES');
+  const soundEnd = config.indexOf('-- UI HELPER: CreateModernDialog', soundStart);
+  const playStart = notif.indexOf('function MarketSync.PlayNotificationSound');
+  const playEnd = notif.indexOf('function MarketSync.AcknowledgeNotifications', playStart);
+  assert(soundStart > 0 && soundEnd > soundStart && playStart > 0 && playEnd > playStart, 'Sound code not found');
+  // Named SOUNDKIT values shared by the Vanilla, TBC and Wrath interface files.
+  const L = lauxlib.luaL_newstate();
+  lualib.luaL_openlibs(L);
+  const script = `
+    SOUNDKIT = { RAID_WARNING = 8959, READY_CHECK = 8960, AUCTION_WINDOW_OPEN = 5274,
+      IG_QUEST_LIST_COMPLETE = 878, TELL_MESSAGE = 3081, LOOT_WINDOW_COIN_SOUND = 120,
+      MAP_PING = 3175, IG_PLAYER_INVITE = 880, ALARM_CLOCK_WARNING_3 = 12889 }
+    local valid = {}
+    for _, id in pairs(SOUNDKIT) do valid[id] = true end
+    MarketSync = {}
+    ${config.slice(soundStart, soundEnd)}
+    ${notif.slice(playStart, playEnd)}
+    for _, s in ipairs(MarketSync.StandardSounds) do
+      assert(s.id == 0 or valid[s.id], s.name .. " is not a known sound kit: " .. tostring(s.id))
+    end
+    MarketSyncDB = { NotificationSoundID = 3171, PerNotificationSounds = { a = 1195, b = 0 }, EnableNotificationSounds = true }
+    MarketSync.MigrateNotificationSounds()
+    assert(MarketSyncDB.NotificationSoundID == 5274, "Old Auction Open id should move to the real one")
+    assert(MarketSyncDB.PerNotificationSounds.a == 120 and MarketSyncDB.PerNotificationSounds.b == 0)
+    assert(MarketSync.GetNotificationSoundName(124) == "Quest Complete")
+
+    -- A sound the client cannot play falls back to the raid warning.
+    local played = {}
+    PlaySound = function(id, channel)
+      played[#played + 1] = id .. ":" .. channel
+      return id == 8959
+    end
+    assert(MarketSync.PlayNotificationSound(99999, false) == true, "Fallback should still alert")
+    assert(played[1] == "99999:Master" and played[2] == "8959:Master", "Expected a Master-channel fallback")
+    played = {}
+    MarketSyncDB.EnableNotificationSounds = false
+    assert(MarketSync.PlayNotificationSound(8959, false) == false and #played == 0, "Sounds off means silent")
+    assert(MarketSync.PlayNotificationSound(8959, true) == true, "Preview ignores the sound switch")
+  `;
+  if (lauxlib.luaL_dostring(L, to_luastring(script)) !== lua.LUA_OK) {
+    throw new Error(to_jsstring(lua.lua_tostring(L, -1)));
   }
 });
 

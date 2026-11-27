@@ -4,7 +4,7 @@
 ## Version: 1.0.1
 ## Dependencies: MarketSync
 ## SavedVariables: MarketSyncLedgerDB
-## AllowLoadGameType: camelot, classic, tbc
+## AllowLoadGameType: camelot, mainline, classic, tbc, wrath, cata, mists
 
 LedgerCore.lua
 ItemLedger.lua

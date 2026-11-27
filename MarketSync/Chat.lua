@@ -1969,7 +1969,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
                             local isWeapon = (classID == 2)
                             local ev = MarketSync.EstimateDisenchantEV(quality, ilvl, isWeapon)
                             if ev and ev > 0 then
-                                extraInfo = extraInfo .. string.format(" - DE EV: %s", MarketSync.FormatMoney(ev))
+                                local approx = MarketSync.IsDisenchantApproximate and MarketSync.IsDisenchantApproximate()
+                                extraInfo = extraInfo .. string.format(" - DE EV%s: %s", approx and " (approx.)" or "",
+                                    MarketSync.FormatMoney(ev))
                             end
                         end
                     end

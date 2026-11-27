@@ -127,6 +127,15 @@ function S.Cancel(reason)
     if legacy.mode == "search" and S.LiveSearchProgress then
         S.LiveSearchProgress.state = "stopped"
     end
+    if legacy.mode == "multi" and S.MultiScan then
+        -- Finished items keep their results; the interrupted one goes back to the queue.
+        if legacy.multiEntry and legacy.multiEntry.state == "scanning" then
+            legacy.multiEntry.state = "queued"
+        end
+        legacy.multiEntry, legacy.multiGroups, legacy.multiOrder = nil, nil, nil
+        S.MultiScan.state = "stopped"
+        S.MultiScan.revision = (S.MultiScan.revision or 0) + 1
+    end
     if legacy.mode == "full" and S.ScanScope == "neutral" and MarketSync.FailNeutralFullScan then
         MarketSync.FailNeutralFullScan()
     end
@@ -152,9 +161,12 @@ local function CanQuery(getAll)
     return ok and ((getAll and full) or (not getAll and regular)) == true
 end
 
-local function Query(name, page, getAll)
+-- onFail(reason) replaces cancelling the whole scan when one query fails; the
+-- multi-item scan uses it to retry or skip a single item.
+local function Query(name, page, getAll, onFail)
     local generation = S.Generation
     local attempts = 0
+    local fail = onFail or S.Cancel
     local function Try()
         if not S.Active or S.Generation ~= generation then return end
         if not CanQuery(getAll) then
@@ -162,7 +174,7 @@ local function Query(name, page, getAll)
             if attempts < 40 then
                 After(0.25, Try)
             else
-                S.Cancel("Auction House query throttled")
+                fail("Auction House query throttled")
             end
             return
         end
@@ -172,13 +184,15 @@ local function Query(name, page, getAll)
         local ok = pcall(QueryAuctionItems, name or "", nil, nil, page or 0,
             nil, nil, getAll == true, legacy.exactSearch == true, nil)
         if not ok then
-            S.Cancel("Auction House query failed")
+            legacy.waiting = false
+            fail("Auction House query failed")
             return
         end
         After(15, function()
             if S.Active and S.Generation == generation and legacy.waiting
                 and legacy.requestID == requestID then
-                S.Cancel("Auction House response timed out")
+                legacy.waiting = false
+                fail("Auction House response timed out")
             end
         end)
     end
@@ -418,16 +432,290 @@ function S.BuyPreparedLivePurchase(row)
     return true
 end
 
+-- ================================================================
+-- Multi-item price scan (legacy Scan page)
+-- One exact-name query per item, so each item only pages through its own
+-- auctions. Each finished item keeps its live listings for the page and saves
+-- its lowest unit price to MarketSync history. A query that fails or times out
+-- is retried once; after that only that item is marked failed and the scan
+-- moves on. Stopping keeps every finished item.
+-- ================================================================
+local MULTI_RETRIES = 1
+
+local function MultiItemName(entry)
+    if entry.name then return entry.name end
+    local cached = MarketSyncDB and MarketSyncDB.ItemInfoCache and MarketSyncDB.ItemInfoCache[entry.itemID]
+    local name = cached and cached.n
+    if not name and MarketSync.GetItemInfo then name = MarketSync.GetItemInfo(entry.itemID) end
+    if not name and GetItemInfo then name = GetItemInfo(entry.itemID) end
+    if type(name) == "string" and name ~= "" then entry.name = name end
+    return entry.name
+end
+
+local function MultiNotify()
+    local multi = S.MultiScan
+    if multi then multi.revision = (multi.revision or 0) + 1 end
+    Notify()
+end
+
+local function ReadMultiRow(index)
+    local entry = legacy.multiEntry
+    if not entry then return end
+    local name, texture, count, quality, _, level, _, _, _, buyout,
+        _, _, _, owner, _, saleStatus, itemID = GetAuctionItemInfo("list", index)
+    local link = GetAuctionItemLink and GetAuctionItemLink("list", index) or nil
+    itemID = tonumber(itemID) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
+    count, buyout = tonumber(count), tonumber(buyout)
+    -- Bid-only and already-sold auctions have no buyout a player can use.
+    if itemID ~= entry.itemID or not count or count < 1 or not buyout or buyout < 1 then return end
+    if saleStatus and saleStatus ~= 0 then return end
+    local suffix = Suffix(link)
+    if entry.itemSuffix and entry.itemSuffix ~= 0 and suffix ~= entry.itemSuffix then return end
+    local mine = UnitName and owner ~= nil and owner == UnitName("player") or false
+    entry.icon = entry.icon or texture
+    entry.quality = entry.quality or quality
+    entry.link = entry.link or link
+    -- Same per-unit rounding as the target scan, so history stays comparable.
+    local unitPrice = math.floor(buyout / count)
+    if unitPrice < 1 then return end
+    local identity = table.concat({ suffix, count, buyout, mine and 1 or 0 }, ":")
+    local group = legacy.multiGroups[identity]
+    if group then
+        group.auctions = group.auctions + 1
+        group.available = group.available + count
+    else
+        group = { itemID = itemID, itemSuffix = suffix, link = link, name = name, icon = texture,
+            quality = quality, level = level, stackSize = count, buyout = buyout,
+            unitPrice = unitPrice, auctions = 1, available = count, mine = mine,
+            -- Where this stack was seen, so PrepareLivePurchase can re-check it before buying.
+            query = entry.name, page = legacy.page, queryExact = legacy.exactSearch }
+        legacy.multiGroups[identity] = group
+        legacy.multiOrder[#legacy.multiOrder + 1] = group
+    end
+end
+
+local NextMulti
+
+local function CompleteMultiItem()
+    local entry = legacy.multiEntry
+    if not entry then return end
+    local listings = legacy.multiOrder or {}
+    table.sort(listings, function(a, b)
+        if a.unitPrice ~= b.unitPrice then return a.unitPrice < b.unitPrice end
+        if a.stackSize ~= b.stackSize then return a.stackSize > b.stackSize end
+        return (a.mine and 0 or 1) < (b.mine and 0 or 1)
+    end)
+    entry.listings = listings
+    entry.minUnit, entry.available, entry.auctions = nil, 0, 0
+    local variants = {}
+    for _, group in ipairs(listings) do
+        entry.available = entry.available + group.available
+        entry.auctions = entry.auctions + group.auctions
+        if not entry.minUnit or group.unitPrice < entry.minUnit then entry.minUnit = group.unitPrice end
+        local variant = variants[group.itemSuffix]
+        if not variant then
+            variant = { group = group, unitPrice = group.unitPrice, available = 0 }
+            variants[group.itemSuffix] = variant
+        end
+        variant.available = variant.available + group.available
+        if group.unitPrice < variant.unitPrice then variant.unitPrice, variant.group = group.unitPrice, group end
+    end
+    entry.state = #listings > 0 and "done" or "empty"
+    entry.reason = nil
+    entry.scannedAt = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    if MarketSync.RecordScanObservation then
+        for suffix, variant in pairs(variants) do
+            local g = variant.group
+            MarketSync.RecordScanObservation({ itemID = entry.itemID, itemSuffix = suffix,
+                itemLevel = g.level or 0, name = g.name, icon = g.icon, quality = g.quality,
+                itemLink = g.link }, variant.unitPrice, variant.available, false, false, true)
+        end
+    end
+    legacy.multiEntry, legacy.multiGroups, legacy.multiOrder = nil, nil, nil
+    local multi = S.MultiScan
+    multi.completed = (multi.completed or 0) + 1
+    S.Progress.current = multi.completed
+    MultiNotify()
+    After(0.05, NextMulti)
+end
+
+local function FailMultiItem(reason)
+    local entry = legacy.multiEntry
+    if not entry or not S.Active or legacy.mode ~= "multi" then return end
+    entry.attempts = (entry.attempts or 0) + 1
+    if entry.attempts <= MULTI_RETRIES then
+        legacy.page, legacy.multiGroups, legacy.multiOrder = 0, {}, {}
+        S.Status = string.format("Retrying %s (%s)", entry.name or ("#" .. entry.itemID), reason)
+        MultiNotify()
+        Query(entry.name, 0, false, FailMultiItem)
+        return
+    end
+    entry.state, entry.reason = "failed", reason
+    legacy.multiEntry, legacy.multiGroups, legacy.multiOrder = nil, nil, nil
+    local multi = S.MultiScan
+    multi.completed = (multi.completed or 0) + 1
+    S.Progress.current = multi.completed
+    MultiNotify()
+    After(0.25, NextMulti)
+end
+
+local function FinishMulti()
+    local multi = S.MultiScan
+    multi.state = "complete"
+    multi.finishedAt = MarketSync.GetServerTime and MarketSync.GetServerTime() or time()
+    Finish()
+    local done, empty, failed, skipped = 0, 0, 0, 0
+    for _, entry in ipairs(multi.items) do
+        if entry.state == "done" then done = done + 1
+        elseif entry.state == "empty" then empty = empty + 1
+        elseif entry.state == "failed" then failed = failed + 1
+        elseif entry.state == "skipped" then skipped = skipped + 1 end
+    end
+    S.Status = string.format("Scan complete: %d priced, %d with no auctions%s%s", done, empty,
+        failed > 0 and string.format(", %d failed", failed) or "",
+        skipped > 0 and string.format(", %d skipped (item info not loaded)", skipped) or "")
+    MultiNotify()
+end
+
+NextMulti = function()
+    if not S.Active or legacy.mode ~= "multi" then return end
+    local multi = S.MultiScan
+    local entry
+    for i = (multi.index or 0) + 1, #multi.items do
+        if multi.items[i].state == "queued" then multi.index, entry = i, multi.items[i]; break end
+    end
+    if not entry and not multi.retriedNames then
+        -- Item names load from the server on first request; give skipped items one more pass.
+        multi.retriedNames = true
+        for _, item in ipairs(multi.items) do
+            if item.state == "skipped" then item.state = "queued"; multi.completed = multi.completed - 1 end
+        end
+        multi.index = 0
+        return NextMulti()
+    end
+    if not entry then FinishMulti() return end
+    if not MultiItemName(entry) then
+        entry.state, entry.reason = "skipped", "Item info not loaded yet"
+        multi.completed = (multi.completed or 0) + 1
+        MultiNotify()
+        After(0.01, NextMulti)
+        return
+    end
+    entry.state, entry.attempts, entry.reason = "scanning", 0, nil
+    legacy.multiEntry, legacy.multiGroups, legacy.multiOrder = entry, {}, {}
+    legacy.page = 0
+    -- Random-suffix listings are named "<item> of the Bear", which an exact search
+    -- for the base name never matches; rows are filtered by item ID either way.
+    entry.looseSearch = (entry.itemSuffix or 0) ~= 0
+    legacy.exactSearch = not entry.looseSearch
+    S.Pending = entry
+    S.Status = string.format("Scanning %d / %d: %s", (multi.completed or 0) + 1, #multi.items, entry.name)
+    MultiNotify()
+    Query(entry.name, 0, false, FailMultiItem)
+end
+
+-- items: item IDs, links, DB keys, or { itemID, itemSuffix, name } tables.
+function S.StartMultiScan(items)
+    if S.Active then S.Cancel("replaced by new scan") end
+    if S.IsDisabledByAuctionator and S.IsDisabledByAuctionator() then
+        S.Status = "MarketSync scanning disabled while Auctionator scans"
+        Notify()
+        return false
+    end
+    if not S.IsAvailable() then
+        S.Status = "Open the Auction House to scan."
+        Notify()
+        return false
+    end
+    local entries, seen = {}, {}
+    for _, item in ipairs(items or {}) do
+        local key = S.ToItemKey(item)
+        local suffix = key and (key.itemSuffix or 0) or 0
+        local identity = key and string.format("%d:%d", key.itemID, suffix)
+        if key and not seen[identity] then
+            seen[identity] = true
+            local dbKey = suffix ~= 0 and string.format("p:%d:%d", key.itemID, suffix) or tostring(key.itemID)
+            local info = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(dbKey)
+            entries[#entries + 1] = { itemID = key.itemID, itemSuffix = suffix,
+                name = type(item) == "table" and item.name or nil,
+                link = type(item) == "table" and item.link or nil,
+                previousPrice = info and info.price or nil, state = "queued" }
+        end
+    end
+    if #entries == 0 then
+        S.Status = "Add items to scan first."
+        Notify()
+        return false
+    end
+    Start("Starting multi-item scan...", "multi")
+    legacy.exactSearch = true
+    S.MultiScan = { items = entries, state = "scanning", index = 0, completed = 0,
+        startedAt = S.ScanTime, revision = ((S.MultiScan and S.MultiScan.revision) or 0) + 1 }
+    S.Progress.total = #entries
+    NextMulti()
+    return true
+end
+
+function S.GetMultiScan()
+    return S.MultiScan
+end
+
 local frame = CreateFrame("Frame")
 pcall(frame.RegisterEvent, frame, "AUCTION_ITEM_LIST_UPDATE")
 pcall(frame.RegisterEvent, frame, "AUCTION_HOUSE_CLOSED")
-frame:SetScript("OnEvent", function(_, event)
+-- The legacy AH fires AUCTION_ITEM_LIST_UPDATE before every row has loaded:
+-- owners and links arrive in later updates. A multi-item page is read only when
+-- every row of the target item has both (as Auctionator's scan does), so own
+-- auctions and suffix variants are recognised. Owners of deleted characters may
+-- never load, so a page is read anyway after a short grace period.
+local MULTI_PAGE_GRACE = 2.5
+local HandleEvent
+
+local function WaitsForFullPage()
+    return legacy.mode == "multi" or legacy.mode == "purchase"
+end
+
+-- The multi scan and the purchase check (which compares the exact link) both
+-- need every row of their item complete.
+local function MultiPageReady()
+    local entry = legacy.mode == "purchase" and legacy.purchaseTarget or legacy.multiEntry
+    if not entry then return true end
+    local count = tonumber((GetNumAuctionItems("list"))) or 0
+    for i = 1, count do
+        local _, _, _, _, _, _, _, _, _, _, _, _, _, owner, _, _, itemID = GetAuctionItemInfo("list", i)
+        local link = GetAuctionItemLink and GetAuctionItemLink("list", i) or nil
+        itemID = tonumber(itemID) or (type(link) == "string" and tonumber(link:match("item:(%d+)")))
+        if not itemID then return false end
+        if itemID == entry.itemID and (owner == nil or link == nil) then return false end
+    end
+    return true
+end
+
+local function WaitForMultiPage()
+    if legacy.graceRequest == legacy.requestID then return end
+    legacy.graceRequest = legacy.requestID
+    local requestID, generation = legacy.requestID, S.Generation
+    After(MULTI_PAGE_GRACE, function()
+        if S.Active and S.Generation == generation and legacy.waiting
+            and legacy.requestID == requestID and WaitsForFullPage() then
+            legacy.forceRead = true
+            HandleEvent(nil, "AUCTION_ITEM_LIST_UPDATE")
+        end
+    end)
+end
+
+HandleEvent = function(_, event)
     if event == "AUCTION_HOUSE_CLOSED" then
         S.PurchaseReady = nil
         if S.Active then S.Cancel("Auctioneer closed") end
         return
     end
     if not S.Active or not legacy.waiting then return end
+    if WaitsForFullPage() and not legacy.forceRead and not MultiPageReady() then
+        WaitForMultiPage()
+        return
+    end
+    legacy.forceRead = false
     legacy.waiting = false
     local count, total = GetNumAuctionItems("list")
     count, total = tonumber(count) or 0, tonumber(total) or 0
@@ -457,6 +745,7 @@ frame:SetScript("OnEvent", function(_, event)
         local stop = math.min(count, index + 249)
         for i = index, stop do
             if legacy.mode == "search" then ReadSearchRow(i)
+            elseif legacy.mode == "multi" then ReadMultiRow(i)
             else ReadRow(i, targetID, targetSuffix) end
         end
         index = stop + 1
@@ -471,6 +760,24 @@ frame:SetScript("OnEvent", function(_, event)
             S.Progress.total = total
             S.Status = string.format("Searching auctions (%d / %d)...", S.Progress.current, total)
             Notify()
+        end
+        if legacy.mode == "multi" then
+            if not legacy.multiEntry then return end
+            local entry = legacy.multiEntry
+            if (legacy.page + 1) * 50 < total then
+                legacy.page = legacy.page + 1
+                Query(entry.name, legacy.page, false, FailMultiItem)
+            elseif #legacy.multiOrder == 0 and not entry.looseSearch then
+                -- Nothing under the exact name: the item may only be listed with
+                -- random suffixes. Search once more by name containing it.
+                entry.looseSearch = true
+                legacy.exactSearch = false
+                legacy.page = 0
+                Query(entry.name, 0, false, FailMultiItem)
+            else
+                CompleteMultiItem()
+            end
+            return
         end
         if (legacy.mode == "target" or legacy.mode == "search") and (legacy.page + 1) * 50 < total then
             legacy.page = legacy.page + 1
@@ -510,4 +817,5 @@ frame:SetScript("OnEvent", function(_, event)
         end)
     end
     ReadBatch()
-end)
+end
+frame:SetScript("OnEvent", HandleEvent)

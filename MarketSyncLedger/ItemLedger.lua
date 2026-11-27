@@ -321,10 +321,22 @@ function I.Reconcile(observation)
     local unresolved = false; for _, qty in pairs(remaining) do if qty ~= 0 then unresolved = true end end
     observation.state = unresolved and "unresolved" or "reconciled"
 end
+-- Holdings scope. Partitions are "interface:realm:faction". On a PvE ("normal") realm
+-- both factions share the realm, so holdings span both. Every other ruleset, and
+-- classic clients, only show the faction you are playing.
+local function RealmScope(partition)
+    return (tostring(partition or ""):gsub(":[^:]*$", ""))
+end
 function I.Holdings(itemID)
     local out = {}
+    local current = I.Partition()
+    local sharedFactions = MarketSync.GetForeverAuctionRuleset and MarketSync.GetForeverAuctionRuleset() == "normal"
+    local function InScope(partition)
+        if sharedFactions then return RealmScope(partition) == RealmScope(current) end
+        return partition == current
+    end
     for _, character in pairs(I.Store().characters) do
-        if character.partition == I.Partition() then
+        if InScope(character.partition) then
             for storage, snapshot in pairs(character.storage) do
                 local qty = 0
                 for _, item in pairs(snapshot.items) do if item.itemID == tonumber(itemID) then qty = qty + item.qty end end
@@ -335,6 +347,12 @@ function I.Holdings(itemID)
     table.sort(out, function(a,b) return a.owner == b.owner and a.storage < b.storage or a.owner < b.owner end)
     return out
 end
+-- While the ledger is enabled, core tooltips read holdings from here instead of
+-- core's own store. Core keeps scanning and feeds the ledger through its hooks.
+MarketSync.InventoryHoldingsProvider = {
+    IsActive = function() return MarketSync.IsLedgerEnabled() == true end,
+    Holdings = function(itemID) return I.Holdings(itemID) end,
+}
 function I.Reserve(jobID, key, quantity)
     quantity = Integer(quantity, true); if not quantity then return false end
     local s, owner, partition = I.Store(), I.Owner(), I.Partition()

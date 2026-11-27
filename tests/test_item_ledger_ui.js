@@ -23,7 +23,7 @@ purchase=I.Record('auction purchase',{incoming={{itemID=555,qty=2}},cashOut=400,
 observation=I.Record('inventory observation',{state='unresolved',metadata={delta={['556:0']=-3}},evidence='storage snapshot'})
 before=#I.List()
 @@LUA@@);
-run(fs.readFileSync(path.join(__dirname,'../MarketSync/Ledger/UI_ItemLedger.lua'),'utf8'));
+run(fs.readFileSync(path.join(__dirname,'../MarketSyncLedger/UI_ItemLedger.lua'),'utf8'));
 run(@@LUA@@
 local f=MarketSync.OpenItemLedger()
 assert(f.cards[1].title.text:find('Gold spent') and f.cards[3].value.text:find('records'),'Summary cards have readable context')

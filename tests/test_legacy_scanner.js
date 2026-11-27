@@ -34,7 +34,7 @@ run(`
   function GetAuctionItemInfo(_, index)
     local r = results[index]
     return r.name, 123, r.count, 2, true, 10, nil, 0, 0,
-      r.buyout, 0, nil, nil, nil, nil, nil, r.id
+      r.buyout, 0, nil, nil, r.owner or "Seller", nil, nil, r.id
   end
   function GetAuctionItemLink(_, index) return results[index].link end
   purchases = {}

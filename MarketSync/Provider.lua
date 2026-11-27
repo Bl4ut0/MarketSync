@@ -234,8 +234,25 @@ end
 function MarketSync.GetMarketSyncDataPrice(itemId)
     local dataAddon = _G.MarketSyncData
     if type(dataAddon) ~= "table" then return nil end
+    if MarketSync.IsDataPackFlavorCompatible
+        and not MarketSync.IsDataPackFlavorCompatible(dataAddon.flavor or dataAddon.Flavor) then
+        return nil
+    end
+    if MarketSync.IsDataPackRegionCompatible
+        and not MarketSync.IsDataPackRegionCompatible(dataAddon.region or dataAddon.Region) then
+        return nil
+    end
     if type(dataAddon.GetPrice) == "function" then
         return dataAddon.GetPrice(itemId)
+    end
+    if MarketSync.EnsureCurrentDataPack then
+        local prices = MarketSync.EnsureCurrentDataPack()
+        local rec = type(prices) == "table" and itemId ~= nil and (prices[itemId] or prices[tostring(itemId)])
+        if type(rec) == "table" and tonumber(rec.m) then
+            return tonumber(rec.m)
+        elseif type(rec) == "number" then
+            return rec
+        end
     end
     local prices = dataAddon.prices or dataAddon.Prices
     if type(prices) == "table" then

@@ -155,7 +155,7 @@ sim.run(`
   assert(scans > oldScans and mailScans > oldMailScans and #T.Holdings(555) == 4)
 `, 'Inventory without Ledger');
 
-const ledgerTOC = fs.readFileSync(path.join(addon, 'Ledger/MarketSyncLedger.toc'), 'utf8');
+const ledgerTOC = fs.readFileSync(path.join(addon, '../MarketSyncLedger/MarketSyncLedger.toc'), 'utf8');
 sim.run(`
   LedgerNamespace = {}
   C_AddOns.IsAddOnLoaded = function(name) return name == 'MarketSyncLedger' end
@@ -165,7 +165,7 @@ sim.run(`
   MarketSyncDB.EnableLedgerBeta = true
 `);
 for (const file of ledgerTOC.split(/\r?\n/).filter(line => line.endsWith('.lua'))) {
-  const source = fs.readFileSync(path.join(addon, 'Ledger', file), 'utf8');
+  const source = fs.readFileSync(path.join(addon, '../MarketSyncLedger', file), 'utf8');
   sim.run(`assert(load([====[${source}]====], '@${file}'))('MarketSyncLedger', LedgerNamespace)`, file);
 }
 sim.run(`

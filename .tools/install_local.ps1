@@ -3,6 +3,9 @@ param(
     [ValidateSet("_anniversary_", "_classic_", "_classic_beta_", "_classic_era_", "_classic_era_ptr_", "_forever_", "_retail_")]
     [string]$Product = "_anniversary_",
 
+    [ValidateSet("MarketSync", "MarketSyncLedger")]
+    [string]$Addon = "MarketSync",
+
     [string]$WowRoot = "C:\Program Files (x86)\World of Warcraft"
 )
 
@@ -55,8 +58,8 @@ function Assert-ManifestsEqual {
 }
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$source = Join-Path $repoRoot "MarketSync"
-$sourceToc = Join-Path $source "MarketSync.toc"
+$source = Join-Path $repoRoot $Addon
+$sourceToc = Join-Path $source "$Addon.toc"
 
 if (-not (Test-Path -LiteralPath $source -PathType Container)) {
     throw "MarketSync source folder was not found at '$source'."
@@ -65,7 +68,7 @@ if (-not (Test-Path -LiteralPath $sourceToc -PathType Leaf)) {
     throw "Refusing to deploy: '$sourceToc' is missing."
 }
 $source = (Resolve-Path -LiteralPath $source).Path
-$sourceToc = Join-Path $source "MarketSync.toc"
+$sourceToc = Join-Path $source "$Addon.toc"
 
 $resolvedWowRoot = (Resolve-Path -LiteralPath $WowRoot).Path
 $productRoot = Join-Path $resolvedWowRoot $Product
@@ -75,7 +78,7 @@ if (-not (Test-Path -LiteralPath $addOnsPath -PathType Container)) {
 }
 
 $resolvedAddOnsPath = (Resolve-Path -LiteralPath $addOnsPath).Path.TrimEnd("\")
-$target = [System.IO.Path]::GetFullPath((Join-Path $resolvedAddOnsPath "MarketSync"))
+$target = [System.IO.Path]::GetFullPath((Join-Path $resolvedAddOnsPath $Addon))
 if ([System.IO.Path]::GetFullPath((Split-Path -Parent $target)).TrimEnd("\") -ne $resolvedAddOnsPath) {
     throw "Refusing to deploy outside the requested AddOns folder: '$target'."
 }
@@ -93,13 +96,13 @@ if ($sourceManifest.Count -eq 0) {
 
 $versionLine = Get-Content -LiteralPath $sourceToc | Where-Object { $_ -match '^## Version:' } | Select-Object -First 1
 $version = if ($versionLine) { ($versionLine -replace '^## Version:\s*', '').Trim() } else { "unknown" }
-$staging = Join-Path $resolvedAddOnsPath ("MarketSync.installing-" + [Guid]::NewGuid().ToString("N"))
+$staging = Join-Path $resolvedAddOnsPath ("$Addon.installing-" + [Guid]::NewGuid().ToString("N"))
 $backupRoot = Join-Path $PSScriptRoot (Join-Path "backups" $Product)
-$backup = Join-Path $backupRoot ("MarketSync-" + (Get-Date -Format "yyyyMMdd-HHmmssfff"))
+$backup = Join-Path $backupRoot ("$Addon-" + (Get-Date -Format "yyyyMMdd-HHmmssfff"))
 $hadExistingInstall = Test-Path -LiteralPath $target -PathType Container
 $targetWasRemoved = $false
 
-Write-Host "Deploying MarketSync v$version to $Product"
+Write-Host "Deploying $Addon v$version to $Product"
 Write-Host "  Source: $source"
 Write-Host "  Target: $target"
 
@@ -131,7 +134,7 @@ try {
     $installedManifest = Get-FileManifest -Root $target
     Assert-ManifestsEqual -Expected $sourceManifest -Actual $installedManifest -Label "Installed copy"
 
-    $tocHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $target "MarketSync.toc")).Hash
+    $tocHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $target "$Addon.toc")).Hash
     Write-Host "Verified MarketSync v$version in ${Product}: $($installedManifest.Count) files"
     Write-Host "  MarketSync.toc SHA256: $tocHash"
 }

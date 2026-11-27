@@ -39,7 +39,7 @@ function Quote(stack,price,count,page)
  return {itemID=10,itemSuffix=0,name='Ore',stackSize=stack,buyout=price,auctions=count or 1,query='Ore',queryExact=true,page=page or 0}
 end
 `);
-for(const name of ['Favorites.lua','Ledger/CraftLedger.lua','Ledger/PurchaseList.lua','Ledger/UI_PurchaseList.lua']){
+for(const name of ['Favorites.lua','../MarketSyncLedger/CraftLedger.lua','../MarketSyncLedger/PurchaseList.lua','../MarketSyncLedger/UI_PurchaseList.lua']){
 const source=fs.readFileSync(path.join(__dirname,'../MarketSync',name),'utf8');require('luaparse').parse(source,{luaVersion:'5.1'});run(source);
 }
 run(`

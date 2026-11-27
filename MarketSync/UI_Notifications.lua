@@ -146,12 +146,12 @@ local function BuildScopeDropdown(frameName, parent, width, getValue, setValue)
             info.text = opt.label
             info.func = function()
                 setValue(opt.value)
-                button:SetText(opt.label .. "  |cffffd700v|r")
+                button:SetText(opt.label .. "  |cFFFFD100v|r")
             end
             UIDropDownMenu_AddButton(info, level)
         end
     end)
-    button:SetText(ScopeLabel(getValue()) .. "  |cffffd700v|r")
+    button:SetText(ScopeLabel(getValue()) .. "  |cFFFFD100v|r")
     button:SetScript("OnClick", function(self)
         ToggleDropDownMenu(1, nil, menu, self, 0, 0)
     end)
@@ -159,7 +159,7 @@ local function BuildScopeDropdown(frameName, parent, width, getValue, setValue)
 end
 
 local function SetDropdownLabel(button, label)
-    button:SetText(tostring(label or "") .. "  |cffffd700v|r")
+    button:SetText(tostring(label or "") .. "  |cFFFFD100v|r")
 end
 
 local function StyleModernPillButton(btn, text, isGold)
@@ -523,15 +523,122 @@ end
 
 MarketSync.ShowBulkAlertImportPopup = ShowBulkImportPopup
 
+-- =============================================================
+-- ALERTS PAGE (Workbench layout)
+-- Left rail: settings for the open tab, the alert editor, or details of a
+-- history entry. Right: the watchlist or alert history table.
+-- =============================================================
+local RAIL_W = 176
+local RAIL_INNER_W = RAIL_W - 16
+
+local function SetControlVisible(control, visible)
+    if not control then return end
+    if visible then control:Show() else control:Hide() end
+end
+
+local function Truncate(text, maxLen)
+    local s = tostring(text or "")
+    if #s <= maxLen then return s end
+    return s:sub(1, math.max(1, maxLen - 3)) .. "..."
+end
+
+-- "4g 50s 20c", "4g50", "450s", "4.5" (gold) and "45000c" all work.
+local function ParseMoneyText(text)
+    local raw = TrimText(text):lower():gsub(",", ".")
+    if raw == "" then return 0 end
+    local g = tonumber(raw:match("([%d%.]+)%s*g")) or 0
+    local s = tonumber(raw:match("([%d%.]+)%s*s")) or 0
+    local c = tonumber(raw:match("([%d%.]+)%s*c")) or 0
+    if not raw:find("[gsc]") then
+        g = tonumber(raw) or 0
+    end
+    return math.max(0, math.floor(g * 10000 + s * 100 + c + 0.5))
+end
+MarketSync.ParseAlertMoneyText = ParseMoneyText
+
+local function MoneyInputText(copper)
+    local c = math.max(0, math.floor(tonumber(copper) or 0))
+    local g, s, cc = math.floor(c / 10000), math.floor((c % 10000) / 100), c % 100
+    local parts = {}
+    if g > 0 then parts[#parts + 1] = g .. "g" end
+    if s > 0 then parts[#parts + 1] = s .. "s" end
+    if cc > 0 or #parts == 0 then parts[#parts + 1] = cc .. "c" end
+    return table.concat(parts, " ")
+end
+
+local function RailLabel(parent, y, text)
+    local label = parent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    label:SetText(text)
+    return label
+end
+
+local function RailButton(parent, y, width, text, x)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(width or RAIL_INNER_W, 20)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 8, y)
+    btn:SetText(text)
+    return btn
+end
+
+local function SetActive(btn, active, label)
+    btn:SetText(active and ("|cffffd700" .. label .. "|r") or label)
+    if active then
+        if btn.LockHighlight then btn:LockHighlight() end
+    elseif btn.UnlockHighlight then
+        btn:UnlockHighlight()
+    end
+end
+
+local function AttachTip(frame, title, body)
+    frame:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(title, 1, 0.82, 0)
+        if body then GameTooltip:AddLine(body, 0.85, 0.85, 0.85, true) end
+        GameTooltip:Show()
+    end)
+    frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+local function SourceLabel(source)
+    if not source or source == "" or source == "Personal" then return "My scan" end
+    return "Guild sync | " .. tostring(source)
+end
+
+local function TimeLabel(epoch)
+    local t = tonumber(epoch) or 0
+    if t <= 0 then return "-" end
+    local now = time()
+    if date and date("%Y%m%d", t) == date("%Y%m%d", now) then return date("%H:%M", t) end
+    if date and date("%Y%m%d", t) == date("%Y%m%d", now - 86400) then return "Yesterday" end
+    return FormatRelativeTime(t)
+end
+
+local function RequestItemID(req)
+    if req.matchType == "itemID" then return tonumber(req.matchValue) end
+    if req.matchType == "dbKey" and MarketSync.ParseItemIDFromDBKey then
+        return MarketSync.ParseItemIDFromDBKey(req.matchValue)
+    end
+    return nil
+end
+
 function MarketSync.CreateNotificationsPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local isLegacyMain = not isEmbedded and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
-    local LEFT_X = isEmbedded and 12 or (isLegacyMain and 25 or 20)
-    local LEFT_W = isEmbedded and 180 or (isLegacyMain and 191 or 196)
-    local RESULTS_X = isEmbedded and 198 or 224
-    local ROW_WIDTH = isEmbedded and 550 or 584
+    local LEFT_X = isEmbedded and 10 or (isLegacyMain and 24 or 14)
+    local RESULTS_X = LEFT_X + RAIL_W + 10
+    local parentWidth = parent.GetWidth and parent:GetWidth() or 0
+    local parentHeight = parent.GetHeight and parent:GetHeight() or 0
+    local effectiveWidth = parentWidth > 0 and parentWidth or (isEmbedded and 780 or 850)
+    local usableHeight = parentHeight > 0 and parentHeight or (isEmbedded and 440 or 430)
+    local ROW_WIDTH = math.max(360, effectiveWidth - RESULTS_X - 14)
+    local tabsY = isEmbedded and -8 or -34
+    local bodyTop = isEmbedded and -36 or -62
     local bottomPadding = parent.MarketSyncNativeAuctionFooter and 0 or 8
-    local numRowsPerPage = isEmbedded and 12 or 9
+    local FOOTER_H = 30
+    local HEADER_H = 22
+    local ROW_H = 28
+    local numRowsPerPage = math.max(4, math.floor((usableHeight + bodyTop - bottomPadding - HEADER_H - FOOTER_H - 8) / ROW_H))
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
@@ -544,22 +651,27 @@ function MarketSync.CreateNotificationsPanel(parent)
     panel.watchlistPage = 0
     panel.historyPage = 0
     panel.searchQuery = ""
+    panel.listFilter = nil
+    panel.watchFilter = "all"     -- all | close | paused | noprice
+    panel.historyFilter = "all"   -- all | unread | below | urgent
+    panel.sourceFilter = "any"    -- any | mine | guild
     panel.editorItemID = nil
     panel.editorItemLink = nil
     panel.editorItemName = nil
     panel.editorMarketPrice = 0
     panel.editorScope = "all"
-    panel.editorCooldown = 300
     panel.editorEditingID = nil
+    panel.editorSoundID = nil
+    panel.editorOrigin = nil
     panel.importSelectedList = "__ALL__"
     panel.importSelectedSource = nil
 
-    -- Forward declarations
     local RefreshView, RefreshWatchlistTable, RefreshHistoryTable, RefreshImportDropdown
-    local SetEditorItem, ClearEditorForm
+    local SetEditorItem, ClearEditorForm, ShowRail, ShowHistoryDetails
+    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
 
     -- =========================================================
-    -- TOP SUB-TAB HEADER (Clearing portrait at X >= 76 on MainFrame)
+    -- HEADER: tabs and alert-wide switches
     -- =========================================================
     local function CreateAlertTab()
         local tab = MarketSync.CreateForeverAuctionControl
@@ -572,65 +684,77 @@ function MarketSync.CreateNotificationsPanel(parent)
     end
 
     local btnTabWatchlist = CreateAlertTab()
-    btnTabWatchlist:SetSize(134, 24)
-    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, isEmbedded and -8 or -34)
-    btnTabWatchlist:SetText("Tracked Watchlist")
+    btnTabWatchlist:SetSize(120, 24)
+    btnTabWatchlist:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, tabsY)
+    btnTabWatchlist:SetText("Watchlist")
 
     local btnTabHistory = CreateAlertTab()
     btnTabHistory:SetSize(134, 24)
     btnTabHistory:SetPoint("LEFT", btnTabWatchlist, "RIGHT", 6, 0)
     btnTabHistory:SetText("Alert History")
 
+    local btnMute = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
+    btnMute:SetSize(64, 22)
+    btnMute:SetPoint("TOPRIGHT", panel, "TOPRIGHT", isEmbedded and -8 or -26, tabsY)
     local btnTestSound = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate,BackdropTemplate")
-    btnTestSound:SetSize(84, 22)
-    btnTestSound:SetPoint("TOPRIGHT", panel, "TOPRIGHT", isEmbedded and -8 or -26, isEmbedded and -8 or -34)
-    btnTestSound:SetText("Test Sound")
-    StyleModernPillButton(btnTestSound, "Test Sound")
+    btnTestSound:SetSize(46, 22)
+    btnTestSound:SetPoint("RIGHT", btnMute, "LEFT", -4, 0)
+    btnTestSound:SetText("Test")
+    AttachTip(btnTestSound, "Test sound", "Plays your alert sound once.")
     btnTestSound:SetScript("OnClick", function()
         local soundID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
-        if MarketSync.PlayNotificationSound then
-            MarketSync.PlayNotificationSound(soundID, true)
-        end
+        if MarketSync.PlayNotificationSound then MarketSync.PlayNotificationSound(soundID, true) end
     end)
+    local function RefreshMute()
+        btnMute:SetText(MarketSync.NotificationsMuted and "|cffff8a7aMuted|r" or "Mute")
+    end
+    btnMute:SetScript("OnClick", function()
+        if MarketSync.ToggleNotificationMute then MarketSync.ToggleNotificationMute() end
+        RefreshMute()
+    end)
+    AttachTip(btnMute, "Mute alerts", "Silences every alert until you log out or click again. Alerts are not recorded while muted.")
+    RefreshMute()
 
-    local soundCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    soundCheck:SetSize(20, 20)
-    soundCheck:SetPoint("RIGHT", btnTestSound, "LEFT", -75, 0)
-    local soundText = soundCheck.text or soundCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    soundCheck.text = soundText
-    soundText:SetText("Sound Alerts")
-    soundText:ClearAllPoints()
-    soundText:SetPoint("LEFT", soundCheck, "RIGHT", 3, 0)
-    soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
-    soundCheck:SetScript("OnClick", function(self)
-        if MarketSyncDB then
-            MarketSyncDB.EnableNotificationSounds = self:GetChecked() and true or false
-        end
-    end)
+    local function HeaderCheck(anchor, label, key, tipTitle, tipBody)
+        local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        check:SetSize(20, 20)
+        local text = check.text or check:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        check.text = text
+        text:SetText(label)
+        text:ClearAllPoints()
+        text:SetPoint("LEFT", check, "RIGHT", 2, 0)
+        check:SetPoint("RIGHT", anchor, "LEFT", -((text.GetStringWidth and text:GetStringWidth() or 40) + 10), 0)
+        check:SetChecked(MarketSyncDB and MarketSyncDB[key] ~= false)
+        check:SetScript("OnClick", function(self)
+            if MarketSyncDB then MarketSyncDB[key] = self:GetChecked() and true or false end
+            if key == "EnableNotificationSounds" and MarketSync.RefreshSettingsUI then pcall(MarketSync.RefreshSettingsUI) end
+        end)
+        AttachTip(check, tipTitle, tipBody)
+        check.settingKey = key
+        return check
+    end
+    local bannerCheck = HeaderCheck(btnTestSound, "Banner", "EnableRaidWarningAlerts", "On-screen banner",
+        "Shows each alert in the raid-warning banner. Urgent alerts always show it.")
+    local soundCheck = HeaderCheck(bannerCheck, "Sound", "EnableNotificationSounds", "Sound alerts",
+        "Plays your alert sound. Pick the sound in Settings, or per alert in the editor.")
+    panel.soundCheck, panel.bannerCheck = soundCheck, bannerCheck
 
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(btnTabWatchlist, {
-            name = "Tracked Watchlist",
-            context = "Tab",
+            name = "Watchlist", context = "Tab",
             description = "View and manage tracked item price alerts",
             getIndexInfo = function() return { index = 1, total = 2 } end,
         })
         MarketSync.SetAccessibility(btnTabHistory, {
-            name = "Alert History",
-            context = "Tab",
+            name = "Alert History", context = "Tab",
             description = "View history of triggered price alerts",
             getIndexInfo = function() return { index = 2, total = 2 } end,
         })
-        MarketSync.SetAccessibility(btnTestSound, {
-            name = "Test Sound",
-            context = "Button",
-            description = "Play notification alert test sound",
-        })
+        MarketSync.SetAccessibility(btnTestSound, { name = "Test Sound", context = "Button",
+            description = "Play notification alert test sound" })
         MarketSync.SetAccessibility(soundCheck, {
             name = "Sound Alerts",
-            context = function(self)
-                return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked"
-            end,
+            context = function(self) return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked" end,
             description = "Toggle audio notifications for market alerts",
         })
     end
@@ -638,14 +762,8 @@ function MarketSync.CreateNotificationsPanel(parent)
     local function UpdateSubTabButtons()
         local unread = tonumber(MarketSync.NotificationUnreadCount) or 0
         local historyText = unread > 0 and string.format("Alert History (|cffffd700%d|r)", unread) or "Alert History"
-
-        if panel.currentView == "watchlist" then
-            StyleModernSubTab(btnTabWatchlist, true, "Tracked Watchlist")
-            StyleModernSubTab(btnTabHistory, false, historyText)
-        else
-            StyleModernSubTab(btnTabWatchlist, false, "Tracked Watchlist")
-            StyleModernSubTab(btnTabHistory, true, historyText)
-        end
+        StyleModernSubTab(btnTabWatchlist, panel.currentView == "watchlist", "Watchlist")
+        StyleModernSubTab(btnTabHistory, panel.currentView == "history", historyText)
     end
     UpdateSubTabButtons()
 
@@ -653,61 +771,200 @@ function MarketSync.CreateNotificationsPanel(parent)
         if panel.currentView == "watchlist" then return end
         panel.currentView = "watchlist"
         UpdateSubTabButtons()
+        ShowRail("watch")
         RefreshView()
     end)
-
     btnTabHistory:SetScript("OnClick", function()
         if panel.currentView == "history" then return end
         panel.currentView = "history"
         UpdateSubTabButtons()
+        ShowRail("history")
         RefreshView()
     end)
 
     -- =========================================================
-    -- LEFT COLUMN: ALERT EDITOR (BOX 1 - Height 216)
+    -- BOXES
     -- =========================================================
-    local editorBox
-    if isEmbedded then
-        editorBox = CreateBox(panel, LEFT_X, -34, LEFT_W, 252, "controls")
-    else
-        editorBox = CreateBox(panel, LEFT_X, TOP_Y, LEFT_W, 252, "controls")
+    local railBox = CreateBox(panel, LEFT_X, bodyTop, RAIL_W, 300, "controls")
+    railBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, bottomPadding)
+    local rightBox = CreateBox(panel, RESULTS_X - 4, bodyTop, ROW_WIDTH + 8, 320, "results")
+    rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -(effectiveWidth - (RESULTS_X + ROW_WIDTH + 4)), bottomPadding)
+    panel.railBox = railBox
+
+    local watchView = CreateFrame("Frame", nil, railBox); watchView:SetAllPoints(railBox)
+    local editView = CreateFrame("Frame", nil, railBox); editView:SetAllPoints(railBox)
+    local historyView = CreateFrame("Frame", nil, railBox); historyView:SetAllPoints(railBox)
+    local detailView = CreateFrame("Frame", nil, railBox); detailView:SetAllPoints(railBox)
+    panel.railViews = { watch = watchView, edit = editView, history = historyView, detail = detailView }
+    ShowRail = function(name)
+        panel.railView = name
+        for key, view in pairs(panel.railViews) do
+            if key == name then view:Show() else view:Hide() end
+        end
     end
 
-    local editorTitle = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    editorTitle:SetPoint("TOPLEFT", 10, -7)
-    editorTitle:SetText("|cffffd700Alert Editor|r")
-    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
-    -- 34x34 Item Drop Slot
-    local itemSlot = CreateFrame("Button", parentPrefix .. "ItemDropSlot", editorBox)
-    itemSlot:SetSize(34, 34)
-    itemSlot:SetPoint("TOPLEFT", 10, -24)
+    -- Footer status line (shared).
+    local statusText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    statusText:SetPoint("BOTTOMLEFT", rightBox, "BOTTOMLEFT", 10, 10)
+    statusText:SetPoint("RIGHT", rightBox, "BOTTOMRIGHT", -110, 10)
+    statusText:SetJustifyH("LEFT")
+    if statusText.SetWordWrap then statusText:SetWordWrap(false) end
+    local countText = statusText
+    local statusToken = 0
+    local function SetStatus(msg, isError)
+        statusToken = statusToken + 1
+        local token = statusToken
+        statusText:SetText((isError and "|cffff4444" or "|cff00ff00") .. tostring(msg) .. "|r")
+        if C_Timer and C_Timer.After then
+            C_Timer.After(4, function()
+                if token == statusToken and RefreshView then RefreshView() end
+            end)
+        end
+    end
+    panel.SetStatus = SetStatus
 
+    -- =========================================================
+    -- RAIL: Watchlist settings
+    -- =========================================================
+    local btnNewAlert = RailButton(watchView, -8, RAIL_INNER_W, "+ New alert")
+    btnNewAlert:SetScript("OnClick", function()
+        ClearEditorForm()
+        ShowRail("edit")
+    end)
+    AttachTip(btnNewAlert, "New alert", "Drop an item, shift-click a link, or type its name.")
+
+    local importDropdown = CreateFrame("Button", nil, watchView, "UIPanelButtonTemplate")
+    importDropdown:SetSize(RAIL_INNER_W, 20)
+    importDropdown:SetPoint("TOPLEFT", watchView, "TOPLEFT", 8, -34)
+    local importMenu = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", watchView, "UIDropDownMenuTemplate")
+    importMenu:Hide()
+    importDropdown._menu = importMenu
+    SetDropdownLabel(importDropdown, "All Lists")
+    importDropdown:SetScript("OnClick", function(self)
+        ToggleDropDownMenu(1, nil, importMenu, self, 0, 0)
+    end)
+
+    local halfW = math.floor((RAIL_INNER_W - 4) / 2)
+    local btnDoImport = RailButton(watchView, -56, RAIL_INNER_W, "Review List Alerts...")
+    AttachTip(btnDoImport, "Review List Alerts",
+        "Preview every item in the list above, adjust its alert price, then confirm the import.")
+    local btnImportString = RailButton(watchView, -78, RAIL_INNER_W, "Import String...")
+    AttachTip(btnImportString, "Import String", "Paste a MarketSync list string to review its alerts.")
+
+    local searchBox = CreateFrame("EditBox", nil, watchView, "InputBoxTemplate")
+    searchBox:SetSize(RAIL_INNER_W - 6, 18)
+    searchBox:SetPoint("TOPLEFT", watchView, "TOPLEFT", 14, -106)
+    searchBox:SetAutoFocus(false)
+    local searchPlaceholder = searchBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    searchPlaceholder:SetPoint("LEFT", 4, 0)
+    searchPlaceholder:SetText("Search alerts...")
+    searchBox:SetScript("OnTextChanged", function(self)
+        local txt = TrimText(self:GetText())
+        if txt == "" then searchPlaceholder:Show() else searchPlaceholder:Hide() end
+        panel.searchQuery = txt:lower()
+        panel.watchlistPage = 0
+        if RefreshWatchlistTable then RefreshWatchlistTable() end
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+
+    RailLabel(watchView, -132, "List")
+    local listFilterButton = CreateFrame("Button", nil, watchView, "UIPanelButtonTemplate")
+    listFilterButton:SetSize(RAIL_INNER_W, 20)
+    listFilterButton:SetPoint("TOPLEFT", watchView, "TOPLEFT", 8, -146)
+    local listFilterMenu = CreateFrame("Frame", parentPrefix .. "NotificationsListFilter", watchView, "UIDropDownMenuTemplate")
+    listFilterMenu:Hide()
+    listFilterButton._menu = listFilterMenu
+    SetDropdownLabel(listFilterButton, "All alerts")
+    UIDropDownMenu_Initialize(listFilterMenu, function(_, level)
+        local seen, names = {}, {}
+        for _, req in ipairs(MarketSync.ListNotificationRequests and MarketSync.ListNotificationRequests() or {}) do
+            local name = req.importSource or req.origin
+            if name and not seen[name] then seen[name] = true; names[#names + 1] = name end
+        end
+        table.sort(names)
+        local all = UIDropDownMenu_CreateInfo()
+        all.text = "All alerts"
+        all.checked = panel.listFilter == nil
+        all.func = function()
+            panel.listFilter = nil
+            SetDropdownLabel(listFilterButton, "All alerts")
+            RefreshWatchlistTable()
+        end
+        UIDropDownMenu_AddButton(all, level)
+        for _, name in ipairs(names) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = name
+            info.checked = panel.listFilter == name
+            info.func = function()
+                panel.listFilter = name
+                SetDropdownLabel(listFilterButton, Truncate and Truncate(name, 20) or name)
+                RefreshWatchlistTable()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    listFilterButton:SetScript("OnClick", function(self) ToggleDropDownMenu(1, nil, listFilterMenu, self, 0, 0) end)
+
+    RailLabel(watchView, -174, "Show")
+    local WATCH_FILTERS = {
+        { key = "all", label = "Everything" },
+        { key = "close", label = "Close to firing", tip = "Within 10% of the alert price, or already below it." },
+        { key = "paused", label = "Paused" },
+        { key = "noprice", label = "No price yet", tip = "No auction price has been seen for these items." },
+    }
+    local watchFilterButtons = {}
+    for i, f in ipairs(WATCH_FILTERS) do
+        local btn = RailButton(watchView, -188 - (i - 1) * 22, RAIL_INNER_W, f.label)
+        btn:SetScript("OnClick", function()
+            panel.watchFilter = f.key
+            panel.watchlistPage = 0
+            RefreshWatchlistTable()
+        end)
+        if f.tip then AttachTip(btn, f.label, f.tip) end
+        btn.filterKey, btn.filterLabel = f.key, f.label
+        watchFilterButtons[i] = btn
+    end
+
+    -- =========================================================
+    -- RAIL: Alert editor
+    -- =========================================================
+    local editorTitle = RailLabel(editView, -8, "New alert")
+    local btnBack = CreateFrame("Button", nil, editView, "UIPanelButtonTemplate")
+    btnBack:SetSize(52, 18)
+    btnBack:SetPoint("TOPRIGHT", editView, "TOPRIGHT", -8, -5)
+    btnBack:SetText("Back")
+    btnBack:SetScript("OnClick", function() ShowRail(panel.currentView == "history" and "history" or "watch") end)
+
+    local itemSlot = CreateFrame("Button", parentPrefix .. "ItemDropSlot", editView)
+    itemSlot:SetSize(34, 34)
+    itemSlot:SetPoint("TOPLEFT", editView, "TOPLEFT", 10, -30)
     local itemSlotIcon = itemSlot:CreateTexture(nil, "BORDER")
     itemSlotIcon:SetAllPoints()
     itemSlotIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-
     local itemSlotBorder = itemSlot:CreateTexture(nil, "OVERLAY")
     itemSlotBorder:SetSize(38, 38)
     itemSlotBorder:SetPoint("CENTER")
     itemSlotBorder:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
     itemSlotBorder:SetBlendMode("ADD")
     itemSlotBorder:SetVertexColor(1, 0.84, 0, 0.6)
-
     local itemSlotHighlight = itemSlot:CreateTexture(nil, "HIGHLIGHT")
     itemSlotHighlight:SetAllPoints()
     itemSlotHighlight:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
     itemSlotHighlight:SetBlendMode("ADD")
 
-    local itemSlotName = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    local itemSlotName = editView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     itemSlotName:SetPoint("TOPLEFT", itemSlot, "TOPRIGHT", 6, -1)
-    itemSlotName:SetPoint("RIGHT", editorBox, "RIGHT", -6, 0)
+    itemSlotName:SetPoint("RIGHT", editView, "RIGHT", -6, 0)
     itemSlotName:SetJustifyH("LEFT")
-    itemSlotName:SetText("|cff888888Drag item here|r")
-
-    local itemSlotMarket = editorBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    if itemSlotName.SetWordWrap then itemSlotName:SetWordWrap(false) end
+    itemSlotName:SetText("|cff888888Drop an item here|r")
+    local itemSlotMarket = editView:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     itemSlotMarket:SetPoint("BOTTOMLEFT", itemSlot, "BOTTOMRIGHT", 6, 1)
     itemSlotMarket:SetJustifyH("LEFT")
-    itemSlotMarket:SetText("Market: |cff888888--|r")
+    itemSlotMarket:SetText("Now: |cff888888--|r")
 
     itemSlot:SetScript("OnReceiveDrag", function()
         local cursorType, itemID, itemLink = GetCursorInfo()
@@ -716,7 +973,6 @@ function MarketSync.CreateNotificationsPanel(parent)
             ClearCursor()
         end
     end)
-
     itemSlot:SetScript("OnClick", function(self, button)
         local cursorType, itemID, itemLink = GetCursorInfo()
         if cursorType == "item" then
@@ -724,154 +980,99 @@ function MarketSync.CreateNotificationsPanel(parent)
             ClearCursor()
         elseif button == "RightButton" then
             ClearEditorForm()
-        elseif panel.editorItemLink and (HandleModifiedItemClick(panel.editorItemLink) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(panel.editorItemLink))) then
+        elseif panel.editorItemLink then
+            if HandleModifiedItemClick then HandleModifiedItemClick(panel.editorItemLink) end
         end
     end)
-
     itemSlot:SetScript("OnEnter", function(self)
-        if panel.editorItemLink or panel.editorItemID then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            if panel.editorItemLink then
-                GameTooltip:SetHyperlink(panel.editorItemLink)
-            else
-                GameTooltip:SetItemByID(panel.editorItemID)
-            end
-            GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if panel.editorItemLink then
+            GameTooltip:SetHyperlink(panel.editorItemLink)
+        elseif panel.editorItemID then
+            GameTooltip:SetItemByID(panel.editorItemID)
         else
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText("Item Drop Slot", 1, 0.82, 0)
-            GameTooltip:AddLine("Drag an item from your bag or shift-click a link here to set up an alert.", 0.85, 0.85, 0.85, true)
-            GameTooltip:Show()
+            GameTooltip:AddLine("Drag an item from your bags or shift-click a link to set up an alert.", 0.85, 0.85, 0.85, true)
         end
+        GameTooltip:Show()
     end)
     itemSlot:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(itemSlot, {
-            name = function()
-                return panel.editorItemName or "Item Drop Slot"
-            end,
+            name = function() return panel.editorItemName or "Item Drop Slot" end,
             context = "Button",
             description = "Drop an item from your bags or click with an item to configure price alerts",
         })
     end
 
-    -- Item Target EditBox
-    local targetLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    targetLabel:SetPoint("TOPLEFT", 10, -62)
-    targetLabel:SetText("Item Name or ID:")
-
-    local targetBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
-    targetBox:SetSize(LEFT_W - 20, 20)
-    targetBox:SetPoint("TOPLEFT", 10, -76)
+    local targetBox = CreateFrame("EditBox", nil, editView, "InputBoxTemplate")
+    targetBox:SetSize(RAIL_INNER_W - 6, 18)
+    targetBox:SetPoint("TOPLEFT", editView, "TOPLEFT", 14, -70)
     targetBox:SetAutoFocus(false)
     if MarketSync.RegisterLinkAwareEditBox then
         MarketSync.RegisterLinkAwareEditBox(targetBox, {
             onInsertLink = function(box, text)
                 local id = text and text:match("item:(%d+)")
-                if id then
-                    SetEditorItem(tonumber(id))
-                    return true
-                end
+                if id then SetEditorItem(tonumber(id)); return true end
                 local itemName = text and text:match("%[(.-)%]")
-                if itemName then
-                    SetEditorItem(itemName)
-                    return true
-                end
+                if itemName then SetEditorItem(itemName); return true end
                 return false
             end
         })
     end
-
     if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(targetBox, {
-            name = "Item Target",
-            context = "Edit Box",
-            description = "Enter item name or item ID for price alert",
-        })
+        MarketSync.SetAccessibility(targetBox, { name = "Item Target", context = "Edit Box",
+            description = "Enter item name or item ID for price alert" })
     end
 
-    -- Threshold Input & Preset Buttons (Gold, Silver, Bronze/Copper)
-    local threshLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    threshLabel:SetPoint("TOPLEFT", 10, -100)
-    threshLabel:SetText("Alert Below:")
-
-    local goldBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
-    goldBox:SetSize(40, 20)
-    goldBox:SetPoint("TOPLEFT", 10, -116)
-    goldBox:SetAutoFocus(false)
-    goldBox:SetNumeric(true)
-    if goldBox.SetMaxLetters then goldBox:SetMaxLetters(7) end
-    goldBox:SetText("0")
-
-    local goldLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    goldLabel:SetPoint("LEFT", goldBox, "RIGHT", 2, 0)
-    goldLabel:SetText("|cffffd700g|r")
-
-    local silverBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
-    silverBox:SetSize(24, 20)
-    silverBox:SetPoint("LEFT", goldLabel, "RIGHT", 4, 0)
-    silverBox:SetAutoFocus(false)
-    silverBox:SetNumeric(true)
-    if silverBox.SetMaxLetters then silverBox:SetMaxLetters(2) end
-    silverBox:SetText("0")
-
-    local silverLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    silverLabel:SetPoint("LEFT", silverBox, "RIGHT", 2, 0)
-    silverLabel:SetText("|cffc0c0c0s|r")
-
-    local copperBox = CreateFrame("EditBox", nil, editorBox, "InputBoxTemplate")
-    copperBox:SetSize(24, 20)
-    copperBox:SetPoint("LEFT", silverLabel, "RIGHT", 4, 0)
-    copperBox:SetAutoFocus(false)
-    copperBox:SetNumeric(true)
-    if copperBox.SetMaxLetters then copperBox:SetMaxLetters(2) end
-    copperBox:SetText("0")
-
-    local copperLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    copperLabel:SetPoint("LEFT", copperBox, "RIGHT", 2, 0)
-    copperLabel:SetText("|cffeda55fc|r")
-
-    goldBox:SetScript("OnTabPressed", function() silverBox:SetFocus() end)
-    silverBox:SetScript("OnTabPressed", function() copperBox:SetFocus() end)
-    copperBox:SetScript("OnTabPressed", function() goldBox:SetFocus() end)
-    goldBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    silverBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    copperBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    RailLabel(editView, -94, "Alert when below")
+    local priceBox = CreateFrame("EditBox", nil, editView, "InputBoxTemplate")
+    priceBox:SetSize(RAIL_INNER_W - 6, 18)
+    priceBox:SetPoint("TOPLEFT", editView, "TOPLEFT", 14, -108)
+    priceBox:SetAutoFocus(false)
+    priceBox:SetText("")
+    AttachTip(priceBox, "Alert price", "Type 4g 50s, 450s or 4.5. MarketSync alerts when a listing is at or below it.")
+    panel.priceBox = priceBox
 
     local function GetThresholdCopper()
-        local g = tonumber(goldBox:GetText()) or 0
-        local s = tonumber(silverBox:GetText()) or 0
-        local c = tonumber(copperBox:GetText()) or 0
-        return (g * 10000) + (s * 100) + c
+        return ParseMoneyText(priceBox:GetText())
     end
     panel.GetThresholdCopper = GetThresholdCopper
-
     local function SetThresholdCopper(copper)
-        local c = math.max(0, tonumber(copper) or 0)
-        local g = math.floor(c / 10000)
-        local s = math.floor((c % 10000) / 100)
-        local cop = c % 100
-        goldBox:SetText(tostring(g))
-        silverBox:SetText(tostring(s))
-        copperBox:SetText(tostring(cop))
+        local c = math.max(0, math.floor(tonumber(copper) or 0))
+        priceBox:SetText(c > 0 and MoneyInputText(c) or "")
     end
     panel.SetThresholdCopper = SetThresholdCopper
 
-    -- Auction-house scope: both checked means all scopes in the saved request.
-    local scopeLabel = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    scopeLabel:SetPoint("TOPLEFT", 10, -146)
-    scopeLabel:SetText("Auction houses:")
-    local mainScopeCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
+    local quickW = math.floor((RAIL_INNER_W - 8) / 3)
+    local function QuickButton(index, label, factor, tip)
+        local btn = RailButton(editView, -130, quickW, label, 8 + (index - 1) * (quickW + 4))
+        btn:SetScript("OnClick", function()
+            local market = tonumber(panel.editorMarketPrice) or 0
+            if market <= 0 then
+                SetStatus("No current price for this item yet.", true)
+                return
+            end
+            SetThresholdCopper(math.floor(market * factor))
+        end)
+        AttachTip(btn, label, tip)
+        return btn
+    end
+    QuickButton(1, "Now", 1, "Alert at the current price.")
+    QuickButton(2, "-10%", 0.9, "10% under the current price.")
+    QuickButton(3, "-20%", 0.8, "20% under the current price.")
+
+    RailLabel(editView, -158, "Auction houses")
+    local mainScopeCheck = CreateFrame("CheckButton", nil, editView, "UICheckButtonTemplate")
     mainScopeCheck:SetSize(18, 18)
-    mainScopeCheck:SetPoint("TOPLEFT", 8, -163)
-    local mainScopeText = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    mainScopeCheck:SetPoint("TOPLEFT", editView, "TOPLEFT", 8, -172)
+    local mainScopeText = editView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     mainScopeText:SetPoint("LEFT", mainScopeCheck, "RIGHT", 1, 0)
     mainScopeText:SetText("Main")
-    local neutralScopeCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
+    local neutralScopeCheck = CreateFrame("CheckButton", nil, editView, "UICheckButtonTemplate")
     neutralScopeCheck:SetSize(18, 18)
-    neutralScopeCheck:SetPoint("LEFT", mainScopeText, "RIGHT", 12, 0)
-    local neutralScopeText = editorBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    neutralScopeCheck:SetPoint("LEFT", mainScopeText, "RIGHT", 14, 0)
+    local neutralScopeText = editView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     neutralScopeText:SetPoint("LEFT", neutralScopeCheck, "RIGHT", 1, 0)
     neutralScopeText:SetText("Neutral")
     local function SetScopeChecks(scope)
@@ -890,113 +1091,203 @@ function MarketSync.CreateNotificationsPanel(parent)
     neutralScopeCheck:SetScript("OnClick", UpdateScopeFromChecks)
     SetScopeChecks("all")
 
-    -- Urgent Checkbox
-    local urgentCheck = CreateFrame("CheckButton", nil, editorBox, "UICheckButtonTemplate")
+    local urgentCheck = CreateFrame("CheckButton", nil, editView, "UICheckButtonTemplate")
     urgentCheck:SetSize(18, 18)
-    urgentCheck:SetPoint("TOPLEFT", 10, -194)
+    urgentCheck:SetPoint("TOPLEFT", editView, "TOPLEFT", 8, -194)
     local urgentText = urgentCheck.text or urgentCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     urgentCheck.text = urgentText
-    urgentText:SetText("Urgent (Raid Warning)")
+    urgentText:SetText("Urgent (always shows banner)")
     urgentText:ClearAllPoints()
-    urgentText:SetPoint("LEFT", urgentCheck, "RIGHT", 4, 0)
+    urgentText:SetPoint("LEFT", urgentCheck, "RIGHT", 2, 0)
     urgentCheck:SetChecked(false)
-
-    -- Action Buttons (dynamically sized to never spill over LEFT_W - 20)
-    local saveW = isEmbedded and 100 or 108
-    local clearW = isEmbedded and 50 or 56
-    local btnSave = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnSave:SetSize(saveW, 22)
-    btnSave:SetPoint("TOPLEFT", 10, -220)
-    btnSave:SetText("Add Alert")
-    StyleModernPillButton(btnSave, "Add Alert", true)
-
-    local btnClear = CreateFrame("Button", nil, editorBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnClear:SetSize(clearW, 22)
-    btnClear:SetPoint("LEFT", btnSave, "RIGHT", 6, 0)
-    btnClear:SetText("Clear")
-    StyleModernPillButton(btnClear, "Clear")
-
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(urgentCheck, {
             name = "Urgent Alert",
-            context = function(self)
-                return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked"
-            end,
-            description = "Show raid warning popup on screen when this alert triggers",
-        })
-        MarketSync.SetAccessibility(btnSave, {
-            name = function() return btnSave:GetText() or "Add Alert" end,
-            context = "Button",
-            description = "Save or update this price alert",
-        })
-        MarketSync.SetAccessibility(btnClear, {
-            name = "Clear Form",
-            context = "Button",
-            description = "Reset alert editor fields",
+            context = function(self) return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked" end,
+            description = "Always show the on-screen banner when this alert fires",
         })
     end
 
-    -- =========================================================
-    -- LEFT COLUMN: PREFERRED LIST IMPORT (BOX 2)
-    -- =========================================================
-    local importBox
-    if isEmbedded then
-        importBox = CreateBox(panel, LEFT_X, -292, LEFT_W, 178, "controls")
-        importBox:SetWidth(LEFT_W)
-        importBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, bottomPadding)
-    else
-        importBox = CreateBox(panel, LEFT_X, TOP_Y - 258, LEFT_W, 118, "controls")
+    RailLabel(editView, -218, "Sound")
+    local soundButton = CreateFrame("Button", nil, editView, "UIPanelButtonTemplate")
+    soundButton:SetSize(RAIL_INNER_W - 30, 20)
+    soundButton:SetPoint("TOPLEFT", editView, "TOPLEFT", 8, -232)
+    local soundMenu = CreateFrame("Frame", parentPrefix .. "NotificationsSoundMenu", editView, "UIDropDownMenuTemplate")
+    soundMenu:Hide()
+    soundButton._menu = soundMenu
+    local function SoundLabel(id)
+        if id == nil then return "Default sound" end
+        if id == 0 then return "No sound" end
+        return MarketSync.GetNotificationSoundName and MarketSync.GetNotificationSoundName(id) or tostring(id)
+    end
+    local function RefreshSoundButton() SetDropdownLabel(soundButton, SoundLabel(panel.editorSoundID)) end
+    UIDropDownMenu_Initialize(soundMenu, function(_, level)
+        local def = UIDropDownMenu_CreateInfo()
+        def.text = "Default sound"
+        def.checked = panel.editorSoundID == nil
+        def.func = function() panel.editorSoundID = nil; RefreshSoundButton() end
+        UIDropDownMenu_AddButton(def, level)
+        for _, s in ipairs(MarketSync.StandardSounds or {}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = (s.id == 0) and "No sound" or s.name
+            info.checked = panel.editorSoundID == s.id
+            info.func = function()
+                panel.editorSoundID = s.id
+                RefreshSoundButton()
+                if s.id > 0 and MarketSync.PlayNotificationSound then MarketSync.PlayNotificationSound(s.id, true) end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    soundButton:SetScript("OnClick", function(self) ToggleDropDownMenu(1, nil, soundMenu, self, 0, 0) end)
+    local soundPreview = CreateFrame("Button", nil, editView, "UIPanelButtonTemplate")
+    soundPreview:SetSize(26, 20)
+    soundPreview:SetPoint("LEFT", soundButton, "RIGHT", 4, 0)
+    soundPreview:SetText(">")
+    AttachTip(soundPreview, "Preview", "Plays this alert's sound.")
+    soundPreview:SetScript("OnClick", function()
+        local id = panel.editorSoundID or (MarketSyncDB and MarketSyncDB.NotificationSoundID) or 8959
+        if id > 0 and MarketSync.PlayNotificationSound then MarketSync.PlayNotificationSound(id, true) end
+    end)
+    RefreshSoundButton()
+
+    local btnSave = CreateFrame("Button", nil, editView, "UIPanelButtonTemplate,BackdropTemplate")
+    btnSave:SetSize(RAIL_INNER_W, 22)
+    btnSave:SetPoint("BOTTOMLEFT", editView, "BOTTOMLEFT", 8, 32)
+    btnSave:SetText("Add Alert")
+    local btnPause = CreateFrame("Button", nil, editView, "UIPanelButtonTemplate,BackdropTemplate")
+    btnPause:SetSize(halfW, 22)
+    btnPause:SetPoint("BOTTOMLEFT", editView, "BOTTOMLEFT", 8, 8)
+    btnPause:SetText("Pause")
+    local btnDelete = CreateFrame("Button", nil, editView, "UIPanelButtonTemplate,BackdropTemplate")
+    btnDelete:SetSize(halfW, 22)
+    btnDelete:SetPoint("LEFT", btnPause, "RIGHT", 4, 0)
+    btnDelete:SetText("Delete")
+    local btnClear = btnBack
+    if MarketSync.SetAccessibility then
+        MarketSync.SetAccessibility(btnSave, { name = function() return btnSave:GetText() or "Add Alert" end,
+            context = "Button", description = "Save or update this price alert" })
     end
 
-    local importTitle = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importTitle:SetPoint("TOPLEFT", 10, -7)
-    importTitle:SetText("|cffffd700Preferred List Import|r")
-
-    local importDropdown = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate")
-    local ddWidth = LEFT_W - 20
-    importDropdown:SetSize(ddWidth, 22)
-    local importMenu = CreateFrame("Frame", parentPrefix .. "NotificationsImportDropdown", importBox, "UIDropDownMenuTemplate")
-    importMenu:Hide()
-    importDropdown._menu = importMenu
-    importDropdown:SetPoint("TOPLEFT", importBox, "TOPLEFT", 10, -25)
-    SetDropdownLabel(importDropdown, "All Lists")
-    importDropdown:SetScript("OnClick", function(self)
-        ToggleDropDownMenu(1, nil, importMenu, self, 0, 0)
+    -- =========================================================
+    -- RAIL: History settings and details
+    -- =========================================================
+    local btnMarkAllRead = RailButton(historyView, -8, RAIL_INNER_W, "Mark All Read")
+    btnMarkAllRead:SetScript("OnClick", function()
+        if MarketSync.MarkAllNotificationsRead then MarketSync.MarkAllNotificationsRead() end
+        UpdateSubTabButtons()
+        RefreshHistoryTable()
+    end)
+    RailLabel(historyView, -36, "Show")
+    local HISTORY_FILTERS = {
+        { key = "all", label = "All" },
+        { key = "unread", label = "Unread" },
+        { key = "below", label = "Still below target", tip = "The current lowest price is still at or under the alert price." },
+        { key = "urgent", label = "Urgent only" },
+    }
+    local historyFilterButtons = {}
+    for i, f in ipairs(HISTORY_FILTERS) do
+        local btn = RailButton(historyView, -50 - (i - 1) * 22, RAIL_INNER_W, f.label)
+        btn:SetScript("OnClick", function()
+            panel.historyFilter = f.key
+            panel.historyPage = 0
+            RefreshHistoryTable()
+        end)
+        if f.tip then AttachTip(btn, f.label, f.tip) end
+        btn.filterKey, btn.filterLabel = f.key, f.label
+        historyFilterButtons[i] = btn
+    end
+    RailLabel(historyView, -144, "Seen by")
+    local SOURCE_FILTERS = {
+        { key = "any", label = "Anyone" },
+        { key = "mine", label = "My scans" },
+        { key = "guild", label = "Guild sync" },
+    }
+    local sourceFilterButtons = {}
+    for i, f in ipairs(SOURCE_FILTERS) do
+        local btn = RailButton(historyView, -158 - (i - 1) * 22, RAIL_INNER_W, f.label)
+        btn:SetScript("OnClick", function()
+            panel.sourceFilter = f.key
+            panel.historyPage = 0
+            RefreshHistoryTable()
+        end)
+        btn.filterKey, btn.filterLabel = f.key, f.label
+        sourceFilterButtons[i] = btn
+    end
+    local historyNote = historyView:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    historyNote:SetPoint("BOTTOMLEFT", historyView, "BOTTOMLEFT", 8, 34)
+    historyNote:SetWidth(RAIL_INNER_W)
+    historyNote:SetJustifyH("LEFT")
+    historyNote:SetText("|cff8a806eKeeps the last 50 alerts.|r")
+    local btnClearHistory = CreateFrame("Button", nil, historyView, "UIPanelButtonTemplate,BackdropTemplate")
+    btnClearHistory:SetSize(RAIL_INNER_W, 22)
+    btnClearHistory:SetPoint("BOTTOMLEFT", historyView, "BOTTOMLEFT", 8, 8)
+    btnClearHistory:SetText("Clear History...")
+    if not StaticPopupDialogs then StaticPopupDialogs = {} end
+    StaticPopupDialogs["MARKETSYNC_CLEAR_ALERT_HISTORY"] = StaticPopupDialogs["MARKETSYNC_CLEAR_ALERT_HISTORY"] or {
+        text = "Clear all alert history? Your alerts stay on the watchlist.",
+        button1 = "Clear",
+        button2 = "Cancel",
+        OnAccept = function(_, data) if data and data.onAccept then data.onAccept() end end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+    }
+    local function ClearHistoryNow()
+        if MarketSync.ClearNotificationLog then MarketSync.ClearNotificationLog() end
+        panel.historyPage = 0
+        UpdateSubTabButtons()
+        RefreshHistoryTable()
+    end
+    btnClearHistory:SetScript("OnClick", function()
+        if StaticPopup_Show then
+            StaticPopup_Show("MARKETSYNC_CLEAR_ALERT_HISTORY", nil, nil, { onAccept = ClearHistoryNow })
+        else
+            ClearHistoryNow()
+        end
     end)
 
-    local btnDoImport = CreateFrame("Button", nil, importBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnDoImport:SetSize(LEFT_W - 20, 22)
-    btnDoImport:SetPoint("TOPLEFT", 10, -55)
-    btnDoImport:SetText("Review List Alerts...")
-    StyleModernPillButton(btnDoImport, "Review List Alerts...", true)
-
-    local importStatusText = importBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    importStatusText:SetPoint("TOPLEFT", 10, -83)
-    importStatusText:SetPoint("RIGHT", importBox, "RIGHT", -10, 0)
-    importStatusText:SetJustifyH("LEFT")
-    if importStatusText.SetWordWrap then importStatusText:SetWordWrap(false) end
-    importStatusText:SetText("")
-
-    btnDoImport:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Review List Alerts", 1, 0.82, 0)
-        GameTooltip:AddLine("Preview every item, adjust its alert price and options, then confirm the import.", 0.85, 0.85, 0.85, true)
-        GameTooltip:Show()
-    end)
-    btnDoImport:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local detailBack = CreateFrame("Button", nil, detailView, "UIPanelButtonTemplate")
+    detailBack:SetSize(52, 18)
+    detailBack:SetPoint("TOPRIGHT", detailView, "TOPRIGHT", -8, -5)
+    detailBack:SetText("Back")
+    detailBack:SetScript("OnClick", function() ShowRail("history") end)
+    local detailIcon = detailView:CreateTexture(nil, "ARTWORK")
+    detailIcon:SetSize(32, 32)
+    detailIcon:SetPoint("TOPLEFT", detailView, "TOPLEFT", 8, -28)
+    local detailName = detailView:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    detailName:SetPoint("TOPLEFT", detailIcon, "TOPRIGHT", 6, 0)
+    detailName:SetWidth(RAIL_W - 56)
+    detailName:SetJustifyH("LEFT")
+    if detailName.SetWordWrap then detailName:SetWordWrap(false) end
+    local detailWhen = detailView:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    detailWhen:SetPoint("TOPLEFT", detailName, "BOTTOMLEFT", 0, -3)
+    local detailHeadline = detailView:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    detailHeadline:SetPoint("TOPLEFT", detailView, "TOPLEFT", 8, -70)
+    detailHeadline:SetWidth(RAIL_INNER_W)
+    detailHeadline:SetJustifyH("LEFT")
+    local detailBody = detailView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    detailBody:SetPoint("TOPLEFT", detailView, "TOPLEFT", 8, -110)
+    detailBody:SetPoint("BOTTOMRIGHT", detailView, "BOTTOMRIGHT", -8, 60)
+    detailBody:SetJustifyH("LEFT")
+    if detailBody.SetJustifyV then detailBody:SetJustifyV("TOP") end
+    if detailBody.SetSpacing then detailBody:SetSpacing(3) end
+    local btnDetailSearch = CreateFrame("Button", nil, detailView, "UIPanelButtonTemplate")
+    btnDetailSearch:SetSize(RAIL_INNER_W, 22)
+    btnDetailSearch:SetPoint("BOTTOMLEFT", detailView, "BOTTOMLEFT", 8, 32)
+    btnDetailSearch:SetText("Search in AH")
+    local btnDetailEdit = CreateFrame("Button", nil, detailView, "UIPanelButtonTemplate")
+    btnDetailEdit:SetSize(halfW, 22)
+    btnDetailEdit:SetPoint("BOTTOMLEFT", detailView, "BOTTOMLEFT", 8, 8)
+    btnDetailEdit:SetText("Edit alert")
+    local btnDetailPause = CreateFrame("Button", nil, detailView, "UIPanelButtonTemplate")
+    btnDetailPause:SetSize(halfW, 22)
+    btnDetailPause:SetPoint("LEFT", btnDetailEdit, "RIGHT", 4, 0)
+    btnDetailPause:SetText("Pause alert")
 
     -- =========================================================
-    -- RIGHT COLUMN: ENCLOSING RESULTS BOX (Height 338)
+    -- TABLE
     -- =========================================================
-    local rightBox
-    if isEmbedded then
-        rightBox = CreateBox(panel, RESULTS_X, -34, ROW_WIDTH, 440, "results")
-        rightBox:SetWidth(ROW_WIDTH)
-        rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, bottomPadding)
-    else
-        rightBox = CreateBox(panel, RESULTS_X, TOP_Y, ROW_WIDTH, CONTENT_H, "results")
-    end
-
     local tableScrollBar
     if MarketSync.CreateModernTableScrollBar and rightBox then
         tableScrollBar = MarketSync.CreateModernTableScrollBar(panel, rightBox, function(newPage)
@@ -1007,527 +1298,286 @@ function MarketSync.CreateNotificationsPanel(parent)
                 panel.historyPage = newPage
                 if RefreshHistoryTable then RefreshHistoryTable() end
             end
-        end, 8, -28, 28)
+        end, 8, -24, FOOTER_H + 2)
         panel.tableScrollBar = tableScrollBar
         tableScrollBar:AttachMouseWheel(rightBox)
         tableScrollBar:AttachMouseWheel(panel)
     end
 
-    -- Top Toolbar inside rightBox
-    local searchBox = CreateFrame("EditBox", nil, rightBox, "InputBoxTemplate")
-    searchBox:SetSize(180, 20)
-    searchBox:SetPoint("TOPLEFT", 10, -7)
-    searchBox:SetAutoFocus(false)
-    searchBox:SetText("")
-
-    local searchPlaceholder = searchBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    searchPlaceholder:SetPoint("LEFT", 4, 0)
-    searchPlaceholder:SetText("Search alerts...")
-
-    local btnClearSearch = CreateFrame("Button", nil, searchBox)
-    btnClearSearch:SetSize(16, 16)
-    btnClearSearch:SetPoint("RIGHT", searchBox, "RIGHT", -4, 0)
-    local clearSearchText = btnClearSearch:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    clearSearchText:SetPoint("CENTER")
-    clearSearchText:SetText("X")
-    btnClearSearch:SetScript("OnClick", function()
-        searchBox:SetText("")
-        searchBox:ClearFocus()
-        panel.searchQuery = ""
-        panel.watchlistPage = 0
-        RefreshWatchlistTable()
-    end)
-
-    searchBox:SetScript("OnTextChanged", function(self)
-        local txt = TrimText(self:GetText())
-        if txt == "" then
-            searchPlaceholder:Show()
-            btnClearSearch:Hide()
-        else
-            searchPlaceholder:Hide()
-            btnClearSearch:Show()
-        end
-        panel.searchQuery = txt:lower()
-        panel.watchlistPage = 0
-        RefreshWatchlistTable()
-    end)
-    searchBox:SetScript("OnEscapePressed", function(self)
-        self:SetText("")
-        self:ClearFocus()
-    end)
-
-    -- History Action Buttons
-    local btnMarkAllRead = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnMarkAllRead:SetSize(104, 22)
-    btnMarkAllRead:SetPoint("TOPLEFT", 10, -6)
-    btnMarkAllRead:SetText("Mark All Read")
-    StyleModernPillButton(btnMarkAllRead, "Mark All Read")
-    btnMarkAllRead:SetScript("OnClick", function()
-        if MarketSync.MarkAllNotificationsRead then
-            MarketSync.MarkAllNotificationsRead()
-        end
-        UpdateSubTabButtons()
-        RefreshHistoryTable()
-    end)
-
-    local btnClearHistory = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnClearHistory:SetSize(96, 22)
-    btnClearHistory:SetPoint("LEFT", btnMarkAllRead, "RIGHT", 6, 0)
-    btnClearHistory:SetText("Clear History")
-    StyleModernPillButton(btnClearHistory, "Clear History")
-    btnClearHistory:SetScript("OnClick", function()
-        if MarketSync.ClearNotificationLog then
-            MarketSync.ClearNotificationLog()
-        end
-        panel.historyPage = 0
-        UpdateSubTabButtons()
-        RefreshHistoryTable()
-    end)
-
-    local btnImportString = CreateFrame("Button", nil, rightBox, "UIPanelButtonTemplate,BackdropTemplate")
-    btnImportString:SetSize(116, 22)
-    btnImportString:SetPoint("TOPRIGHT", rightBox, "TOPRIGHT", -8, -5)
-    btnImportString:SetText("Import String...")
-    StyleModernPillButton(btnImportString, "Import String...")
-
-    -- Shared Status label
-    local statusText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    statusText:SetPoint("LEFT", searchBox, "RIGHT", 14, 0)
-    statusText:SetPoint("RIGHT", btnImportString, "LEFT", -8, 0)
-    statusText:SetJustifyH("LEFT")
-    statusText:SetText("")
-
-    local function SetStatus(msg, isError)
-        if isError then
-            statusText:SetText("|cffff4444" .. tostring(msg) .. "|r")
-        else
-            statusText:SetText("|cff00ff00" .. tostring(msg) .. "|r")
-        end
-        C_Timer.After(4, function()
-            if statusText:GetText() == msg then statusText:SetText("") end
-        end)
-    end
-
-    btnImportString:SetScript("OnClick", function()
-        if not MarketSync.ShowListImportDialog then
-            SetStatus("Import codec unavailable.", true)
-            return
-        end
-        MarketSync.ShowListImportDialog({
-            mode = "alerts",
-            onImportAlerts = function(decoded)
-                local candidates = MarketSync.BuildNotificationCandidatesFromDecodedList
-                    and MarketSync.BuildNotificationCandidatesFromDecodedList(decoded) or {}
-                if #candidates == 0 then
-                    SetStatus("No items found in string.", true)
-                    return
-                end
-                ShowBulkImportPopup(decoded.n or "Imported List", candidates, function(count)
-                    SetStatus(string.format("Imported %d alert(s) from %s.", count, tostring(decoded.n or "string")), false)
-                    UpdateSubTabButtons()
-                    RefreshView()
-                end)
-            end,
-        })
-    end)
-
-    -- Horizontal separator bar above headers
-    local headerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
-    headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
-    headerSep:SetPoint("TOPLEFT", 0, -30)
-    headerSep:SetSize(ROW_WIDTH, 1)
-
-    -- Header background strip
     local headerStrip = rightBox:CreateTexture(nil, "BACKGROUND", nil, 1)
     headerStrip:SetColorTexture(MarketSync.GetThemeColor("header"))
-    headerStrip:SetPoint("TOPLEFT", 0, -31)
+    headerStrip:SetPoint("TOPLEFT", 4, -4)
     headerStrip:SetSize(ROW_WIDTH, 18)
+    local headerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
+    headerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
+    headerSep:SetPoint("TOPLEFT", 4, -22)
+    headerSep:SetSize(ROW_WIDTH, 1)
 
-    -- Watchlist column headers
-    local wHdrIcon = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrIcon:SetPoint("TOPLEFT", 10, -34)
-    wHdrIcon:SetText("Item")
+    -- Column layouts: { key, label, width, justify, tooltip }. Item takes the rest.
+    local WATCH_COLUMNS = {
+        { "name", "Item", 0, "LEFT" },
+        { "at", "Alert at", 74, "RIGHT", "The alert fires when a listing is at or below this price." },
+        { "now", "Now", 74, "RIGHT", "Cheapest price last seen in the auction houses this alert watches." },
+        { "close", "How close", 86, "RIGHT", "How far the current price is above the alert price." },
+        { "scope", "AH", 52, "LEFT" },
+        { "last", "Last fired", 66, "LEFT" },
+        { "on", "On", 28, "CENTER", "Untick to pause this alert." },
+    }
+    local HISTORY_COLUMNS = {
+        { "time", "Time", 62, "LEFT" },
+        { "name", "Item", 0, "LEFT" },
+        { "price", "Dropped to", 74, "RIGHT" },
+        { "target", "Target", 70, "RIGHT" },
+        { "saved", "Under", 46, "RIGHT", "How far under the alert price the listing was." },
+        { "scope", "AH", 50, "LEFT" },
+        { "source", "Seen by", 92, "LEFT", "My scan: your own Auction House scan. Guild sync: a guild member's shared scan." },
+    }
+    local function LayoutColumns(columns)
+        local fixed = 0
+        for _, c in ipairs(columns) do fixed = fixed + c[3] end
+        local out, x = {}, 0
+        for _, c in ipairs(columns) do
+            local width = (c[3] > 0) and c[3] or (ROW_WIDTH - 8 - fixed)
+            out[c[1]] = { x = x, width = width, justify = c[4], label = c[2], tip = c[5] }
+            out[#out + 1] = out[c[1]]
+            x = x + width
+        end
+        return out
+    end
+    local watchLayout = LayoutColumns(WATCH_COLUMNS)
+    local historyLayout = LayoutColumns(HISTORY_COLUMNS)
 
-    local wHdrThresh = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrThresh:SetPoint("TOPLEFT", isEmbedded and 245 or 275, -34)
-    wHdrThresh:SetText("Threshold")
-
-    local wHdrScope = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrScope:SetPoint("TOPLEFT", isEmbedded and 360 or 395, -34)
-    wHdrScope:SetText("Scope")
-
-    local wHdrActive = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrActive:SetPoint("TOPLEFT", isEmbedded and 445 or 480, -34)
-    wHdrActive:SetText("Active")
-
-    local wHdrDel = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    wHdrDel:SetPoint("TOPLEFT", isEmbedded and 505 or 540, -34)
-    wHdrDel:SetText("Del")
-
-    -- History column headers
-    local hHdrTime = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrTime:SetPoint("TOPLEFT", 10, -34)
-    hHdrTime:SetText("Time")
-
-    local hHdrItem = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrItem:SetPoint("TOPLEFT", isEmbedded and 70 or 75, -34)
-    hHdrItem:SetText("Item")
-
-    local hHdrPrice = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrPrice:SetPoint("TOPLEFT", isEmbedded and 235 or 275, -34)
-    hHdrPrice:SetText("Alert Price")
-
-    local hHdrThresh = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrThresh:SetPoint("TOPLEFT", isEmbedded and 325 or 365, -34)
-    hHdrThresh:SetText("Target")
-
-    local hHdrScope = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrScope:SetPoint("TOPLEFT", isEmbedded and 410 or 450, -34)
-    hHdrScope:SetText("Scope")
-
-    local hHdrSource = rightBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    hHdrSource:SetPoint("TOPLEFT", isEmbedded and 475 or 515, -34)
-    hHdrSource:SetText("Source")
-
-    local function UpdateHeaderVisibility()
-        local isWatch = (panel.currentView == "watchlist")
-        searchBox:SetShown(isWatch)
-        wHdrIcon:SetShown(isWatch)
-        wHdrThresh:SetShown(isWatch)
-        wHdrScope:SetShown(isWatch)
-        wHdrActive:SetShown(isWatch)
-        wHdrDel:SetShown(isWatch)
-
-        btnMarkAllRead:SetShown(not isWatch)
-        btnClearHistory:SetShown(not isWatch)
-        hHdrTime:SetShown(not isWatch)
-        hHdrItem:SetShown(not isWatch)
-        hHdrPrice:SetShown(not isWatch)
-        hHdrThresh:SetShown(not isWatch)
-        hHdrScope:SetShown(not isWatch)
-        hHdrSource:SetShown(not isWatch)
+    local headerLabels = {}
+    for i = 1, 7 do
+        local hdr = CreateFrame("Frame", nil, rightBox)
+        hdr:SetSize(60, 18)
+        hdr.text = hdr:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+        hdr.text:SetPoint("TOPLEFT", hdr, "TOPLEFT", 0, 0)
+        hdr.text:SetPoint("BOTTOMRIGHT", hdr, "BOTTOMRIGHT", 0, 0)
+        if hdr.EnableMouse then hdr:EnableMouse(true) end
+        hdr:SetScript("OnEnter", function(self)
+            if not self.tip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(self.label or "", 1, 0.82, 0)
+            GameTooltip:AddLine(self.tip, 0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        hdr:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        headerLabels[i] = hdr
+    end
+    local function ApplyHeaders(layout, iconOffset)
+        for i, hdr in ipairs(headerLabels) do
+            local col = layout[i]
+            if col then
+                hdr:ClearAllPoints()
+                local x = 8 + col.x + ((col.label == "Item") and iconOffset or 0)
+                hdr:SetPoint("TOPLEFT", rightBox, "TOPLEFT", x, -4)
+                hdr:SetSize(math.max(10, col.width - 6 - ((col.label == "Item") and iconOffset or 0)), 18)
+                hdr.text:SetJustifyH(col.justify)
+                hdr.text:SetText(col.label)
+                hdr.label, hdr.tip = col.label, col.tip
+                hdr:Show()
+            else
+                hdr:Hide()
+            end
+        end
     end
 
-    -- =========================================================
-    -- TABLE ROWS (9 Rows, 27px height each)
-    -- =========================================================
     local rows = {}
     local emptyLabel = rightBox:CreateFontString(nil, "ARTWORK", "GameFontDisable")
     emptyLabel:SetPoint("CENTER", rightBox, "CENTER", 0, 10)
+    emptyLabel:SetWidth(ROW_WIDTH - 40)
     emptyLabel:SetText("")
+
+    local function Cell(row, justify)
+        local fs = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        fs:SetJustifyH(justify or "LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        return fs
+    end
+    local function PlaceCell(fs, col, height, extraX)
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", fs:GetParent(), "LEFT", 4 + col.x + (extraX or 0), 0)
+        fs:SetSize(math.max(10, col.width - 6 - (extraX or 0)), height)
+        fs:SetJustifyH(col.justify)
+    end
 
     for i = 1, numRowsPerPage do
         local row = CreateFrame("Button", nil, rightBox)
-        row:SetSize(ROW_WIDTH - 8, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", rightBox, "TOPLEFT", 4, -51 - ((i - 1) * 28))
+        row:SetSize(ROW_WIDTH - 8, ROW_H - 1)
+        row:SetPoint("TOPLEFT", rightBox, "TOPLEFT", 8, -(HEADER_H + 4) - ((i - 1) * ROW_H))
 
         local bg = row:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(MarketSync.GetThemeColor(i % 2 == 0 and "rowEven" or "rowOdd"))
-        row.bg = bg
-
         local hl = row:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
         hl:SetTexture("Interface\\Buttons\\UI-Listbox-Highlight")
         if hl.SetBlendMode then hl:SetBlendMode("ADD") end
         if hl.SetAlpha then hl:SetAlpha(0.28) end
-
         local accent = row:CreateTexture(nil, "OVERLAY")
-        accent:SetSize(3, ROW_HEIGHT)
+        accent:SetSize(3, ROW_H - 1)
         accent:SetPoint("LEFT")
         accent:SetColorTexture(1, 0.84, 0, 0.9)
         accent:Hide()
         row.accent = accent
 
-        -- Icon button (shared)
         local iconBtn = CreateFrame("Button", nil, row)
         iconBtn:SetSize(20, 20)
-        iconBtn:SetPoint("LEFT", 4, 0)
         local iconTex = iconBtn:CreateTexture(nil, "BORDER")
         iconTex:SetAllPoints()
-        row.iconTex = iconTex
-        row.iconBtn = iconBtn
-
+        row.iconTex, row.iconBtn = iconTex, iconBtn
         iconBtn:SetScript("OnEnter", function(self)
             if row.itemLink or row.itemID then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                if row.itemLink then
-                    GameTooltip:SetHyperlink(row.itemLink)
-                else
-                    GameTooltip:SetItemByID(row.itemID)
-                end
+                if row.itemLink then GameTooltip:SetHyperlink(row.itemLink) else GameTooltip:SetItemByID(row.itemID) end
                 GameTooltip:Show()
             end
         end)
         iconBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        -- Watchlist items
-        local wName = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wName:SetPoint("LEFT", iconBtn, "RIGHT", 6, 0)
-        wName:SetSize(isEmbedded and 205 or 235, 20)
-        wName:SetJustifyH("LEFT")
-        row.wName = wName
+        row.cells = {}
+        for _, key in ipairs({ "c1", "c2", "c3", "c4", "c5", "c6", "c7" }) do
+            row.cells[key] = Cell(row)
+        end
+        row.wActiveCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+        row.wActiveCheck:SetSize(18, 18)
 
-        local wThresh = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wThresh:SetPoint("LEFT", isEmbedded and 241 or 271, 0)
-        wThresh:SetSize(isEmbedded and 105 or 110, 20)
-        wThresh:SetJustifyH("LEFT")
-        row.wThresh = wThresh
-
-        local wScope = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wScope:SetPoint("LEFT", isEmbedded and 356 or 391, 0)
-        wScope:SetSize(isEmbedded and 75 or 75, 20)
-        wScope:SetJustifyH("LEFT")
-        row.wScope = wScope
-
-        local wCooldown = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        wCooldown:Hide()
-        row.wCooldown = wCooldown
-
-        local wActiveCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-        wActiveCheck:SetSize(18, 18)
-        wActiveCheck:SetPoint("LEFT", isEmbedded and 447 or 482, 0)
-        row.wActiveCheck = wActiveCheck
-
-        local wDelBtn = CreateFrame("Button", nil, row)
-        wDelBtn:SetSize(18, 18)
-        wDelBtn:SetPoint("LEFT", isEmbedded and 505 or 540, 0)
-        local delText = wDelBtn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        delText:SetPoint("CENTER")
-        delText:SetText("|cffff5555X|r")
-        wDelBtn:SetScript("OnEnter", function() delText:SetText("|cffff2222X|r") end)
-        wDelBtn:SetScript("OnLeave", function() delText:SetText("|cffff5555X|r") end)
-        row.wDelBtn = wDelBtn
-
-        -- History items
-        local hTime = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-        hTime:SetPoint("LEFT", 4, 0)
-        hTime:SetSize(58, 20)
-        hTime:SetJustifyH("LEFT")
-        row.hTime = hTime
-
-        local hName = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hName:SetPoint("LEFT", iconBtn, "RIGHT", 6, 0)
-        hName:SetSize(isEmbedded and 150 or 165, 20)
-        hName:SetJustifyH("LEFT")
-        row.hName = hName
-
-        local hPrice = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hPrice:SetPoint("LEFT", isEmbedded and 231 or 271, 0)
-        hPrice:SetSize(85, 20)
-        hPrice:SetJustifyH("LEFT")
-        row.hPrice = hPrice
-
-        local hThresh = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hThresh:SetPoint("LEFT", isEmbedded and 321 or 361, 0)
-        hThresh:SetSize(80, 20)
-        hThresh:SetJustifyH("LEFT")
-        row.hThresh = hThresh
-
-        local hScope = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        hScope:SetPoint("LEFT", isEmbedded and 406 or 446, 0)
-        hScope:SetSize(isEmbedded and 60 or 55, 20)
-        hScope:SetJustifyH("LEFT")
-        row.hScope = hScope
-
-        local hSource = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-        hSource:SetPoint("LEFT", isEmbedded and 471 or 511, 0)
-        hSource:SetSize(58, 20)
-        hSource:SetJustifyH("LEFT")
-        row.hSource = hSource
-
-        -- Row click handler (Left click: load into editor; Right click: context menu)
         local function HandleRowClick(self, button)
             if button == "RightButton" then
-                if row.request then
-                    local req = row.request
-                    local customActions = {
-                        {
-                            text = "Edit in Alert Form",
-                            func = function()
-                                SetEditorItem(req.matchValue or req.displayName or row.itemID)
-                                panel.editorEditingID = req.id
-                                btnSave:SetText("Update Alert")
-                                SetThresholdCopper(req.thresholdCopper)
-                                SetScopeChecks(req.scope or "all")
-                                urgentCheck:SetChecked(req.urgent == true)
-                            end
-                        },
-                        {
-                            text = (req.enabled ~= false) and "Disable Alert" or "Enable Alert",
-                            func = function()
-                                if MarketSync.ToggleNotificationRequest then
-                                    MarketSync.ToggleNotificationRequest(req.id)
-                                else
-                                    req.enabled = not (req.enabled ~= false)
-                                end
-                                RefreshView()
-                            end
-                        },
-                        {
-                            text = "Delete Alert",
-                            func = function()
-                                if MarketSync.DeleteNotificationRequest then
-                                    MarketSync.DeleteNotificationRequest(req.id)
-                                    RefreshView()
-                                end
-                            end
-                        },
+                local req, h = row.request, row.historyEntry
+                local customActions = {}
+                if req then
+                    customActions = {
+                        { text = "Edit Alert", func = function() panel.OpenEditorForRequest(req) end },
+                        { text = (req.enabled ~= false) and "Pause Alert" or "Resume Alert", func = function()
+                            req.enabled = not (req.enabled ~= false)
+                            MarketSync.UpsertNotificationRequest(req)
+                            RefreshView()
+                        end },
+                        { text = "Delete Alert", func = function()
+                            MarketSync.DeleteNotificationRequest(req.id)
+                            RefreshView()
+                        end },
                     }
-                    if MarketSync.ShowItemContextMenu then
-                        MarketSync.ShowItemContextMenu(row, {
-                            itemID = row.itemID,
-                            itemLink = row.itemLink,
-                            itemName = req.displayName or row.itemName,
-                            price = req.thresholdCopper,
-                            customActions = customActions,
-                        })
-                    end
-                elseif row.historyEntry then
-                    local h = row.historyEntry
-                    local customActions = {
-                        {
-                            text = "Load into Alert Form",
-                            func = function()
-                                SetEditorItem(h.itemLink or h.itemID or h.itemName)
-                                SetThresholdCopper(h.threshold)
-                            end
-                        }
+                elseif h then
+                    customActions = {
+                        { text = "Load into Alert Form", func = function()
+                            SetEditorItem(h.itemLink or h.itemID or h.itemName)
+                            SetThresholdCopper(h.threshold)
+                            ShowRail("edit")
+                        end },
                     }
-                    if MarketSync.ShowItemContextMenu then
-                        MarketSync.ShowItemContextMenu(row, {
-                            itemID = row.itemID,
-                            itemLink = row.itemLink or h.itemLink,
-                            itemName = h.itemName or row.itemName,
-                            price = h.price or h.threshold,
-                            customActions = customActions,
-                        })
-                    end
+                end
+                if MarketSync.ShowItemContextMenu then
+                    MarketSync.ShowItemContextMenu(row, {
+                        itemID = row.itemID,
+                        itemLink = row.itemLink,
+                        itemName = (req and req.displayName) or (h and h.itemName),
+                        price = (req and req.thresholdCopper) or (h and (h.price or h.threshold)),
+                        customActions = customActions,
+                    })
                 end
                 return
             end
-
-            -- Left click: load into editor
             if row.request then
-                SetEditorItem(row.request.matchValue or row.request.displayName or row.itemID)
-                panel.editorEditingID = row.request.id
-                btnSave:SetText("Update Alert")
-                SetThresholdCopper(row.request.thresholdCopper)
-                SetScopeChecks(row.request.scope or "all")
-                urgentCheck:SetChecked(row.request.urgent == true)
+                panel.OpenEditorForRequest(row.request)
             elseif row.historyEntry then
-                SetEditorItem(row.historyEntry.itemLink or row.historyEntry.itemID or row.historyEntry.itemName)
-                SetThresholdCopper(row.historyEntry.threshold)
+                ShowHistoryDetails(row.historyEntry)
             end
         end
-
         row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         row:SetScript("OnClick", HandleRowClick)
         iconBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         iconBtn:SetScript("OnClick", HandleRowClick)
-
         if tableScrollBar then
             tableScrollBar:AttachMouseWheel(row)
             tableScrollBar:AttachMouseWheel(iconBtn)
         end
-
+        row:Hide()
         rows[i] = row
     end
 
-    -- Footer inside rightBox
-    local footerSep = rightBox:CreateTexture(nil, "BACKGROUND", nil, 2)
-    footerSep:SetColorTexture(MarketSync.GetThemeColor("headerBorder"))
-    footerSep:SetPoint("BOTTOMLEFT", 0, 30)
-    footerSep:SetSize(ROW_WIDTH, 1)
-
-    local countText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    countText:SetPoint("BOTTOMLEFT", 10, 8)
-    countText:SetText("")
-
     local btnPrev = CreateFrame("Button", nil, rightBox)
     btnPrev:SetSize(20, 20)
-    btnPrev:SetPoint("BOTTOMRIGHT", -48, 6)
+    btnPrev:SetPoint("BOTTOMRIGHT", -32, 6)
     btnPrev:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
     btnPrev:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     btnPrev:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
-    local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
-    if pnt and pnt.SetVertexColor then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
-
     local btnNext = CreateFrame("Button", nil, rightBox)
     btnNext:SetSize(20, 20)
     btnNext:SetPoint("LEFT", btnPrev, "RIGHT", 4, 0)
     btnNext:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
     btnNext:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
     btnNext:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
-    local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
-    if nnt and nnt.SetVertexColor then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
-
     local pageText = rightBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    pageText:SetPoint("RIGHT", btnPrev, "LEFT", -8, 0)
+    pageText:SetPoint("RIGHT", btnPrev, "LEFT", -4, 0)
     pageText:SetJustifyH("RIGHT")
-    pageText:SetText("1 / 1")
-
+    pageText:SetText("1/1")
     if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(btnPrev, {
-            name = "Previous Page",
-            context = "Button",
-            description = "Go to previous page of alerts",
-        })
-        MarketSync.SetAccessibility(btnNext, {
-            name = "Next Page",
-            context = "Button",
-            description = "Go to next page of alerts",
-        })
+        MarketSync.SetAccessibility(btnPrev, { name = "Previous Page", context = "Button", description = "Go to previous page of alerts" })
+        MarketSync.SetAccessibility(btnNext, { name = "Next Page", context = "Button", description = "Go to next page of alerts" })
     end
-
+    local function UpdatePager(page, maxPage)
+        local hasPrev, hasNext = page > 0, page < maxPage
+        btnPrev:SetEnabled(hasPrev)
+        btnNext:SetEnabled(hasNext)
+        local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
+        if pnt and pnt.SetVertexColor then pnt:SetVertexColor(MarketSync.GetThemeColor(hasPrev and "arrow" or "arrowDisabled")) end
+        local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
+        if nnt and nnt.SetVertexColor then nnt:SetVertexColor(MarketSync.GetThemeColor(hasNext and "arrow" or "arrowDisabled")) end
+        pageText:SetText(string.format("%d/%d", page + 1, maxPage + 1))
+        if tableScrollBar then tableScrollBar:Update(page, maxPage) end
+    end
     btnPrev:SetScript("OnClick", function()
         if panel.currentView == "watchlist" then
-            if panel.watchlistPage > 0 then
-                panel.watchlistPage = panel.watchlistPage - 1
-                RefreshWatchlistTable()
-            end
-        else
-            if panel.historyPage > 0 then
-                panel.historyPage = panel.historyPage - 1
-                RefreshHistoryTable()
-            end
+            if panel.watchlistPage > 0 then panel.watchlistPage = panel.watchlistPage - 1; RefreshWatchlistTable() end
+        elseif panel.historyPage > 0 then
+            panel.historyPage = panel.historyPage - 1; RefreshHistoryTable()
         end
     end)
-
     btnNext:SetScript("OnClick", function()
         if panel.currentView == "watchlist" then
-            panel.watchlistPage = panel.watchlistPage + 1
-            RefreshWatchlistTable()
+            panel.watchlistPage = panel.watchlistPage + 1; RefreshWatchlistTable()
         else
-            panel.historyPage = panel.historyPage + 1
-            RefreshHistoryTable()
+            panel.historyPage = panel.historyPage + 1; RefreshHistoryTable()
         end
     end)
-
-    -- Mousewheel pagination
     panel:EnableMouseWheel(true)
     panel:SetScript("OnMouseWheel", function(self, delta)
-        if delta > 0 then
-            btnPrev:Click()
-        else
-            btnNext:Click()
-        end
+        if delta > 0 then btnPrev:Click() else btnNext:Click() end
     end)
 
     -- =========================================================
-    -- EDITOR LOGIC & ITEM RESOLUTION
+    -- EDITOR LOGIC
     -- =========================================================
+    local function CurrentPriceFor(link, itemID, raw)
+        local priceInfo = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(link or itemID or raw)
+        local marketPrice = priceInfo and tonumber(priceInfo.price) or 0
+        if marketPrice <= 0 then
+            marketPrice = (MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(link or itemID or raw)) or 0
+        end
+        return marketPrice
+    end
+
+    local function ShowEditorFor(req)
+        editorTitle:SetText(req and "Edit alert" or "New alert")
+        btnSave:SetText(req and "Update Alert" or "Add Alert")
+        SetControlVisible(btnPause, req ~= nil)
+        SetControlVisible(btnDelete, req ~= nil)
+        if req then btnPause:SetText(req.enabled ~= false and "Pause" or "Resume") end
+    end
+
     SetEditorItem = function(itemOrLink)
         if not itemOrLink then return end
         local raw = tostring(itemOrLink)
-        local itemID, suffix = MarketSync.ParseItemIDFromDBKey(raw)
+        local itemID = MarketSync.ParseItemIDFromDBKey and MarketSync.ParseItemIDFromDBKey(raw)
         if not itemID then
             itemID = tonumber(raw:match("item:(%d+)") or raw:match("^(%d+)$"))
         end
         if not itemID and MarketSync.ResolveItemID then
             itemID = MarketSync.ResolveItemID(raw)
         end
-
         local name, link, quality, _, _, _, _, _, _, icon
         if itemID then
             name, link, quality, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
@@ -1535,42 +1585,27 @@ function MarketSync.CreateNotificationsPanel(parent)
             name, link, quality, _, _, _, _, _, _, icon = SafeGetItemInfo(raw)
             if link then itemID = tonumber(link:match("item:(%d+)")) end
         end
-
         panel.editorItemID = itemID
         panel.editorItemLink = link
         panel.editorItemName = name or raw
 
         itemSlotIcon:SetTexture(icon or SafeGetItemIcon(itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
-        if quality and quality > 1 then
+        if quality and quality > 1 and GetItemQualityColor then
             local r, g, b = GetItemQualityColor(quality)
             itemSlotBorder:SetVertexColor(r, g, b, 0.8)
         else
             itemSlotBorder:SetVertexColor(1, 0.84, 0, 0.5)
         end
-
-        if link then
-            itemSlotName:SetText(link)
-        elseif name then
-            itemSlotName:SetText(name)
-        else
-            itemSlotName:SetText(raw)
-        end
+        itemSlotName:SetText(link or name or raw)
         targetBox:SetText(name or raw)
 
-        -- Check market price
-        local priceInfo = MarketSync.GetItemPriceAndScanInfo and MarketSync.GetItemPriceAndScanInfo(link or itemID or raw)
-        local marketPrice = priceInfo and tonumber(priceInfo.price) or 0
-        if marketPrice <= 0 then
-            marketPrice = (MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(link or itemID or raw)) or 0
-        end
+        local marketPrice = CurrentPriceFor(link, itemID, raw)
         panel.editorMarketPrice = marketPrice
         local savedRequest
         if MarketSync.ListNotificationRequests then
             for _, req in ipairs(MarketSync.ListNotificationRequests()) do
-                local matchesID = itemID and req.matchType == "itemID"
-                    and tonumber(req.matchValue) == itemID
-                local matchesName = name and req.matchType == "name"
-                    and tostring(req.matchValue):lower() == name:lower()
+                local matchesID = itemID and req.matchType == "itemID" and tonumber(req.matchValue) == itemID
+                local matchesName = name and req.matchType == "name" and tostring(req.matchValue):lower() == name:lower()
                 if matchesID or matchesName then
                     savedRequest = req
                     if req.scope == panel.editorScope then break end
@@ -1578,68 +1613,76 @@ function MarketSync.CreateNotificationsPanel(parent)
             end
         end
         panel.editorEditingID = savedRequest and savedRequest.id or nil
-        btnSave:SetText(savedRequest and "Update Alert" or "Add Alert")
+        panel.editorRequest = savedRequest
+        ShowEditorFor(savedRequest)
         if savedRequest then
             SetThresholdCopper(savedRequest.thresholdCopper)
             SetScopeChecks(savedRequest.scope or "all")
             urgentCheck:SetChecked(savedRequest.urgent == true)
+            local per = MarketSyncDB and MarketSyncDB.PerNotificationSounds
+            panel.editorSoundID = per and per[savedRequest.id] or nil
         elseif marketPrice > 0 then
             SetThresholdCopper(math.floor(marketPrice))
         else
             SetThresholdCopper(0)
         end
-        if marketPrice > 0 then
-            itemSlotMarket:SetText("Market: " .. FormatMoneyColored(marketPrice))
-        else
-            itemSlotMarket:SetText("Market: |cff888888--|r")
-        end
+        RefreshSoundButton()
+        itemSlotMarket:SetText("Now: " .. (marketPrice > 0 and FormatMoneyColored(marketPrice) or "|cff888888--|r"))
     end
     panel.SetEditorItem = SetEditorItem
 
+    panel.OpenEditorForRequest = function(req)
+        SetEditorItem(req.matchValue or req.displayName)
+        panel.editorEditingID = req.id
+        panel.editorRequest = req
+        ShowEditorFor(req)
+        SetThresholdCopper(req.thresholdCopper)
+        SetScopeChecks(req.scope or "all")
+        urgentCheck:SetChecked(req.urgent == true)
+        local per = MarketSyncDB and MarketSyncDB.PerNotificationSounds
+        panel.editorSoundID = per and per[req.id] or nil
+        RefreshSoundButton()
+        ShowRail("edit")
+    end
+
     ClearEditorForm = function()
         panel.editorEditingID = nil
+        panel.editorRequest = nil
         panel.editorItemID = nil
         panel.editorItemLink = nil
         panel.editorItemName = nil
         panel.editorMarketPrice = 0
+        panel.editorSoundID = nil
+        panel.editorOrigin = nil
         itemSlotIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         itemSlotBorder:SetVertexColor(1, 0.84, 0, 0.5)
-        itemSlotName:SetText("|cff888888Drag item here|r")
-        itemSlotMarket:SetText("Market: |cff888888--|r")
+        itemSlotName:SetText("|cff888888Drop an item here|r")
+        itemSlotMarket:SetText("Now: |cff888888--|r")
         targetBox:SetText("")
         SetThresholdCopper(0)
         SetScopeChecks("all")
         urgentCheck:SetChecked(false)
-        btnSave:SetText("Add Alert")
+        RefreshSoundButton()
+        ShowEditorFor(nil)
     end
-
-    btnClear:SetScript("OnClick", ClearEditorForm)
+    panel.ClearEditorForm = ClearEditorForm
 
     targetBox:SetScript("OnEnterPressed", function(self)
         local val = TrimText(self:GetText())
-        if val ~= "" then
-            SetEditorItem(val)
-        end
+        if val ~= "" then SetEditorItem(val) end
         self:ClearFocus()
     end)
     targetBox:SetScript("OnEditFocusLost", function(self)
         local val = TrimText(self:GetText())
-        if val ~= "" and not panel.editorItemID then
-            SetEditorItem(val)
-        end
+        if val ~= "" and not panel.editorItemID then SetEditorItem(val) end
     end)
     targetBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    local function OnCoinEnterPressed(self)
-        self:ClearFocus()
-        btnSave:Click()
-    end
-    goldBox:SetScript("OnEnterPressed", OnCoinEnterPressed)
-    goldBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    silverBox:SetScript("OnEnterPressed", OnCoinEnterPressed)
-    silverBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    copperBox:SetScript("OnEnterPressed", OnCoinEnterPressed)
-    copperBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    priceBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); btnSave:Click() end)
+    priceBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    priceBox:SetScript("OnEditFocusLost", function(self)
+        local copper = ParseMoneyText(self:GetText())
+        if copper > 0 then self:SetText(MoneyInputText(copper)) end
+    end)
 
     btnSave:SetScript("OnClick", function()
         local rawTarget = TrimText(targetBox:GetText())
@@ -1647,27 +1690,21 @@ function MarketSync.CreateNotificationsPanel(parent)
             SetStatus("Enter an item name or drop an item.", true)
             return
         end
-
         local threshCopper = GetThresholdCopper()
         if threshCopper <= 0 then
-            SetStatus("Set a threshold price greater than 0.", true)
+            SetStatus("Set an alert price above 0.", true)
             return
         end
-
-        local matchType = "name"
-        local matchValue = rawTarget:lower()
+        local matchType, matchValue = "name", rawTarget:lower()
         local displayName = panel.editorItemName or rawTarget
         if panel.editorItemID then
-            matchType = "itemID"
-            matchValue = panel.editorItemID
+            matchType, matchValue = "itemID", panel.editorItemID
         end
-
         local reqID = panel.editorEditingID
         if not reqID then
-            local scope = panel.editorScope or "all"
-            reqID = string.format("%s:%s:%s", matchType, tostring(matchValue), scope)
+            reqID = string.format("%s:%s:%s", matchType, tostring(matchValue), panel.editorScope or "all")
         end
-
+        local previous = panel.editorRequest
         local req = MarketSync.UpsertNotificationRequest({
             id = reqID,
             matchType = matchType,
@@ -1678,20 +1715,43 @@ function MarketSync.CreateNotificationsPanel(parent)
             variantMode = "any_suffix",
             cooldownSec = 3600,
             urgent = urgentCheck:GetChecked() and true or false,
-            enabled = true,
+            enabled = previous and previous.enabled ~= false or true,
+            origin = panel.editorOrigin,
         })
-
         if req then
-            SetStatus(panel.editorEditingID and "Alert updated!" or "Alert added!")
+            if MarketSyncDB then
+                MarketSyncDB.PerNotificationSounds = MarketSyncDB.PerNotificationSounds or {}
+                MarketSyncDB.PerNotificationSounds[req.id] = panel.editorSoundID
+            end
+            SetStatus(panel.editorEditingID and "Alert updated." or "Alert added.")
             ClearEditorForm()
+            ShowRail("watch")
             RefreshWatchlistTable()
         else
             SetStatus("Failed to save alert.", true)
         end
     end)
+    btnPause:SetScript("OnClick", function()
+        local req = panel.editorRequest
+        if not req then return end
+        req.enabled = not (req.enabled ~= false)
+        MarketSync.UpsertNotificationRequest(req)
+        ShowEditorFor(req)
+        SetStatus(req.enabled and "Alert resumed." or "Alert paused.")
+        RefreshWatchlistTable()
+    end)
+    btnDelete:SetScript("OnClick", function()
+        local req = panel.editorRequest
+        if not req then return end
+        MarketSync.DeleteNotificationRequest(req.id)
+        SetStatus("Alert deleted.")
+        ClearEditorForm()
+        ShowRail("watch")
+        RefreshWatchlistTable()
+    end)
 
     -- =========================================================
-    -- LIST IMPORT CONTROLS
+    -- LIST IMPORT
     -- =========================================================
     RefreshImportDropdown = function()
         local lists = MarketSync.GetImportableListNames and MarketSync.GetImportableListNames() or {}
@@ -1704,7 +1764,6 @@ function MarketSync.CreateNotificationsPanel(parent)
                 SetDropdownLabel(importDropdown, "All Lists")
             end
             UIDropDownMenu_AddButton(infoAll, level)
-
             for _, item in ipairs(lists) do
                 local info = UIDropDownMenu_CreateInfo()
                 info.text = item.label or item.name
@@ -1725,329 +1784,367 @@ function MarketSync.CreateNotificationsPanel(parent)
                 panel.importSelectedSource, (MarketSyncDB and MarketSyncDB.AlertUndercutPct) or 10)
             or {}
         if #candidates == 0 then
-            importStatusText:SetText("|cffff4444Selected list has no items.|r")
+            SetStatus("That list has no items.", true)
             return
         end
         local label = panel.importSelectedList == "__ALL__" and "All Lists" or panel.importSelectedList
         ShowBulkImportPopup(label, candidates, function(imported)
-            importStatusText:SetText(string.format("|cff00ff00Imported %d alert(s)!|r", imported))
+            SetStatus(string.format("Imported %d alert(s).", imported))
             panel.watchlistPage = 0
             RefreshWatchlistTable()
-            C_Timer.After(4, function() importStatusText:SetText("") end)
         end)
     end)
 
-    -- =========================================================
-    -- WATCHLIST TABLE REFRESH
-    -- =========================================================
-    RefreshWatchlistTable = function()
-        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
-        local reqMap = realmDB and realmDB.NotificationRequests or {}
-        local allReqs = {}
-
-        for _, req in pairs(reqMap) do
-            local matchesSearch = true
-            if panel.searchQuery and panel.searchQuery ~= "" then
-                local name = tostring(req.displayName or req.matchValue or ""):lower()
-                matchesSearch = (name:find(panel.searchQuery, 1, true) ~= nil)
-            end
-            if matchesSearch then
-                table.insert(allReqs, req)
-            end
+    btnImportString:SetScript("OnClick", function()
+        if not MarketSync.ShowListImportDialog then
+            SetStatus("Import codec unavailable.", true)
+            return
         end
+        MarketSync.ShowListImportDialog({
+            mode = "alerts",
+            onImportAlerts = function(decoded)
+                local candidates = MarketSync.BuildNotificationCandidatesFromDecodedList
+                    and MarketSync.BuildNotificationCandidatesFromDecodedList(decoded) or {}
+                if #candidates == 0 then
+                    SetStatus("No items found in string.", true)
+                    return
+                end
+                ShowBulkImportPopup(decoded.n or "Imported List", candidates, function(count)
+                    SetStatus(string.format("Imported %d alert(s) from %s.", count, tostring(decoded.n or "string")))
+                    UpdateSubTabButtons()
+                    RefreshView()
+                end)
+            end,
+        })
+    end)
 
-        table.sort(allReqs, function(a, b)
-            return tostring(a.displayName or a.matchValue or ""):lower() < tostring(b.displayName or b.matchValue or ""):lower()
+    -- =========================================================
+    -- WATCHLIST
+    -- =========================================================
+    local function RefreshFilterButtons(buttons, active)
+        for _, btn in ipairs(buttons) do SetActive(btn, btn.filterKey == active, btn.filterLabel) end
+    end
+
+    RefreshWatchlistTable = function()
+        RefreshFilterButtons(watchFilterButtons, panel.watchFilter)
+        ApplyHeaders(watchLayout, 24)
+        local all = MarketSync.ListNotificationRequests and MarketSync.ListNotificationRequests() or {}
+        local statuses = MarketSync.GetNotificationRequestStatuses and MarketSync.GetNotificationRequestStatuses(all) or {}
+        local counts = { close = 0, paused = 0, noprice = 0 }
+        local shown = {}
+        for _, req in ipairs(all) do
+            local st = statuses[req.id] or {}
+            local isClose = st.isBelow or (st.gapPct and st.gapPct <= 10)
+            if isClose and req.enabled ~= false then counts.close = counts.close + 1 end
+            if req.enabled == false then counts.paused = counts.paused + 1 end
+            if not st.currentPrice then counts.noprice = counts.noprice + 1 end
+            local keep = true
+            if panel.searchQuery ~= "" then
+                keep = tostring(req.displayName or req.matchValue or ""):lower():find(panel.searchQuery, 1, true) ~= nil
+            end
+            if keep and panel.listFilter then
+                keep = (req.importSource == panel.listFilter) or (req.origin == panel.listFilter)
+            end
+            if keep and panel.watchFilter == "close" then keep = isClose and req.enabled ~= false end
+            if keep and panel.watchFilter == "paused" then keep = req.enabled == false end
+            if keep and panel.watchFilter == "noprice" then keep = not st.currentPrice end
+            if keep then shown[#shown + 1] = { req = req, st = st } end
+        end
+        for _, btn in ipairs(watchFilterButtons) do
+            local n = counts[btn.filterKey]
+            local label = n and n > 0 and string.format("%s (%d)", btn.filterLabel, n) or btn.filterLabel
+            SetActive(btn, btn.filterKey == panel.watchFilter, label)
+        end
+        -- Closest to firing first, then by name.
+        table.sort(shown, function(a, b)
+            local ga = a.st.gapPct or math.huge
+            local gb = b.st.gapPct or math.huge
+            if (a.req.enabled ~= false) ~= (b.req.enabled ~= false) then return a.req.enabled ~= false end
+            if ga ~= gb then return ga < gb end
+            return tostring(a.req.displayName or ""):lower() < tostring(b.req.displayName or ""):lower()
         end)
 
-        local total = #allReqs
+        local total = #shown
         local maxPage = math.max(0, math.ceil(total / numRowsPerPage) - 1)
-        if panel.watchlistPage > maxPage then panel.watchlistPage = maxPage end
-        if panel.watchlistPage < 0 then panel.watchlistPage = 0 end
+        panel.watchlistPage = math.min(math.max(0, panel.watchlistPage), maxPage)
+        UpdatePager(panel.watchlistPage, maxPage)
+        local startIndex = panel.watchlistPage * numRowsPerPage + 1
 
-        local hasPrev = panel.watchlistPage > 0
-        local hasNext = panel.watchlistPage < maxPage
-        btnPrev:SetEnabled(hasPrev)
-        btnNext:SetEnabled(hasNext)
-        local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
-        if pnt and pnt.SetVertexColor then
-            if hasPrev then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else pnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
-        end
-        local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
-        if nnt and nnt.SetVertexColor then
-            if hasNext then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else nnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
-        end
-        pageText:SetText(string.format("%d / %d", panel.watchlistPage + 1, math.max(1, maxPage + 1)))
-        if tableScrollBar then
-            tableScrollBar:Update(panel.watchlistPage, maxPage)
-        end
-
-        local startIndex = (panel.watchlistPage * numRowsPerPage) + 1
-        local endIndex = math.min(total, startIndex + numRowsPerPage - 1)
-
-        if total == 0 then
-            countText:SetText("No tracked items")
-            emptyLabel:SetText(panel.searchQuery ~= "" and "No matching tracked items." or "No tracked items.\nDrag an item to the editor or import a Preferred List.")
+        if #all == 0 then
+            emptyLabel:SetText("No alerts yet.\nPress + New alert, or review a list on the left.")
+            emptyLabel:Show()
+        elseif total == 0 then
+            emptyLabel:SetText("No alerts match these filters.")
             emptyLabel:Show()
         else
-            countText:SetText(string.format("Showing %d-%d of %d alerts", startIndex, endIndex, total))
             emptyLabel:Hide()
         end
+        countText:SetText(string.format("%d alerts | %d on | %d paused", #all, #all - counts.paused, counts.paused))
 
-        for i = 1, numRowsPerPage do
-            local row = rows[i]
-            local reqIndex = startIndex + i - 1
-            local req = allReqs[reqIndex]
-
-            -- Hide history elements
-            row.hTime:Hide()
-            row.hName:Hide()
-            row.hPrice:Hide()
-            row.hThresh:Hide()
-            row.hScope:Hide()
-            row.hSource:Hide()
+        for i, row in ipairs(rows) do
+            local entry = shown[startIndex + i - 1]
+            local cells = row.cells
             row.accent:Hide()
-
-            if req then
-                row.request = req
-                row.historyEntry = nil
-
-                local itemID = nil
-                if req.matchType == "itemID" then
-                    itemID = tonumber(req.matchValue)
-                elseif req.matchType == "dbKey" and MarketSync.ParseItemIDFromDBKey then
-                    itemID = MarketSync.ParseItemIDFromDBKey(req.matchValue)
-                end
+            if entry then
+                local req, st = entry.req, entry.st
+                row.request, row.historyEntry = req, nil
+                local itemID = RequestItemID(req)
                 row.itemID = itemID
-
-                local name, link, quality, _, _, _, _, _, _, icon
-                if itemID then
-                    name, link, quality, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID)
-                end
+                local name, link, _, _, _, _, _, _, _, icon
+                if itemID then name, link, _, _, _, _, _, _, _, icon = SafeGetItemInfo(itemID) end
                 row.itemLink = link
-
                 row.iconTex:SetTexture(icon or SafeGetItemIcon(itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
-                row.iconBtn:SetPoint("LEFT", 4, 0)
+                row.iconBtn:ClearAllPoints()
+                row.iconBtn:SetPoint("LEFT", row, "LEFT", 4, 0)
                 row.iconBtn:Show()
 
                 local dName = link or req.displayName or (itemID and ("Item " .. itemID)) or tostring(req.matchValue)
-                if req.urgent then
-                    dName = "|cffff4444!|r " .. dName
+                if req.urgent then dName = "|cffff4444!|r " .. dName end
+                if req.enabled == false then dName = "|cff8a806e" .. MarketSync.StripColorCodes(dName) .. "|r" end
+                PlaceCell(cells.c1, watchLayout.name, 20, 24)
+                cells.c1:SetText(dName)
+                PlaceCell(cells.c2, watchLayout.at, 20)
+                cells.c2:SetText(FormatMoneyColored(req.thresholdCopper))
+                PlaceCell(cells.c3, watchLayout.now, 20)
+                cells.c3:SetText(st.currentPrice and FormatMoneyColored(st.currentPrice) or "|cff8a806e-|r")
+                PlaceCell(cells.c4, watchLayout.close, 20)
+                if not st.currentPrice then
+                    cells.c4:SetText("|cff8a806eNo price|r")
+                elseif st.isBelow then
+                    cells.c4:SetText("|cff4fd06aBelow now|r")
+                elseif st.gapPct and st.gapPct <= 10 then
+                    cells.c4:SetText(string.format("|cffffb347%d%% over|r", st.gapPct))
+                else
+                    cells.c4:SetText(string.format("|cffa89e8c%d%% over|r", st.gapPct or 0))
                 end
-                row.wName:SetText(dName)
-                row.wName:Show()
-
-                row.wThresh:SetText(FormatMoneyColored(req.thresholdCopper))
-                row.wThresh:Show()
-
-                row.wScope:SetText(ScopeLabel(req.scope))
-                row.wScope:Show()
-
-                if row.wCooldown then row.wCooldown:Hide() end
-
+                PlaceCell(cells.c5, watchLayout.scope, 20)
+                cells.c5:SetText(req.scope == "main" and "Main" or (req.scope == "neutral" and "Neutral" or "Both"))
+                PlaceCell(cells.c6, watchLayout.last, 20)
+                cells.c6:SetText((st.lastAlertAt or 0) > 0 and FormatRelativeTime(st.lastAlertAt) or "|cff8a806eNever|r")
+                cells.c7:SetText("")
+                row.wActiveCheck:ClearAllPoints()
+                row.wActiveCheck:SetPoint("LEFT", row, "LEFT", 4 + watchLayout.on.x + 4, 0)
                 row.wActiveCheck:SetChecked(req.enabled ~= false)
                 row.wActiveCheck:SetScript("OnClick", function(self)
                     req.enabled = self:GetChecked() and true or false
                     MarketSync.UpsertNotificationRequest(req)
-                end)
-                row.wActiveCheck:Show()
-
-                row.wDelBtn:SetScript("OnClick", function()
-                    MarketSync.DeleteNotificationRequest(req.id)
                     RefreshWatchlistTable()
                 end)
-                row.wDelBtn:Show()
+                row.wActiveCheck:Show()
+                for _, fs in pairs(cells) do fs:Show() end
 
                 if MarketSync.SetAccessibility then
                     local displayName = MarketSync.StripColorCodes(req.displayName or req.matchValue or "Item")
                     MarketSync.SetAccessibility(row, {
-                        name = function()
-                            return displayName
-                        end,
+                        name = function() return displayName end,
                         context = "Button",
                         description = function()
                             local thresh = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(req.thresholdCopper) or (tostring(req.thresholdCopper or 0) .. " copper")
-                            local stateStr = (req.enabled ~= false) and "Active" or "Disabled"
-                            return string.format("%s, Alert threshold below %s, Status: %s. Click to load into alert editor.", displayName, thresh, stateStr)
+                            return string.format("%s, alert below %s, %s. Click to edit.", displayName, thresh,
+                                (req.enabled ~= false) and "on" or "paused")
                         end,
-                        getIndexInfo = function()
-                            return { index = reqIndex, total = total }
-                        end,
-                    })
-                    MarketSync.SetAccessibility(row.wActiveCheck, {
-                        name = "Enable Alert: " .. displayName,
-                        context = function(self)
-                            return self:GetChecked() and "Check Button, Checked" or "Check Button, Unchecked"
-                        end,
-                        description = "Toggle active monitoring for " .. displayName,
-                    })
-                    MarketSync.SetAccessibility(row.wDelBtn, {
-                        name = "Delete Alert: " .. displayName,
-                        context = "Button",
-                        description = "Remove " .. displayName .. " from price alert watchlist",
+                        getIndexInfo = function() return { index = startIndex + i - 1, total = total } end,
                     })
                 end
-
                 row:Show()
             else
-                row.request = nil
-                row.historyEntry = nil
-                row.wName:Hide()
-                row.wThresh:Hide()
-                row.wScope:Hide()
-                row.wCooldown:Hide()
+                row.request, row.historyEntry = nil, nil
                 row.wActiveCheck:Hide()
-                row.wDelBtn:Hide()
-                row.iconBtn:Hide()
                 row:Hide()
             end
         end
     end
 
     -- =========================================================
-    -- ALERT HISTORY TABLE REFRESH
+    -- HISTORY
     -- =========================================================
+    local function HistoryStatus(entry)
+        if not (MarketSync.GetNotificationRequestStatus and entry.requestID) then return {} end
+        local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
+        local req = realmDB and realmDB.NotificationRequests and realmDB.NotificationRequests[entry.requestID]
+        if not req then return {} end
+        local st = MarketSync.GetNotificationRequestStatus(req)
+        st.request = req
+        return st
+    end
+
+    ShowHistoryDetails = function(entry)
+        panel.detailEntry = entry
+        local st = HistoryStatus(entry)
+        detailIcon:SetTexture(entry.itemIcon or SafeGetItemIcon(entry.itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        detailName:SetText(entry.itemLink or entry.itemName or "Item")
+        detailWhen:SetText("|cffa89e8c" .. FormatRelativeTime(entry.time) .. "|r")
+        local price, target = tonumber(entry.price) or 0, tonumber(entry.threshold) or 0
+        local under = (target > 0) and math.floor(((target - price) / target) * 100 + 0.5) or 0
+        detailHeadline:SetText(string.format("|cff4fd06aDropped to %s|r\n|cffcfe8d2%d%% under your %s target|r",
+            MarketSync.FormatMoney and MarketSync.FormatMoney(price) or price, under,
+            MarketSync.FormatMoney and MarketSync.FormatMoney(target) or target))
+        local lines = {
+            "|cffa89e8cSeen by|r  " .. SourceLabel(entry.source),
+            "|cffa89e8cAuction house|r  " .. (entry.scope == "neutral" and "Neutral" or (entry.scope == "main" and "Main" or "Either")),
+            "|cffa89e8cAlert type|r  " .. (entry.urgent and "|cffff8a7aUrgent|r" or "Normal"),
+        }
+        if st.currentPrice then
+            local still = st.currentPrice <= target and "|cff4fd06a still under target|r" or "|cffffb347 back above target|r"
+            lines[#lines + 1] = "|cffa89e8cLowest now|r  " .. FormatMoneyColored(st.currentPrice) .. still
+        end
+        local req = st.request
+        if req and (req.origin or req.importSource) then
+            lines[#lines + 1] = "|cffa89e8cFrom|r  " .. tostring(req.origin or req.importSource)
+        end
+        if not req then lines[#lines + 1] = "|cff8a806eThis alert was deleted.|r" end
+        detailBody:SetText(table.concat(lines, "\n"))
+        SetControlVisible(btnDetailEdit, req ~= nil)
+        SetControlVisible(btnDetailPause, req ~= nil)
+        if req then btnDetailPause:SetText(req.enabled ~= false and "Pause alert" or "Resume alert") end
+        ShowRail("detail")
+    end
+    panel.ShowHistoryDetails = ShowHistoryDetails
+
+    btnDetailSearch:SetScript("OnClick", function()
+        local entry = panel.detailEntry
+        if not entry then return end
+        local ok = MarketSync.SearchInAuctionHouse and MarketSync.SearchInAuctionHouse(entry.itemID or entry.itemName)
+        if not ok then SetStatus("Open the Auction House to search for this item.", true) end
+    end)
+    btnDetailEdit:SetScript("OnClick", function()
+        local st = panel.detailEntry and HistoryStatus(panel.detailEntry)
+        if st and st.request then panel.OpenEditorForRequest(st.request) end
+    end)
+    btnDetailPause:SetScript("OnClick", function()
+        local st = panel.detailEntry and HistoryStatus(panel.detailEntry)
+        if not (st and st.request) then return end
+        st.request.enabled = not (st.request.enabled ~= false)
+        MarketSync.UpsertNotificationRequest(st.request)
+        ShowHistoryDetails(panel.detailEntry)
+    end)
+
     RefreshHistoryTable = function()
+        RefreshFilterButtons(historyFilterButtons, panel.historyFilter)
+        RefreshFilterButtons(sourceFilterButtons, panel.sourceFilter)
+        ApplyHeaders(historyLayout, 24)
         local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB()
         local history = realmDB and realmDB.NotificationLog or {}
+        local needStatus = panel.historyFilter == "below"
+        local statusByRequest = {}
+        if needStatus and MarketSync.GetNotificationRequestStatuses then
+            local reqs, seen = {}, {}
+            for _, entry in ipairs(history) do
+                local req = entry.requestID and realmDB.NotificationRequests and realmDB.NotificationRequests[entry.requestID]
+                if req and not seen[req.id] then seen[req.id] = true; reqs[#reqs + 1] = req end
+            end
+            statusByRequest = MarketSync.GetNotificationRequestStatuses(reqs)
+        end
+        local shown, unread = {}, 0
+        for _, entry in ipairs(history) do
+            if entry.read == false then unread = unread + 1 end
+            local keep = true
+            if panel.historyFilter == "unread" then keep = entry.read == false end
+            if panel.historyFilter == "urgent" then keep = entry.urgent == true end
+            if panel.historyFilter == "below" then
+                local st = entry.requestID and statusByRequest[entry.requestID]
+                keep = st and st.isBelow or false
+            end
+            local mine = (entry.source == nil or entry.source == "" or entry.source == "Personal")
+            if keep and panel.sourceFilter == "mine" then keep = mine end
+            if keep and panel.sourceFilter == "guild" then keep = not mine end
+            if keep then shown[#shown + 1] = entry end
+        end
 
-        local total = #history
+        local total = #shown
         local maxPage = math.max(0, math.ceil(total / numRowsPerPage) - 1)
-        if panel.historyPage > maxPage then panel.historyPage = maxPage end
-        if panel.historyPage < 0 then panel.historyPage = 0 end
-
-        local hasPrev = panel.historyPage > 0
-        local hasNext = panel.historyPage < maxPage
-        btnPrev:SetEnabled(hasPrev)
-        btnNext:SetEnabled(hasNext)
-        local pnt = btnPrev.GetNormalTexture and btnPrev:GetNormalTexture()
-        if pnt and pnt.SetVertexColor then
-            if hasPrev then pnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else pnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
-        end
-        local nnt = btnNext.GetNormalTexture and btnNext:GetNormalTexture()
-        if nnt and nnt.SetVertexColor then
-            if hasNext then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) else nnt:SetVertexColor(MarketSync.GetThemeColor("arrowDisabled")) end
-        end
-        pageText:SetText(string.format("%d / %d", panel.historyPage + 1, math.max(1, maxPage + 1)))
-        if tableScrollBar then
-            tableScrollBar:Update(panel.historyPage, maxPage)
-        end
-
-        local startIndex = (panel.historyPage * numRowsPerPage) + 1
-        local endIndex = math.min(total, startIndex + numRowsPerPage - 1)
-
-        if total == 0 then
-            countText:SetText("No alerts recorded")
-            emptyLabel:SetText("No alerts recorded yet.\nAlerts will appear here when prices drop below your thresholds.")
+        panel.historyPage = math.min(math.max(0, panel.historyPage), maxPage)
+        UpdatePager(panel.historyPage, maxPage)
+        local startIndex = panel.historyPage * numRowsPerPage + 1
+        if #history == 0 then
+            emptyLabel:SetText("No alerts yet.\nThey show here when a price drops to an alert's target.")
+            emptyLabel:Show()
+        elseif total == 0 then
+            emptyLabel:SetText("No alerts match these filters.")
             emptyLabel:Show()
         else
-            countText:SetText(string.format("Showing %d-%d of %d alerts", startIndex, endIndex, total))
             emptyLabel:Hide()
         end
+        countText:SetText(string.format("%d alerts | %d unread", #history, unread))
 
-        for i = 1, numRowsPerPage do
-            local row = rows[i]
-            local hIndex = startIndex + i - 1
-            local entry = history[hIndex]
-
-            -- Hide watchlist elements
-            row.wName:Hide()
-            row.wThresh:Hide()
-            row.wScope:Hide()
-            row.wCooldown:Hide()
+        for i, row in ipairs(rows) do
+            local entry = shown[startIndex + i - 1]
+            local cells = row.cells
             row.wActiveCheck:Hide()
-            row.wDelBtn:Hide()
-
             if entry then
-                row.historyEntry = entry
-                row.request = nil
-                row.itemID = entry.itemID
-                row.itemLink = entry.itemLink
-
+                row.historyEntry, row.request = entry, nil
+                row.itemID, row.itemLink = entry.itemID, entry.itemLink
                 row.accent:SetShown(entry.read == false)
-
-                row.hTime:SetText(FormatRelativeTime(entry.time))
-                row.hTime:Show()
-
+                local bold = entry.read == false
+                PlaceCell(cells.c1, historyLayout.time, 20)
+                cells.c1:SetText((bold and "|cffffd700" or "|cffa89e8c") .. TimeLabel(entry.time) .. "|r")
                 row.iconTex:SetTexture(entry.itemIcon or SafeGetItemIcon(entry.itemID) or "Interface\\Icons\\INV_Misc_QuestionMark")
-                row.iconBtn:SetPoint("LEFT", 68, 0)
+                row.iconBtn:ClearAllPoints()
+                row.iconBtn:SetPoint("LEFT", row, "LEFT", 4 + historyLayout.name.x, 0)
                 row.iconBtn:Show()
-
                 local dName = entry.itemLink or entry.itemName or (entry.itemID and ("Item " .. entry.itemID)) or "Unknown"
-                if entry.urgent then
-                    dName = "|cffff4444!|r " .. dName
-                end
-                row.hName:SetText(dName)
-                row.hName:Show()
-
-                row.hPrice:SetText(FormatMoneyColored(entry.price))
-                row.hPrice:Show()
-
-                row.hThresh:SetText(FormatMoneyColored(entry.threshold))
-                row.hThresh:Show()
-
-                row.hScope:SetText(ScopeLabel(entry.scope))
-                row.hScope:Show()
-
-                row.hSource:SetText(entry.source or "Scan")
-                row.hSource:Show()
+                if entry.urgent then dName = "|cffff4444!|r " .. dName end
+                PlaceCell(cells.c2, historyLayout.name, 20, 24)
+                cells.c2:SetText(dName)
+                PlaceCell(cells.c3, historyLayout.price, 20)
+                cells.c3:SetText(FormatMoneyColored(entry.price))
+                PlaceCell(cells.c4, historyLayout.target, 20)
+                cells.c4:SetText(FormatMoneyColored(entry.threshold))
+                local price, target = tonumber(entry.price) or 0, tonumber(entry.threshold) or 0
+                PlaceCell(cells.c5, historyLayout.saved, 20)
+                cells.c5:SetText(target > 0 and string.format("|cff4fd06a%d%%|r", math.floor(((target - price) / target) * 100 + 0.5)) or "-")
+                PlaceCell(cells.c6, historyLayout.scope, 20)
+                cells.c6:SetText(entry.scope == "neutral" and "Neutral" or (entry.scope == "main" and "Main" or "Either"))
+                PlaceCell(cells.c7, historyLayout.source, 20)
+                cells.c7:SetText(SourceLabel(entry.source))
+                for _, fs in pairs(cells) do fs:Show() end
 
                 if MarketSync.SetAccessibility then
-                    local cleanHistName = MarketSync.StripColorCodes(entry.itemName or (entry.itemID and ("Item " .. entry.itemID)) or "Alert")
+                    local cleanName = MarketSync.StripColorCodes(entry.itemName or (entry.itemID and ("Item " .. entry.itemID)) or "Alert")
                     MarketSync.SetAccessibility(row, {
-                        name = function()
-                            return cleanHistName
-                        end,
+                        name = function() return cleanName end,
                         context = "Button",
                         description = function()
                             local priceStr = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(entry.price) or (tostring(entry.price or 0) .. " copper")
-                            local threshStr = MarketSync.FormatNarrationMoney and MarketSync.FormatNarrationMoney(entry.threshold) or (tostring(entry.threshold or 0) .. " copper")
-                            return string.format("%s, Seen price: %s, Threshold was: %s, Source: %s. Click to search in Auction House.", cleanHistName, priceStr, threshStr, entry.source or "Scan")
+                            return string.format("%s, dropped to %s, seen by %s. Click for details.", cleanName, priceStr, SourceLabel(entry.source))
                         end,
-                        getIndexInfo = function()
-                            return { index = (panel.historyPage * ROWS_PER_PAGE) + i, total = total }
-                        end,
+                        getIndexInfo = function() return { index = startIndex + i - 1, total = total } end,
                     })
                 end
-
                 row:Show()
             else
-                row.request = nil
-                row.historyEntry = nil
-                row.hTime:Hide()
-                row.hName:Hide()
-                row.hPrice:Hide()
-                row.hThresh:Hide()
-                row.hScope:Hide()
-                row.hSource:Hide()
-                row.iconBtn:Hide()
-                row.accent:Hide()
+                row.request, row.historyEntry = nil, nil
                 row:Hide()
             end
         end
     end
 
     RefreshView = function()
-        UpdateHeaderVisibility()
         if panel.currentView == "watchlist" then
             RefreshWatchlistTable()
         else
             RefreshHistoryTable()
         end
     end
+    panel.RefreshView = function() RefreshView() end
 
     panel:SetScript("OnShow", function()
         if MarketSync.AcknowledgeNotifications then
             MarketSync.AcknowledgeNotifications()
         end
-        if soundCheck then
-            soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
-        end
+        soundCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false)
+        bannerCheck:SetChecked(MarketSyncDB and MarketSyncDB.EnableRaidWarningAlerts ~= false)
+        RefreshMute()
         UpdateSubTabButtons()
         RefreshImportDropdown()
+        if panel.railView ~= "edit" then
+            ShowRail(panel.currentView == "history" and "history" or "watch")
+        end
         RefreshView()
-        statusText:SetText("")
     end)
+
+    ShowRail("watch")
+    ClearEditorForm()
 
     NotificationPanel = panel
     panel.rows = rows
@@ -2073,7 +2170,9 @@ function MarketSync.ToggleNotificationsManager()
     end
 end
 
-function MarketSync.OpenAlertEditorWithItem(itemRef, price)
+-- origin: where the alert is made from (for example "Processing"); shown in
+-- the alert's history details.
+function MarketSync.OpenAlertEditorWithItem(itemRef, price, origin)
     if AuctionFrame and AuctionFrame:IsShown() and MarketSync.AuctionHouse and MarketSync.AuctionHouse.SelectTab then
         MarketSync.AuctionHouse.SelectTab("alerts")
     elseif MarketSync.SelectMainFrameTab then
@@ -2090,6 +2189,13 @@ function MarketSync.OpenAlertEditorWithItem(itemRef, price)
             p.SetEditorItem(itemRef)
             if price and price > 0 and p.SetThresholdCopper then
                 p.SetThresholdCopper(price)
+            end
+            p.editorOrigin = origin
+            if p.railViews and p.railViews.edit then
+                for key, view in pairs(p.railViews) do
+                    if key == "edit" then view:Show() else view:Hide() end
+                end
+                p.railView = "edit"
             end
         end
     end

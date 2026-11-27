@@ -42,7 +42,7 @@ function MarketSync.CalculateGroundUpCraftCost(recipe,choices,qty)
 end
 function MarketSync.CalculateRecipeProfit() return {outputPrice=1000,grossRevenue=1000,netRevenue=950} end
 `);
-for(const name of ['Favorites.lua','Ledger/CraftLedger.lua','Ledger/UI_CraftManager.lua']){
+for(const name of ['Favorites.lua','../MarketSyncLedger/CraftLedger.lua','../MarketSyncLedger/UI_CraftManager.lua']){
  const code=fs.readFileSync(path.join(__dirname,'../MarketSync',name),'utf8');luaparse.parse(code,{luaVersion:'5.1'});run(code);
 }
 run(`

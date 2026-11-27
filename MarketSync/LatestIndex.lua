@@ -21,6 +21,8 @@ local function IsNewer(a, b)
     return false
 end
 
+MarketSync.IsLatestEntryNewer = IsNewer
+
 -- personalIndex and guildIndex are tables keyed by record key, as built by
 -- the browse index. Entries with no price are skipped. Returns a new table.
 function MarketSync.MergeLatestIndex(personalIndex, guildIndex)

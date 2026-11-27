@@ -237,6 +237,15 @@ end
 -- ================================================================
 -- CONSTRUCT SIDECAR FRAME
 -- ================================================================
+-- Toggles the Shopping / Craft / Bags panel from anywhere (slash commands), creating
+-- it first if neither the Auction House nor the MarketSync window has done so.
+function MarketSync.ToggleSidecarAnywhere(mode)
+    if not Sidecar.Frame and MarketSync.CreateAHSidecar then
+        MarketSync.CreateAHSidecar(AuctionHouseFrame or AuctionFrame or MarketSync.MainFrame or UIParent)
+    end
+    if Sidecar.Toggle then Sidecar.Toggle(mode) end
+end
+
 function MarketSync.CreateAHSidecar(parent)
     if Sidecar.Frame then return Sidecar.Frame end
 
@@ -285,6 +294,10 @@ function MarketSync.CreateAHSidecar(parent)
         })
     end
 
+    -- Created without an Auction House or MarketSync window (floating only): the
+    -- AH edge tab has nothing to attach to until the AH opens.
+    if ahFrame == UIParent then toggleBtn:Hide() end
+
     local frame = MarketSync.Theme.CreateStandardWindow("MarketSyncAHSidecarFrame", "MarketSync Sidecar",
         SIDECAR_WIDTH, 400, "Interface\\Icons\\INV_Misc_Book_09", true)
     frame:ClearAllPoints()
@@ -298,11 +311,51 @@ function MarketSync.CreateAHSidecar(parent)
 
     local closeBtn = frame.CloseButton
     closeBtn:SetScript("OnClick", function()
-        if Sidecar.host == "main" and Sidecar.HideForMain then
+        if Sidecar.host == "float" then
+            frame:Hide()
+        elseif Sidecar.host == "main" and Sidecar.HideForMain then
             Sidecar.HideForMain()
         else
             Sidecar.SetExpanded(false)
         end
+    end)
+
+    -- Pop-out / dock button: detaches the drawer into a free-standing window, or
+    -- docks a floating one back to the Auction House or the main window.
+    local popBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    popBtn:SetSize(48, 18)
+    popBtn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
+    popBtn:SetText("Float")
+    if popBtn.GetFontString and popBtn:GetFontString() then
+        popBtn:GetFontString():SetFontObject(GameFontNormalSmall)
+    end
+    popBtn:SetScript("OnClick", function()
+        if Sidecar.host == "float" then
+            Sidecar.Dock(Sidecar.currentMode)
+        else
+            Sidecar.ShowFloating(Sidecar.currentMode)
+        end
+    end)
+    popBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if Sidecar.host == "float" then
+            GameTooltip:SetText("Dock", 1, 0.82, 0)
+            GameTooltip:AddLine("Attach this panel back to the Auction House or the MarketSync window.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:SetText("Float", 1, 0.82, 0)
+            GameTooltip:AddLine("Open this panel as its own movable window. /sidecar also opens it on its own.", 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    popBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    Sidecar.PopButton = popBtn
+
+    -- Remember where a floating panel was left.
+    frame:HookScript("OnDragStop", function(self)
+        if Sidecar.host ~= "float" then return end
+        local point, _, relativePoint, x, y = self:GetPoint(1)
+        MarketSyncDB = MarketSyncDB or {}
+        MarketSyncDB.FloatingSidecar = { point = point, relativePoint = relativePoint, x = x, y = y }
     end)
     if MarketSync.SetAccessibility then
         MarketSync.SetAccessibility(closeBtn, {
@@ -498,19 +551,74 @@ function MarketSync.CreateAHSidecar(parent)
         end
     end
 
+    local function AuctionHouseShown()
+        local ah = AuctionHouseFrame or AuctionFrame
+        return ah and ah.IsShown and ah:IsShown() and Sidecar.AHVisible ~= false
+    end
+
+    local function MainShown()
+        return MarketSync.MainFrame and MarketSync.MainFrame:IsShown()
+    end
+
+    -- Opens the panel: docked to the Auction House when it is open, docked to the
+    -- MarketSync window when that is open, otherwise as a floating window.
     function Sidecar.Toggle(mode)
         if frame:IsShown() then
-            if Sidecar.host == "main" and Sidecar.HideForMain then
+            if Sidecar.host == "float" then
+                frame:Hide()
+            elseif Sidecar.host == "main" and Sidecar.HideForMain then
                 Sidecar.HideForMain()
             else
                 Sidecar.SetExpanded(false)
             end
+        elseif AuctionHouseShown() then
+            Sidecar.SetVisibleForAH(true)
+            Sidecar.SetExpanded(true)
+            if mode then SetMode(mode) end
+        elseif MainShown() then
+            Sidecar.ShowForMain(mode)
         else
-            if Sidecar.host == "main" or (not AuctionFrame and not AuctionHouseFrame and MarketSync.MainFrame and MarketSync.MainFrame:IsShown()) then
-                Sidecar.ShowForMain(mode)
-            else
-                Sidecar.SetExpanded(true)
-            end
+            Sidecar.ShowFloating(mode)
+        end
+    end
+
+    -- Free-standing, movable panel that does not need the Auction House or the
+    -- MarketSync window, for managing shopping and favorites lists on their own.
+    function Sidecar.ShowFloating(mode)
+        local wasMain = Sidecar.host == "main"
+        Sidecar.host = "float"
+        if frame.SetParent then frame:SetParent(UIParent) end
+        frame:ClearAllPoints()
+        frame:SetHeight(420)
+        local pos = MarketSyncDB and MarketSyncDB.FloatingSidecar
+        if pos and pos.point then
+            frame:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x or 0, pos.y or 0)
+        else
+            frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        end
+        frame:SetFrameStrata("MEDIUM")
+        if frame.SetToplevel then frame:SetToplevel(true) end
+        if frame.SetClampedToScreen then frame:SetClampedToScreen(true) end
+        frame:Show()
+        if MarketSync.EnsureFrameOnScreen then MarketSync.EnsureFrameOnScreen(frame) end
+        toggleBtn:Hide()
+        -- The docking tab on the MarketSync window stays available while floating.
+        if wasMain and Sidecar.MainToggleButton then Sidecar.MainToggleButton:Show() end
+        if Sidecar.PopButton then Sidecar.PopButton:SetText("Dock") end
+        SetMode(mode or Sidecar.currentMode or "lists")
+    end
+
+    -- Attaches a floating panel back to the Auction House or the MarketSync window.
+    -- With neither open it stays floating.
+    function Sidecar.Dock(mode)
+        if AuctionHouseShown() then
+            Sidecar.SetVisibleForAH(true, true)
+            Sidecar.SetExpanded(true)
+            if mode then SetMode(mode) end
+        elseif MainShown() then
+            Sidecar.ShowForMain(mode)
+        else
+            print("|cFFFFD100[MarketSync]|r Open the Auction House or the MarketSync window to dock this panel.")
         end
     end
     MarketSync.ToggleAHSidecar = Sidecar.Toggle
@@ -520,17 +628,31 @@ function MarketSync.CreateAHSidecar(parent)
         Sidecar.SetExpanded(true)
     end)
     Sidecar.ToggleButton = toggleBtn
-    function Sidecar.SetVisibleForAH(visible)
+    -- forceDock: dock even when the panel is currently floating (the Dock button).
+    -- Otherwise an open floating panel stays where the player put it when the
+    -- Auction House opens or closes.
+    function Sidecar.SetVisibleForAH(visible, forceDock)
         Sidecar.AHVisible = visible == true
+        local keepFloating = Sidecar.host == "float" and frame:IsShown() and not forceDock
         if visible then
             local host = AuctionHouseFrame or AuctionFrame or ahFrame
-            Sidecar.host = "ah"
-            frame:ClearAllPoints()
-            frame:SetPoint("TOPLEFT", host, "TOPRIGHT", -2, -28)
-            frame:SetPoint("BOTTOMLEFT", host, "BOTTOMRIGHT", -2, 28)
             toggleBtn:SetParent(host)
             toggleBtn:ClearAllPoints()
             toggleBtn:SetPoint("TOPLEFT", host, "TOPRIGHT", -2, -60)
+            if keepFloating then
+                toggleBtn:Hide()
+                return
+            end
+            Sidecar.host = "ah"
+            frame:ClearAllPoints()
+            frame:SetHeight(0)
+            frame:SetPoint("TOPLEFT", host, "TOPRIGHT", -2, -28)
+            frame:SetPoint("BOTTOMLEFT", host, "BOTTOMRIGHT", -2, 28)
+            frame:SetFrameStrata(host:GetFrameStrata())
+            if Sidecar.PopButton then Sidecar.PopButton:SetText("Float") end
+        elseif keepFloating then
+            toggleBtn:Hide()
+            return
         end
         if not visible and Sidecar.host ~= "main" then
             frame:Hide()
@@ -552,7 +674,9 @@ function MarketSync.CreateAHSidecar(parent)
             Sidecar.mainHideHooked = true
         end
         Sidecar.host = "main"
+        if Sidecar.PopButton then Sidecar.PopButton:SetText("Float") end
         frame:ClearAllPoints()
+        frame:SetHeight(0)
         frame:SetPoint("TOPLEFT", MarketSync.MainFrame, "TOPRIGHT", -2, -28)
         frame:SetPoint("BOTTOMLEFT", MarketSync.MainFrame, "BOTTOMRIGHT", -2, 28)
         frame:SetFrameStrata(MarketSync.MainFrame:GetFrameStrata())
@@ -941,7 +1065,9 @@ function MarketSync.CreateAHSidecar(parent)
     -- ================================================================
     -- 1. SHOPPING LISTS VIEW
     -- ================================================================
-    local currentListName = "Favorites"
+    -- The selected list is shared with the legacy Scan page (Favorites.GetSelectedList).
+    local Fav = MarketSync.Favorites
+    local currentListName = (Fav and Fav.GetSelectedList and Fav.GetSelectedList()) or "Favorites"
     function Sidecar.GetSelectedShoppingListName() return currentListName end
 
     local listControlBar = CreateFrame("Frame", nil, listsContainer)
@@ -972,6 +1098,7 @@ function MarketSync.CreateAHSidecar(parent)
     function Sidecar.SelectShoppingList(name)
         currentListName = name
         dropdownBtn:SetText(name .. "  |cFFFFD100v|r")
+        if Fav and Fav.SetSelectedList then Fav.SetSelectedList(name) end
         if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
     end
 
@@ -985,9 +1112,7 @@ function MarketSync.CreateAHSidecar(parent)
             opt.text = lName
             opt.checked = (lName == currentListName)
             opt.func = function()
-                currentListName = lName
-                dropdownBtn:SetText(lName .. "  |cFFFFD100v|r")
-                if Sidecar.UpdateListsView then Sidecar.UpdateListsView() end
+                Sidecar.SelectShoppingList(lName)
             end
             UIDropDownMenu_AddButton(opt, level)
         end
@@ -1670,6 +1795,12 @@ function MarketSync.CreateAHSidecar(parent)
     -- Register with Favorites callbacks
     if MarketSync.Favorites then
         MarketSync.Favorites.RegisterCallback(function()
+            -- Follow a list picked on the Scan page, or a deleted list.
+            local shared = Fav and Fav.GetSelectedList and Fav.GetSelectedList()
+            if shared and shared ~= currentListName then
+                currentListName = shared
+                dropdownBtn:SetText(currentListName .. "  |cFFFFD100v|r")
+            end
             if frame:IsShown() and activeMode == "lists" and Sidecar.UpdateListsView then
                 dropdownBtn:SetText(currentListName .. "  |cFFFFD100v|r")
                 Sidecar.UpdateListsView()

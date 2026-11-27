@@ -50,7 +50,7 @@ function UIDropDownMenu_CreateInfo() return {} end
 function UIDropDownMenu_AddButton(info) menuItems[#menuItems+1]=info end
 function ToggleDropDownMenu(_,_,menu) menuItems={}; menu.callback(menu,1) end
 `);
-const source=fs.readFileSync(path.join(__dirname,'../MarketSync/Ledger/UI_CraftManager.lua'),'utf8');
+const source=fs.readFileSync(path.join(__dirname,'../MarketSyncLedger/UI_CraftManager.lua'),'utf8');
 require('luaparse').parse(source,{luaVersion:'5.1'});run(source);
 run(`
 MarketSync.OpenLedgerCraftTree(jobs[1].recipe,nil,{ledgerID=1})

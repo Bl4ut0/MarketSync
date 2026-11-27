@@ -79,6 +79,25 @@ local function NotifyChanged()
     end
 end
 
+-- The shopping list the player is working with. The breakout (sidecar) and the
+-- legacy Scan page both show and edit this list, so picking a list in one picks
+-- it in the other.
+function F.GetSelectedList()
+    F.Initialize()
+    local name = MarketSyncDB.SelectedShoppingList
+    if type(name) ~= "string" or not MarketSyncDB.Favorites[name] then name = "Favorites" end
+    return name
+end
+
+function F.SetSelectedList(name)
+    F.Initialize()
+    if type(name) ~= "string" or not MarketSyncDB.Favorites[name] then return false end
+    if MarketSyncDB.SelectedShoppingList == name then return true end
+    MarketSyncDB.SelectedShoppingList = name
+    NotifyChanged()
+    return true
+end
+
 function F.GetLists()
     F.Initialize()
     local lists = {}
@@ -173,6 +192,7 @@ function F.RenameList(oldName, newName)
     end
     MarketSyncDB.Favorites[newName] = MarketSyncDB.Favorites[oldName]
     MarketSyncDB.Favorites[oldName] = nil
+    if MarketSyncDB.SelectedShoppingList == oldName then MarketSyncDB.SelectedShoppingList = newName end
     if MarketSyncDB.FavoriteQuantities then
         MarketSyncDB.FavoriteQuantities[newName] = MarketSyncDB.FavoriteQuantities[oldName]
         MarketSyncDB.FavoriteQuantities[oldName] = nil

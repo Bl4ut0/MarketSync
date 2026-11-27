@@ -92,9 +92,9 @@ for (const flavor of ['legacy', 'forever']) {
   `, `legacyArtwork_${flavor}`);
 }
 const windows = createAddonSim({ flavor: 'legacy' });
-for (const file of ['Config.lua', 'Theme.lua', 'Favorites.lua', 'Ledger/CraftLedger.lua',
-  'Ledger/PurchaseList.lua', 'Ledger/ItemLedger.lua', 'Ledger/UI_CraftManager.lua',
-  'Ledger/UI_ItemLedger.lua', 'UI_Main.lua']) windows.loadLuaFile(path.join(addon, file));
+for (const file of ['Config.lua', 'Theme.lua', 'Favorites.lua', '../MarketSyncLedger/CraftLedger.lua',
+  '../MarketSyncLedger/PurchaseList.lua', '../MarketSyncLedger/ItemLedger.lua', '../MarketSyncLedger/UI_CraftManager.lua',
+  '../MarketSyncLedger/UI_ItemLedger.lua', 'UI_Main.lua']) windows.loadLuaFile(path.join(addon, file));
 windows.run(String.raw`
   MarketSync.InitializeDB()
   MarketSyncDB.UITheme='legacy'

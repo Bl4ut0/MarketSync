@@ -4,7 +4,7 @@
 -- =============================================================
 
 local RESULTS_PER_PAGE = 8
-local CUSTOM_ROWS = 4
+local CUSTOM_ROWS = 3
 
 local LEFT_X = 14
 local TOP_Y = -70
@@ -18,6 +18,14 @@ local ROW_WIDTH = 632
 local ROW_HEIGHT = 37
 
 local PROCESS_OPTIONS_FALLBACK = { "ALL", "PROSPECT", "MILL", "DISENCHANT" }
+-- Recipe colours as the profession window shows them.
+local SKILL_DIFFICULTY = {
+    optimal = { text = "|cffff8040Orange|r", rank = 1 },
+    difficult = { text = "|cffff8040Orange|r", rank = 1 },
+    medium = { text = "|cffffff00Yellow|r", rank = 2 },
+    easy = { text = "|cff40c040Green|r", rank = 3 },
+    trivial = { text = "|cff808080Grey|r", rank = 4 },
+}
 local MODE_OPTIONS = {
     { key = "target", label = "Target Material" },
     { key = "process", label = "Process Scan" },
@@ -80,6 +88,9 @@ end
 
 local function BuildDropdown(frameName, parent, width, initFunc)
     -- Match the sidecar: a native AH button opens a hidden Blizzard menu.
+    if MarketSync.CreateDropdownButton then
+        return MarketSync.CreateDropdownButton(parent, frameName, width or 120, 22, initFunc)
+    end
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     button:SetSize(width or 120, 22)
     local menu = CreateFrame("Frame", frameName, parent, "UIDropDownMenuTemplate")
@@ -94,7 +105,7 @@ local function BuildDropdown(frameName, parent, width, initFunc)
 end
 
 local function SetDropdownLabel(button, label)
-    button:SetText(tostring(label or "") .. "  |cffffd700v|r")
+    button:SetText(tostring(label or "") .. "  |cFFFFD100v|r")
 end
 
 local function ReadNumber(editBox, defaultVal)
@@ -310,27 +321,267 @@ local function StyleStandardGameButton(btn, text)
     return btn
 end
 
+local RAIL_W = 176
+local RAIL_INNER_W = RAIL_W - 16
+local PROCESS_LIST = { "ALL", "DISENCHANT", "PROSPECT", "MILL" }
+local QUALITY_FILTERS = {
+    { key = 2, label = "Unc.", color = "|cff1eff00" },
+    { key = 3, label = "Rare", color = "|cff0070dd" },
+    { key = 4, label = "Epic", color = "|cffa335ee" },
+}
+local MAX_RECENT_TARGETS = 3
+
+local registeredPanels = {}
+
+local function CachedItemField(itemID, field)
+    local cache = MarketSyncDB and MarketSyncDB.ItemInfoCache
+    local info = cache and tonumber(itemID) and cache[tonumber(itemID)]
+    return info and info[field]
+end
+
+local function CreateCheck(parent, x, y, label, onClick)
+    local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    check:SetSize(20, 20)
+    check:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    local text = check.text or check.Text or check:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    check.text = text
+    text:ClearAllPoints()
+    text:SetPoint("LEFT", check, "RIGHT", 2, 0)
+    text:SetText(label)
+    check:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
+    return check
+end
+
+local function CreateRailLabel(parent, y, text)
+    local label = parent:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    label:SetText(text)
+    return label
+end
+
+local function SetToggleButton(btn, active, label)
+    btn:SetText(active and ("|cffffd700" .. label .. "|r") or label)
+    if active then
+        if btn.LockHighlight then btn:LockHighlight() end
+    elseif btn.UnlockHighlight then
+        btn:UnlockHighlight()
+    end
+end
+
+-- -------------------------------------------------------------
+-- Profession scan confirmation: a short note on the open profession window.
+-- -------------------------------------------------------------
+local scanToast
+function MarketSync.OnProfessionScanned(professionName, total, added)
+    local label = (professionName == "First Aid (Health)") and "First Aid" or tostring(professionName)
+    for _, p in ipairs(registeredPanels) do
+        if p.RefreshProfessionStatus then pcall(p.RefreshProfessionStatus) end
+    end
+    if MarketSync.ProfessionStatusFrame and MarketSync.ProfessionStatusFrame:IsShown()
+        and MarketSync.ProfessionStatusFrame.Refresh then
+        MarketSync.ProfessionStatusFrame:Refresh()
+    end
+    if not UIParent then return end
+    if not scanToast then
+        scanToast = CreateFrame("Frame", "MarketSyncProfessionScanToast", UIParent, "BackdropTemplate")
+        scanToast:SetSize(300, 40)
+        scanToast:SetFrameStrata("DIALOG")
+        if scanToast.SetBackdrop then
+            scanToast:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8X8",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                edgeSize = 12,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 },
+            })
+            scanToast:SetBackdropColor(0.06, 0.05, 0.04, 0.95)
+            scanToast:SetBackdropBorderColor(0.31, 0.82, 0.42, 1)
+        end
+        scanToast.title = scanToast:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        scanToast.title:SetPoint("TOPLEFT", 10, -7)
+        scanToast.title:SetPoint("RIGHT", -10, 0)
+        scanToast.title:SetJustifyH("LEFT")
+        scanToast.body = scanToast:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        scanToast.body:SetPoint("TOPLEFT", scanToast.title, "BOTTOMLEFT", 0, -2)
+        scanToast.body:SetPoint("RIGHT", -10, 0)
+        scanToast.body:SetJustifyH("LEFT")
+        scanToast:Hide()
+    end
+    local host = (ProfessionsFrame and ProfessionsFrame:IsShown() and ProfessionsFrame)
+        or (TradeSkillFrame and TradeSkillFrame:IsShown() and TradeSkillFrame)
+        or (CraftFrame and CraftFrame:IsShown() and CraftFrame)
+    scanToast:ClearAllPoints()
+    if host then
+        scanToast:SetPoint("TOP", host, "BOTTOM", 0, -4)
+    else
+        scanToast:SetPoint("TOP", UIParent, "TOP", 0, -160)
+    end
+    scanToast.title:SetText("|cff4fd06aMarketSync saved " .. label .. "|r")
+    local addedText = (tonumber(added) or 0) > 0 and string.format(" | %d new since last scan", added) or ""
+    scanToast.body:SetText(string.format("%d item recipes%s", tonumber(total) or 0, addedText))
+    scanToast:Show()
+    scanToast.token = (scanToast.token or 0) + 1
+    local token = scanToast.token
+    if C_Timer and C_Timer.After then
+        C_Timer.After(5, function()
+            if scanToast.token == token then scanToast:Hide() end
+        end)
+    end
+end
+
+-- -------------------------------------------------------------
+-- Professions window: what is scanned for every character.
+-- -------------------------------------------------------------
+local STATUS_GLYPH = {
+    ready = "|cff4fd06aReady|r",
+    stale = "|cffffb347Refresh|r",
+    missing = "|cffff8a7aNot scanned|r",
+    gathering = "|cffa89e8cGathering|r",
+}
+
+function MarketSync.ShowProfessionStatus()
+    local frame = MarketSync.ProfessionStatusFrame
+    if not frame then
+        if MarketSync.CreateModernDialog then
+            frame = MarketSync.CreateModernDialog("MarketSyncProfessionStatusFrame", 520, 400, "Professions",
+                "Interface\\Icons\\Trade_BlackSmithing")
+        else
+            frame = CreateFrame("Frame", "MarketSyncProfessionStatusFrame", UIParent, "BackdropTemplate")
+            frame:SetSize(520, 400)
+            frame:SetPoint("CENTER")
+        end
+        frame:SetFrameStrata("DIALOG")
+        local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
+        close:SetScript("OnClick", function() frame:Hide() end)
+
+        local intro = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        intro:SetPoint("TOPLEFT", 20, -40)
+        intro:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+        intro:SetJustifyH("LEFT")
+        intro:SetText("Recipes MarketSync knows for each character. Craft Profit uses these lists.")
+
+        frame.lines = {}
+        for i = 1, 14 do
+            local line = CreateFrame("Frame", nil, frame)
+            line:SetSize(480, 18)
+            line:SetPoint("TOPLEFT", 20, -62 - (i - 1) * 19)
+            line.state = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            line.state:SetPoint("LEFT", 0, 0)
+            line.state:SetWidth(74)
+            line.state:SetJustifyH("LEFT")
+            line.name = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            line.name:SetPoint("LEFT", 78, 0)
+            line.name:SetWidth(140)
+            line.name:SetJustifyH("LEFT")
+            line.info = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            line.info:SetPoint("LEFT", 222, 0)
+            line.info:SetPoint("RIGHT", line, "RIGHT", 0, 0)
+            line.info:SetJustifyH("LEFT")
+            for _, fs in ipairs({ line.state, line.name, line.info }) do
+                if fs.SetWordWrap then fs:SetWordWrap(false) end
+            end
+            line:Hide()
+            frame.lines[i] = line
+        end
+
+        local steps = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        steps:SetPoint("BOTTOMLEFT", 20, 46)
+        steps:SetPoint("RIGHT", frame, "RIGHT", -20, 0)
+        steps:SetJustifyH("LEFT")
+        steps:SetText("|cffffd7001.|r Open a profession from your spellbook.   |cffffd7002.|r MarketSync reads it on its own."
+            .. "   |cffffd7003.|r Close it. The row above turns |cff4fd06aReady|r.")
+        frame.status = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        frame.status:SetPoint("BOTTOMLEFT", 20, 20)
+        frame.status:SetPoint("RIGHT", frame, "RIGHT", -150, 0)
+        frame.status:SetJustifyH("LEFT")
+
+        local rescan = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        rescan:SetSize(124, 22)
+        rescan:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -16, 14)
+        rescan:SetText("Rescan open window")
+        rescan:SetScript("OnClick", function()
+            if not MarketSync.ResyncProfessionCache then return end
+            local ok, msg = MarketSync.ResyncProfessionCache()
+            frame.status:SetText((ok and "|cff4fd06a" or "|cffffd100") .. tostring(msg or "") .. "|r")
+            frame:Refresh()
+        end)
+        frame.rescanButton = rescan
+
+        function frame:Refresh()
+            local entries = {}
+            local characters = MarketSync.GetProcessingCraftingCharacters
+                and MarketSync.GetProcessingCraftingCharacters() or {}
+            for _, choice in ipairs(characters) do
+                entries[#entries + 1] = { header = true, text = choice.isCurrent
+                    and ("|cffffd700" .. tostring(choice.key) .. "|r  |cffa89e8cthis character|r")
+                    or ("|cffffd700" .. tostring(choice.key) .. "|r") }
+                for _, row in ipairs(MarketSync.GetProfessionScanStatus
+                    and MarketSync.GetProfessionScanStatus(not choice.isCurrent and choice.key or nil) or {}) do
+                    entries[#entries + 1] = { row = row }
+                end
+            end
+            for i, line in ipairs(self.lines) do
+                local entry = entries[i]
+                if not entry then
+                    line:Hide()
+                elseif entry.header then
+                    line.state:SetText("")
+                    line.name:SetText(entry.text)
+                    line.name:SetWidth(460)
+                    line.info:SetText("")
+                    line:Show()
+                else
+                    local row = entry.row
+                    line.name:SetWidth(140)
+                    line.state:SetText(STATUS_GLYPH[row.state] or "")
+                    local rank = row.rank and (" |cffa89e8c" .. tostring(row.rank) .. "|r") or ""
+                    line.name:SetText("  " .. tostring(row.label) .. rank)
+                    local parts = {}
+                    if row.recipes and row.recipes > 0 then
+                        parts[#parts + 1] = tostring(row.recipes) .. " recipes"
+                    end
+                    if row.updatedAt and row.updatedAt > 0 and MarketSync.FormatRelativeTime then
+                        parts[#parts + 1] = MarketSync.FormatRelativeTime(row.updatedAt)
+                    end
+                    if row.state ~= "ready" and row.hint then parts[#parts + 1] = row.hint end
+                    if row.usesCraftWindow and row.state == "missing" then
+                        parts[#parts + 1] = "(Craft window)"
+                    end
+                    line.info:SetText("|cffd8ccb4" .. table.concat(parts, " | ") .. "|r")
+                    line:Show()
+                end
+            end
+        end
+        frame:SetScript("OnShow", function(self) self:Refresh() end)
+        MarketSync.ProfessionStatusFrame = frame
+        frame:Hide()
+    end
+    frame.status:SetText("")
+    frame:Show()
+    frame:Refresh()
+    return frame
+end
+
 function MarketSync.CreateProcessingPanel(parent)
     local isEmbedded = (parent ~= MarketSync.MainFrame)
     local isLegacyMain = not isEmbedded and MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
     local LEFT_X = isEmbedded and 10 or (isLegacyMain and 24 or 14)
-    local LEFT_W = 220
-    local RESULTS_X = isEmbedded and 16 or (isLegacyMain and 24 or 18)
-    -- The classic Auction House hosts this panel in a shorter but wider area
-    -- than the portable window. Use the actual host width instead of leaving
-    -- unused space to the right of the price columns.
+    local RESULTS_X = LEFT_X + RAIL_W + 10
     local parentWidth = parent.GetWidth and parent:GetWidth() or 0
     local parentHeight = parent.GetHeight and parent:GetHeight() or 0
     local effectiveWidth = parentWidth > 0 and parentWidth or (isEmbedded and 780 or 850)
-    local ROW_WIDTH = math.max(550, effectiveWidth - RESULTS_X - 18)
-    local controlsTop = isEmbedded and -36 or -68
-    local resultsTop = isEmbedded and -111 or -145
+    local ROW_WIDTH = math.max(360, effectiveWidth - RESULTS_X - 14)
+    local tabsY = isEmbedded and -8 or -34
+    local bodyTop = isEmbedded and -36 or -62
+    local FOOTER_H = 30
+    local bottomInset = parent.MarketSyncNativeAuctionFooter and 0 or 8
 
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
     if parent == MarketSync.MainFrame then
         panel:Hide()
     end
+    registeredPanels[#registeredPanels + 1] = panel
 
     panel.activeMode = "target"
     function panel:CancelCachedWork()
@@ -345,13 +596,20 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.lastMode = nil
     panel.lastArbitrageResults = {}
     panel.lastCraftResults = {}
+    panel.allRows = {}
+    panel.filters = {
+        onlyProfitable = false,
+        hideStale = false,
+        madeBy = nil,
+        qualities = { [2] = true, [3] = true, [4] = true },
+        minLevel = nil,
+        maxLevel = nil,
+    }
     local pendingItemNames = {}
     local function RequestItemName(itemID)
         local id = tonumber(itemID)
         if not id or pendingItemNames[id] then return end
         pendingItemNames[id] = true
-        -- GetItemInfo above starts a cache request on older clients. Modern
-        -- clients also expose an explicit item-data request for uncached IDs.
         if C_Item and C_Item.RequestLoadItemDataByID then
             pcall(C_Item.RequestLoadItemDataByID, id)
         end
@@ -361,26 +619,42 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.displayRows = {}
     panel.page = 0
     panel.customPage = 0
+    local customRowCount = CUSTOM_ROWS
 
-    local leftTopBox = CreateBox(panel, LEFT_X, controlsTop, effectiveWidth - LEFT_X - 10, 68, "controls")
-    local rightBox = CreateBox(panel, RESULTS_X - 4, resultsTop, ROW_WIDTH + 8, 320, "results")
-    rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, parent.MarketSyncNativeAuctionFooter and 0 or 8)
-    local leftBottomBox = CreateBox(panel, 0, 0, LEFT_W, 202, "controls")
-    if leftBottomBox.ClearAllPoints then leftBottomBox:ClearAllPoints() end
-    leftBottomBox:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, resultsTop - 4)
-    leftBottomBox:SetSize(LEFT_W, 202)
-    if leftBottomBox.SetFrameLevel and panel.GetFrameLevel then
-        leftBottomBox:SetFrameLevel(panel:GetFrameLevel() + 20)
-    end
-    leftBottomBox:Hide()
-    panel.leftTopBox = leftTopBox
-    panel.leftBottomBox = leftBottomBox
+    -- Left rail (settings, or details of the clicked row) and the results table.
+    local railBox = CreateBox(panel, LEFT_X, bodyTop, RAIL_W, 300, "controls")
+    railBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", LEFT_X, bottomInset)
+    local rightBox = CreateBox(panel, RESULTS_X - 4, bodyTop, ROW_WIDTH + 8, 320, "results")
+    rightBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -(effectiveWidth - (RESULTS_X + ROW_WIDTH + 4)), bottomInset)
+    panel.railBox = railBox
+    panel.leftTopBox = railBox
     panel.rightBox = rightBox
 
-    local leftTopTitle = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    leftTopTitle:SetPoint("TOPLEFT", 8, -8)
-    leftTopTitle:SetText("|cffffd700Target Material Controls|r")
-    leftTopTitle:Hide()
+    local settingsView = CreateFrame("Frame", nil, railBox)
+    settingsView:SetAllPoints(railBox)
+    local detailsView = CreateFrame("Frame", nil, railBox)
+    detailsView:SetAllPoints(railBox)
+    detailsView:Hide()
+    panel.settingsView = settingsView
+    panel.detailsView = detailsView
+
+    local btnRailSettings = CreateFrame("Button", nil, railBox, "UIPanelButtonTemplate")
+    btnRailSettings:SetSize(78, 20)
+    btnRailSettings:SetPoint("TOPLEFT", railBox, "TOPLEFT", 8, -6)
+    local btnRailDetails = CreateFrame("Button", nil, railBox, "UIPanelButtonTemplate")
+    btnRailDetails:SetSize(78, 20)
+    btnRailDetails:SetPoint("LEFT", btnRailSettings, "RIGHT", 4, 0)
+    local function ShowRailView(view)
+        panel.railView = view
+        SetControlVisible(settingsView, view ~= "details")
+        SetControlVisible(detailsView, view == "details")
+        SetToggleButton(btnRailSettings, view ~= "details", "Settings")
+        SetToggleButton(btnRailDetails, view == "details", "Details")
+    end
+    panel.ShowRailView = ShowRailView
+    btnRailSettings:SetScript("OnClick", function() ShowRailView("settings") end)
+    btnRailDetails:SetScript("OnClick", function() ShowRailView("details") end)
+    ShowRailView("settings")
 
     local modeButtons = {}
     local btnRun
@@ -390,6 +664,9 @@ function MarketSync.CreateProcessingPanel(parent)
     local HandleTableMouseWheel
     local RefreshResultHeaders
     local BuildCraftDisplay
+    local ApplyFilters
+    local ShowDetails
+    local UpdateSelectionSummary
 
     local tableScrollBar
     if MarketSync.CreateModernTableScrollBar and rightBox then
@@ -400,7 +677,7 @@ function MarketSync.CreateProcessingPanel(parent)
             elseif UpdateResultRows then
                 UpdateResultRows()
             end
-        end, 8, isEmbedded and -24 or -28, 28)
+        end, 8, -24, FOOTER_H + 2)
         panel.tableScrollBar = tableScrollBar
         tableScrollBar:AttachMouseWheel(rightBox)
         tableScrollBar:AttachMouseWheel(panel)
@@ -411,7 +688,7 @@ function MarketSync.CreateProcessingPanel(parent)
         if panel.activeMode == "process" then
             btnRun:SetText("Run Process")
         elseif panel.activeMode == "craft" then
-            btnRun:SetText("Run Craft")
+            btnRun:SetText("Refresh")
         else
             btnRun:SetText("Run Target")
         end
@@ -421,33 +698,16 @@ function MarketSync.CreateProcessingPanel(parent)
         for _, def in ipairs(MODE_OPTIONS) do
             local btn = modeButtons[def.key]
             if btn then
-                local isActive = (def.key == panel.activeMode)
-                if isActive then
-                    btn:SetText("|cffffd700" .. def.label .. "|r")
-                    if btn.LockHighlight then btn:LockHighlight() end
-                else
-                    btn:SetText(def.label)
-                    if btn.UnlockHighlight then btn:UnlockHighlight() end
-                end
-            end
-        end
-        if leftTopTitle then
-            if panel.activeMode == "target" then
-                leftTopTitle:SetText("|cffffd700Target Material Controls|r")
-            elseif panel.activeMode == "process" then
-                leftTopTitle:SetText("|cffffd700Process Scan Controls|r")
-            else
-                leftTopTitle:SetText("|cffffd700Craft Profit Controls|r")
+                SetToggleButton(btn, def.key == panel.activeMode, def.label)
             end
         end
     end
 
-    -- Top Sub-Tab Mode Buttons (Target Material / Process Scan / Craft Profit)
     local function CreateModeTab(def, index)
         local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         btn:SetSize(isEmbedded and 114 or 124, 24)
         if index == 1 then
-            btn:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, isEmbedded and -8 or -34)
+            btn:SetPoint("TOPLEFT", panel, "TOPLEFT", isEmbedded and 64 or 76, tabsY)
         else
             btn:SetPoint("LEFT", modeButtons[MODE_OPTIONS[index - 1].key], "RIGHT", 5, 0)
         end
@@ -460,6 +720,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 panel.selectedCrafts = {}
                 panel.selectedArbitrage = {}
                 panel.displayRows = {}
+                panel.allRows = {}
                 if panel.ClearResults then panel:ClearResults() end
                 RefreshModeButtons()
                 UpdateRunButtonText()
@@ -467,6 +728,8 @@ function MarketSync.CreateProcessingPanel(parent)
                     panel:RefreshModeControls()
                 end
                 if panel.RefreshCustomRows then panel.RefreshCustomRows() end
+                if ShowDetails then ShowDetails(nil) end
+                ShowRailView("settings")
                 if def.key == "craft" and RunActiveMode then
                     RunActiveMode()
                 end
@@ -480,20 +743,33 @@ function MarketSync.CreateProcessingPanel(parent)
     modeButtons.craft = CreateModeTab(MODE_OPTIONS[3], 3)
     RefreshModeButtons()
 
-    local targetLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    targetLabel:SetPoint("TOPLEFT", 12, -8)
-    targetLabel:SetText("Target (Name/ID)")
+    -- Freshness of the market cache used by the last run.
+    local priceBadge = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    priceBadge:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -16, tabsY - 6)
+    priceBadge:SetJustifyH("RIGHT")
+    priceBadge:SetText("")
+    panel.priceBadge = priceBadge
 
-    local targetInputBox = CreateFrame("EditBox", nil, leftTopBox, "InputBoxTemplate")
+    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
+    local modeControls = { target = {}, process = {}, craft = {} }
+    local function Track(mode, control)
+        modeControls[mode][#modeControls[mode] + 1] = control
+        return control
+    end
+
+    -- ===================== Target Material settings =====================
+    local targetLabel = Track("target", CreateRailLabel(settingsView, -34, "Target material"))
+    local targetInputBox = CreateFrame("EditBox", nil, settingsView, "InputBoxTemplate")
+    Track("target", targetInputBox)
     panel.targetInputBox = targetInputBox
-    targetInputBox:SetSize(210, 18)
-    targetInputBox:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -27)
+    targetInputBox:SetSize(RAIL_INNER_W - 6, 18)
+    targetInputBox:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 14, -50)
     targetInputBox:SetAutoFocus(false)
     targetInputBox:SetText("")
     targetInputBox:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Enter target item", 1, 0.82, 0)
-        GameTooltip:AddLine("Drag an item here, shift-click a link, or enter a name/ID to search.", 0.85, 0.85, 0.85, true)
+        GameTooltip:SetText("Target material", 1, 0.82, 0)
+        GameTooltip:AddLine("Drop an item here, shift-click a link, or type a name or ID and press Enter.", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     targetInputBox:SetScript("OnLeave", function()
@@ -502,13 +778,24 @@ function MarketSync.CreateProcessingPanel(parent)
     targetInputBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
     end)
-    targetInputBox:SetScript("OnEnterPressed", function(self)
-        self:ClearFocus()
-        if panel.activeMode == "target" and RunActiveMode then
-            RunActiveMode()
-        end
-    end)
+    local targetHint = Track("target", settingsView:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall"))
+    targetHint:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -72)
+    targetHint:SetWidth(RAIL_INNER_W)
+    targetHint:SetJustifyH("LEFT")
+    targetHint:SetText("|cffa89e8cType, drop or shift-click an item.|r")
+
     local targetDropdown
+    local recentButtons = {}
+    local function RememberTarget(itemID)
+        if not MarketSyncDB then return end
+        local list = MarketSyncDB.ProcessingRecentTargets or {}
+        local out = { tonumber(itemID) }
+        for _, id in ipairs(list) do
+            if tonumber(id) ~= tonumber(itemID) and #out < MAX_RECENT_TARGETS then out[#out + 1] = tonumber(id) end
+        end
+        MarketSyncDB.ProcessingRecentTargets = out
+        if panel.RefreshRecentTargets then panel.RefreshRecentTargets() end
+    end
     local function SetTargetFromItem(item)
         local itemID = ResolveItemIDFromQuery(item)
         if not itemID then return false end
@@ -516,12 +803,13 @@ function MarketSync.CreateProcessingPanel(parent)
         panel.selectedTargetID = itemID
         targetInputBox:SetText(name and (name .. " (" .. itemID .. ")") or ("Item " .. itemID))
         if targetDropdown then
-            SetDropdownLabel(targetDropdown, Truncate(name or ("Item " .. itemID), 20))
+            SetDropdownLabel(targetDropdown, "Pick from list")
         end
         targetInputBox:ClearFocus()
         if panel.activeMode == "target" and RunActiveMode then RunActiveMode() end
         return true
     end
+    panel.SetTargetFromItem = SetTargetFromItem
     local function HandleTargetItemDrop()
         if type(GetCursorInfo) ~= "function" then return false end
         local cursorType, itemID, itemLink = GetCursorInfo()
@@ -564,14 +852,13 @@ function MarketSync.CreateProcessingPanel(parent)
         })
     end
 
-    local parentPrefix = (parent and parent.GetName and parent:GetName()) or "MarketSync"
-    targetDropdown = BuildDropdown(parentPrefix .. "ProcessingTargetDropdown", leftTopBox, 208, function(self, level)
+    targetDropdown = BuildDropdown(parentPrefix .. "ProcessingTargetDropdown", settingsView, RAIL_INNER_W, function(self, level)
         local resetInfo = UIDropDownMenu_CreateInfo()
-        resetInfo.text = "Select material..."
+        resetInfo.text = "Clear target"
         resetInfo.func = function()
             panel.selectedTargetID = nil
             targetInputBox:SetText("")
-            SetDropdownLabel(targetDropdown, "Select material...")
+            SetDropdownLabel(targetDropdown, "Pick from list")
         end
         UIDropDownMenu_AddButton(resetInfo, level)
 
@@ -594,7 +881,6 @@ function MarketSync.CreateProcessingPanel(parent)
             opt.func = function()
                 panel.selectedTargetID = t.itemID
                 targetInputBox:SetText(t.name or ("Item #" .. tostring(t.itemID)))
-                SetDropdownLabel(targetDropdown, Truncate(t.name or ("Item #" .. tostring(t.itemID)), 16))
                 if panel.activeMode == "target" and RunActiveMode then
                     RunActiveMode()
                 end
@@ -602,60 +888,146 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    targetDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 232, -25)
-    SetDropdownLabel(targetDropdown, "Select material...")
+    Track("target", targetDropdown)
+    targetDropdown:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -88)
+    SetDropdownLabel(targetDropdown, "Pick from list")
 
-    local targetDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    targetDesc:SetPoint("TOPLEFT", 12, -53)
-    targetDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
-    targetDesc:SetJustifyH("LEFT")
-    if targetDesc.SetJustifyV then targetDesc:SetJustifyV("TOP") end
-    targetDesc:SetText("|cff777777Shows all items that process into this material.|r")
-
-    local processLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    processLabel:SetPoint("TOPLEFT", 12, -8)
-    processLabel:SetText("Process")
-
-    local processDropdown
-    processDropdown = BuildDropdown(parentPrefix .. "ProcessingTypeDropdown", leftTopBox, 208, function(self, level)
-        if panel.selectedProcess and not IsSupportedProcessType(panel.selectedProcess) then
-            panel.selectedProcess = nil
-        end
-
-        for _, p in ipairs(GetProcessOptions()) do
-            local opt = UIDropDownMenu_CreateInfo()
-            opt.text = p
-            opt.func = function()
-                panel.selectedProcess = (p == "ALL") and nil or p
-                SetDropdownLabel(processDropdown, p)
-                if panel.activeMode == "process" and RunActiveMode then
-                    RunActiveMode()
-                end
+    local recentLabel = Track("target", CreateRailLabel(settingsView, -116, "Recent"))
+    for i = 1, MAX_RECENT_TARGETS do
+        local btn = CreateFrame("Button", nil, settingsView, "UIPanelButtonTemplate")
+        btn:SetSize(RAIL_INNER_W, 18)
+        btn:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -130 - (i - 1) * 20)
+        btn:Hide()
+        btn:SetScript("OnClick", function(self)
+            if self.itemID then SetTargetFromItem(self.itemID) end
+        end)
+        recentButtons[i] = btn
+    end
+    function panel.RefreshRecentTargets()
+        local list = MarketSyncDB and MarketSyncDB.ProcessingRecentTargets or {}
+        local isTarget = panel.activeMode == "target"
+        SetControlVisible(recentLabel, isTarget and #list > 0)
+        for i, btn in ipairs(recentButtons) do
+            local id = tonumber(list[i])
+            btn.itemID = id
+            if id and isTarget then
+                local name = CachedItemField(id, "n") or SafeGetItemInfo(id) or ("Item " .. id)
+                btn:SetText(Truncate(name, 24))
+                btn:Show()
+            else
+                btn:Hide()
             end
-            UIDropDownMenu_AddButton(opt, level)
+        end
+    end
+
+    local madeByLabel = Track("target", CreateRailLabel(settingsView, -196, "Made by"))
+    local madeByDropdown
+    madeByDropdown = BuildDropdown(parentPrefix .. "ProcessingMadeByDropdown", settingsView, RAIL_INNER_W, function(_, level)
+        for _, p in ipairs(GetProcessOptions()) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = (p == "ALL") and "Any process" or FormatProcessType(p)
+            info.checked = (panel.filters.madeBy == nil and p == "ALL") or panel.filters.madeBy == p
+            info.func = function()
+                panel.filters.madeBy = (p ~= "ALL") and p or nil
+                SetDropdownLabel(madeByDropdown, info.text)
+                if ApplyFilters then ApplyFilters() end
+            end
+            UIDropDownMenu_AddButton(info, level)
         end
     end)
-    processDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -25)
-    SetDropdownLabel(processDropdown, "ALL")
+    Track("target", madeByDropdown)
+    madeByDropdown:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -210)
+    SetDropdownLabel(madeByDropdown, "Any process")
 
-    local processDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    processDesc:SetPoint("TOPLEFT", 232, -30)
-    processDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
-    processDesc:SetJustifyH("LEFT")
-    if processDesc.SetJustifyV then processDesc:SetJustifyV("TOP") end
-    processDesc:SetText("|cff777777Shows all items that can be processed.|r")
+    -- ===================== Process Scan settings =====================
+    Track("process", CreateRailLabel(settingsView, -34, "Process"))
+    local processButtons = {}
+    for i, p in ipairs(PROCESS_LIST) do
+        local btn = CreateFrame("Button", nil, settingsView, "UIPanelButtonTemplate")
+        btn:SetSize(RAIL_INNER_W, 20)
+        btn:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -48 - (i - 1) * 22)
+        btn.processType = p
+        btn:SetScript("OnClick", function(self)
+            if not IsSupportedProcessType(p ~= "ALL" and p or nil) then return end
+            panel.selectedProcess = (p == "ALL") and nil or p
+            if panel.RefreshProcessButtons then panel.RefreshProcessButtons() end
+            if panel.activeMode == "process" and RunActiveMode then RunActiveMode() end
+        end)
+        processButtons[i] = Track("process", btn)
+    end
+    panel.processButtons = processButtons
+    function panel.RefreshProcessButtons()
+        for _, btn in ipairs(processButtons) do
+            local p = btn.processType
+            local supported = IsSupportedProcessType(p ~= "ALL" and p or nil)
+            local label = (p == "ALL") and "All processes" or FormatProcessType(p)
+            local active = (panel.selectedProcess == nil and p == "ALL") or panel.selectedProcess == p
+            if not supported then
+                btn:SetText("|cff8a806e" .. label .. " (not on this client)|r")
+                if btn.SetEnabled then btn:SetEnabled(false) end
+            else
+                if btn.SetEnabled then btn:SetEnabled(true) end
+                SetToggleButton(btn, active, label)
+            end
+        end
+    end
 
+    Track("process", CreateRailLabel(settingsView, -142, "Quality"))
+    local qualityButtons = {}
+    local qualityW = math.floor((RAIL_INNER_W - 8) / 3)
+    for i, q in ipairs(QUALITY_FILTERS) do
+        local btn = CreateFrame("Button", nil, settingsView, "UIPanelButtonTemplate")
+        btn:SetSize(qualityW, 20)
+        btn:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8 + (i - 1) * (qualityW + 4), -156)
+        btn:SetScript("OnClick", function()
+            panel.filters.qualities[q.key] = not panel.filters.qualities[q.key]
+            if panel.RefreshQualityButtons then panel.RefreshQualityButtons() end
+            if ApplyFilters then ApplyFilters() end
+        end)
+        qualityButtons[i] = Track("process", btn)
+    end
+    function panel.RefreshQualityButtons()
+        for i, q in ipairs(QUALITY_FILTERS) do
+            local on = panel.filters.qualities[q.key]
+            qualityButtons[i]:SetText(on and (q.color .. q.label .. "|r") or ("|cff8a806e" .. q.label .. "|r"))
+        end
+    end
+
+    Track("process", CreateRailLabel(settingsView, -184, "Item level"))
+    local function LevelBox(x)
+        local box = CreateFrame("EditBox", nil, settingsView, "InputBoxTemplate")
+        box:SetSize(44, 18)
+        box:SetPoint("TOPLEFT", settingsView, "TOPLEFT", x, -200)
+        box:SetAutoFocus(false)
+        if box.SetNumeric then box:SetNumeric(true) end
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        return Track("process", box)
+    end
+    local minLevelBox = LevelBox(14)
+    local levelTo = Track("process", settingsView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall"))
+    levelTo:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 64, -203)
+    levelTo:SetText("to")
+    local maxLevelBox = LevelBox(84)
+    local function ReadLevels()
+        panel.filters.minLevel = tonumber(minLevelBox:GetText())
+        panel.filters.maxLevel = tonumber(maxLevelBox:GetText())
+        if ApplyFilters then ApplyFilters() end
+    end
+    for _, box in ipairs({ minLevelBox, maxLevelBox }) do
+        box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ReadLevels() end)
+        box:SetScript("OnEditFocusLost", ReadLevels)
+    end
+
+    -- ===================== Craft Profit settings =====================
     local professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions()) or {}
     panel.selectedProfession = "ALL"
     panel.craftSaleTarget = "ah" -- "ah" (resell on AH -5% cut) or "vendor" (bulk vendor shuffle, 0% cut)
 
     local RefreshProfessionOptions
-    local characterLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    characterLabel:SetPoint("TOPLEFT", 12, -8)
-    characterLabel:SetText("Crafter")
+    local characterLabel = Track("craft", CreateRailLabel(settingsView, -34, "Crafter"))
 
     local characterDropdown
-    characterDropdown = BuildDropdown(parentPrefix .. "ProcessingCharacterDropdown", leftTopBox, 208, function(self, level)
+    characterDropdown = BuildDropdown(parentPrefix .. "ProcessingCharacterDropdown", settingsView, RAIL_INNER_W, function(self, level)
         local choices = MarketSync.GetProcessingCraftingCharacters and MarketSync.GetProcessingCraftingCharacters() or {}
         for _, choice in ipairs(choices) do
             local opt = UIDropDownMenu_CreateInfo()
@@ -671,20 +1043,20 @@ function MarketSync.CreateProcessingPanel(parent)
                 panel.activeCraftSet = nil
                 panel.selectedCrafts = {}
                 if RefreshProfessionOptions then RefreshProfessionOptions() end
+                if panel.RefreshProfessionStatus then panel.RefreshProfessionStatus() end
                 if panel.activeMode == "craft" and RunActiveMode then RunActiveMode() end
             end
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    characterDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 12, -25)
+    Track("craft", characterDropdown)
+    characterDropdown:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -48)
     SetDropdownLabel(characterDropdown, "This character")
 
-    local professionLabel = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    professionLabel:SetPoint("TOPLEFT", 232, -8)
-    professionLabel:SetText("Profession")
+    local professionLabel = Track("craft", CreateRailLabel(settingsView, -76, "Profession"))
 
     local professionDropdown
-    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", leftTopBox, 208, function(self, level)
+    professionDropdown = BuildDropdown(parentPrefix .. "CraftProfDropdown", settingsView, RAIL_INNER_W, function(self, level)
         professionOptions = (MarketSync.GetProcessingProfessions and MarketSync.GetProcessingProfessions(panel.selectedCharacterKey)) or professionOptions
         local options = { "ALL" }
         for _, name in ipairs(professionOptions) do options[#options + 1] = name end
@@ -695,6 +1067,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 panel.selectedProfession = p
                 panel.selectedCrafts = {}
                 SetDropdownLabel(professionDropdown, p)
+                if panel.RefreshProfessionStatus then panel.RefreshProfessionStatus() end
                 if panel.activeMode == "craft" and panel:IsShown() and RunActiveMode then
                     RunActiveMode()
                 end
@@ -702,70 +1075,151 @@ function MarketSync.CreateProcessingPanel(parent)
             UIDropDownMenu_AddButton(opt, level)
         end
     end)
-    professionDropdown:SetPoint("TOPLEFT", leftTopBox, "TOPLEFT", 232, -25)
+    Track("craft", professionDropdown)
+    professionDropdown:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -90)
     SetDropdownLabel(professionDropdown, "ALL")
 
-    local craftDesc = leftTopBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    craftDesc:SetPoint("TOPLEFT", 144, -53)
-    craftDesc:SetPoint("RIGHT", leftTopBox, "RIGHT", -8, 0)
-    craftDesc:SetJustifyH("LEFT")
-    if craftDesc.SetJustifyV then craftDesc:SetJustifyV("TOP") end
-    craftDesc:SetText("|cff777777Current realm AH prices|r")
-
-    local saleTargetDropdown
-    local function RefreshSaleTarget()
-        if panel.craftSaleTarget == "vendor" then
-            SetDropdownLabel(saleTargetDropdown, "Vendor Sale")
-            craftDesc:SetText("|cff777777Vendor sell price less reagent cost (0% fee).|r")
+    local profStatusText = Track("craft", settingsView:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall"))
+    profStatusText:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -114)
+    profStatusText:SetWidth(RAIL_INNER_W)
+    profStatusText:SetJustifyH("LEFT")
+    panel.profStatusText = profStatusText
+    function panel.RefreshProfessionStatus()
+        if not MarketSync.GetProfessionScanStatus then
+            profStatusText:SetText("")
+            return
+        end
+        local rows = MarketSync.GetProfessionScanStatus(panel.selectedCharacterKey)
+        local prof = panel.selectedProfession
+        if prof and prof ~= "ALL" then
+            for _, row in ipairs(rows) do
+                if row.name == prof then
+                    local color = row.state == "ready" and "|cff4fd06a" or "|cffffb347"
+                    local age = (row.updatedAt and row.updatedAt > 0 and MarketSync.FormatRelativeTime)
+                        and (" | " .. MarketSync.FormatRelativeTime(row.updatedAt)) or ""
+                    if row.state == "missing" then
+                        profStatusText:SetText(color .. tostring(row.hint) .. "|r")
+                    else
+                        profStatusText:SetText(color .. tostring(row.recipes or 0) .. " recipes" .. age .. "|r"
+                            .. (row.state == "stale" and ("\n|cffffb347" .. tostring(row.hint) .. "|r") or ""))
+                    end
+                    return
+                end
+            end
+        end
+        local ready, needs = 0, 0
+        for _, row in ipairs(rows) do
+            if row.state == "ready" then ready = ready + 1
+            elseif row.state == "missing" or row.state == "stale" then needs = needs + 1 end
+        end
+        if needs > 0 then
+            profStatusText:SetText(string.format("|cff4fd06a%d ready|r | |cffffb347%d need a scan|r", ready, needs))
+        elseif ready > 0 then
+            profStatusText:SetText(string.format("|cff4fd06a%d professions ready|r", ready))
         else
-            SetDropdownLabel(saleTargetDropdown, "Auction Sale")
-            craftDesc:SetText("|cff777777Current realm auction prices less reagent cost and the 5% cut.|r")
+            profStatusText:SetText("|cffffb347Open a profession window to scan it.|r")
         end
     end
-    saleTargetDropdown = BuildDropdown(parentPrefix .. "ProcessingSaleTargetDropdown", panel, 116, function(_, level)
-        for _, option in ipairs({ { "ah", "Auction Sale" }, { "vendor", "Vendor Sale" } }) do
-            local target, label = option[1], option[2]
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = label
-            info.checked = panel.craftSaleTarget == target
-            info.func = function()
-                if panel.craftSaleTarget == target then return end
-                panel.craftSaleTarget = target
-                RefreshSaleTarget()
-                if RefreshResultHeaders then RefreshResultHeaders() end
-                if panel.activeMode == "craft" and RunActiveMode then RunActiveMode() end
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
+
+    Track("craft", CreateRailLabel(settingsView, -146, "Sell to"))
+    local halfW = math.floor((RAIL_INNER_W - 4) / 2)
+    local btnSellAH = Track("craft", CreateFrame("Button", nil, settingsView, "UIPanelButtonTemplate"))
+    btnSellAH:SetSize(halfW, 20)
+    btnSellAH:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -160)
+    local btnSellVendor = Track("craft", CreateFrame("Button", nil, settingsView, "UIPanelButtonTemplate"))
+    btnSellVendor:SetSize(halfW, 20)
+    btnSellVendor:SetPoint("LEFT", btnSellAH, "RIGHT", 4, 0)
+    panel.sellButtons = { ah = btnSellAH, vendor = btnSellVendor }
+    local function RefreshSaleTarget()
+        SetToggleButton(btnSellAH, panel.craftSaleTarget ~= "vendor", "Auction")
+        SetToggleButton(btnSellVendor, panel.craftSaleTarget == "vendor", "Vendor")
+    end
+    local function SetSaleTarget(target)
+        if panel.craftSaleTarget == target then return end
+        panel.craftSaleTarget = target
+        RefreshSaleTarget()
+        if RefreshResultHeaders then RefreshResultHeaders() end
+        if panel.activeMode == "craft" and RunActiveMode then RunActiveMode() end
+    end
+    btnSellAH:SetScript("OnClick", function() SetSaleTarget("ah") end)
+    btnSellVendor:SetScript("OnClick", function() SetSaleTarget("vendor") end)
+    btnSellAH:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Sell on the Auction House", 1, 0.82, 0)
+        GameTooltip:AddLine("Auction prices less material cost and the 5% cut.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
     end)
-    saleTargetDropdown:SetPoint("LEFT", modeButtons.craft, "RIGHT", 8, 0)
+    btnSellAH:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    btnSellVendor:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Sell to a vendor", 1, 0.82, 0)
+        GameTooltip:AddLine("Vendor sell price less material cost. No fee.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnSellVendor:SetScript("OnLeave", function() GameTooltip:Hide() end)
     RefreshSaleTarget()
 
+    local btnProfessions = Track("craft", CreateFrame("Button", nil, settingsView, "UIPanelButtonTemplate"))
+    btnProfessions:SetSize(RAIL_INNER_W, 20)
+    btnProfessions:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 8, -232)
+    btnProfessions:SetText("Professions...")
+    btnProfessions:SetScript("OnClick", function() MarketSync.ShowProfessionStatus() end)
+    btnProfessions:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Professions", 1, 0.82, 0)
+        GameTooltip:AddLine("See which professions are scanned for each character, and how to scan the rest.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnProfessions:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    panel.professionsButton = btnProfessions
 
+    -- ===================== Shared filters =====================
+    local function FilterY()
+        if panel.activeMode == "target" then return -238 end
+        if panel.activeMode == "process" then return -226 end
+        return -184
+    end
+    local chkProfitable = CreateCheck(settingsView, 6, -238, "Only profitable", function(on)
+        panel.filters.onlyProfitable = on
+        if ApplyFilters then ApplyFilters() end
+    end)
+    local chkStale = CreateCheck(settingsView, 6, -258, "Hide stale prices", function(on)
+        panel.filters.hideStale = on
+        if ApplyFilters then ApplyFilters() end
+    end)
+    panel.profitableCheck = chkProfitable
+    panel.staleCheck = chkStale
+    local function PlaceFilterChecks()
+        local y = FilterY()
+        chkProfitable:ClearAllPoints()
+        chkProfitable:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 6, y)
+        chkStale:ClearAllPoints()
+        chkStale:SetPoint("TOPLEFT", settingsView, "TOPLEFT", 6, y - 20)
+        chkStale.text:SetText(panel.activeMode == "process" and "Hide partial / stale" or "Hide stale prices")
+    end
+
+    -- ===================== Results footer =====================
     btnRun = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     local btnExport = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     local btnTrack = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    local btnSaved = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    panel.savedButton = btnSaved
     local statusSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    panel.statusSummary = statusSummary
+    panel.runButton = btnRun
 
-    btnRun:SetSize(88, 24)
-    btnExport:SetSize(66, 24)
-    btnTrack:SetSize(64, 24)
-    btnSaved:SetSize(90, 24)
+    btnRun:SetSize(84, 22)
+    btnExport:SetSize(62, 22)
+    btnTrack:SetSize(60, 22)
 
-    btnTrack:SetPoint("TOPRIGHT", leftTopBox, "TOPRIGHT", -8, -24)
-    btnExport:SetPoint("RIGHT", btnTrack, "LEFT", -4, 0)
-    btnRun:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
-    btnSaved:SetPoint("RIGHT", btnRun, "LEFT", -4, 0)
+    btnRun:SetPoint("BOTTOMRIGHT", rightBox, "BOTTOMRIGHT", -112, 5)
+    btnExport:SetPoint("RIGHT", btnRun, "LEFT", -4, 0)
+    btnTrack:SetPoint("RIGHT", btnExport, "LEFT", -4, 0)
 
-    statusSummary:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RESULTS_X + 4, 14)
-    statusSummary:SetPoint("RIGHT", panel, "BOTTOMRIGHT", -140, 14)
+    statusSummary:SetPoint("BOTTOMLEFT", rightBox, "BOTTOMLEFT", 8, 10)
+    statusSummary:SetPoint("RIGHT", btnTrack, "LEFT", -8, 0)
     statusSummary:SetJustifyH("LEFT")
     if statusSummary.SetWordWrap then statusSummary:SetWordWrap(false) end
     btnExport:SetText("Export")
     btnTrack:SetText("Track")
-    btnSaved:SetText("Saved...")
     local function OpenCraftSidecar(itemID)
         local host = AuctionHouseFrame or AuctionFrame or MarketSync.MainFrame
         if MarketSync.CreateAHSidecar then MarketSync.CreateAHSidecar(host) end
@@ -785,18 +1239,6 @@ function MarketSync.CreateProcessingPanel(parent)
         end
         return true
     end
-    btnSaved:SetScript("OnClick", function()
-        if panel.activeMode == "craft" then
-            OpenCraftSidecar()
-            return
-        end
-        if leftBottomBox:IsShown() then
-            leftBottomBox:Hide()
-        else
-            if panel.RefreshCustomRows then panel.RefreshCustomRows() end
-            leftBottomBox:Show()
-        end
-    end)
     statusSummary:SetText("|cff888888Ready|r")
 
     if MarketSync.SetAccessibility then
@@ -820,15 +1262,15 @@ function MarketSync.CreateProcessingPanel(parent)
     panel.sortField = "valueSort"
     panel.sortAscending = false
 
-    local extraWidth = ROW_WIDTH - 550
-    local itemWidth = 175 + math.floor(extraWidth * 0.18)
-    local typeWidth = 65 + math.floor(extraWidth * 0.08)
-    local priceWidth = 62 + math.floor(extraWidth * 0.12)
-    local statusWidth = ROW_WIDTH - itemWidth - typeWidth - (priceWidth * 4)
+    local itemWidth = math.floor(ROW_WIDTH * 0.30)
+    local typeWidth = math.floor(ROW_WIDTH * 0.12)
+    local statusWidth = 66
+    local priceWidth = math.floor((ROW_WIDTH - itemWidth - typeWidth - statusWidth) / 4)
+    itemWidth = ROW_WIDTH - typeWidth - statusWidth - (priceWidth * 4)
     local colDefs = {
         { name = "Item",     width = itemWidth,   sortKey = "itemSort"   },
         { name = "Type",     width = typeWidth,   sortKey = "typeSort"   },
-        { name = "Net EV",   width = priceWidth,  sortKey = "valueSort"  },
+        { name = "Value",    width = priceWidth,  sortKey = "valueSort"  },
         { name = "Max/ea",   width = priceWidth,  sortKey = "maxSort"    },
         { name = "AH/ea",    width = priceWidth,  sortKey = "liveSort"   },
         { name = "Edge",     width = priceWidth,  sortKey = "deltaSort"  },
@@ -855,10 +1297,10 @@ function MarketSync.CreateProcessingPanel(parent)
 
     local rowHeight = isEmbedded and 36 or 37
     local usableHeight = parentHeight > 0 and parentHeight or (isEmbedded and 440 or 430)
+    local hdrY = bodyTop - 4
+    local rowStartY = hdrY - 22
     local numResultsPerPage = math.max(1, math.min(10,
-        math.floor((usableHeight - (isEmbedded and 172 or 204)) / rowHeight)))
-    local hdrY = isEmbedded and -111 or -145
-    local rowStartY = isEmbedded and -135 or -169
+        math.floor((usableHeight + rowStartY - FOOTER_H - bottomInset - 6) / rowHeight)))
 
     local colX = RESULTS_X - 2
     for i, col in ipairs(colDefs) do
@@ -896,37 +1338,45 @@ function MarketSync.CreateProcessingPanel(parent)
         colX = colX + col.width
     end
 
-    local ARBITRAGE_HEADERS = {
-        { "Item", "Input item being purchased and processed." },
+    local TARGET_HEADERS = {
+        { "Item", "Input item you would buy and process." },
+        { "Process", "How the item turns into the target material." },
+        { "Yield", "Expected number of target materials per input item." },
+        { "Buy under", "Break-even buy price per input item after the 5% auction cut on the material." },
+        { "AH now", "Current auction price per input item." },
+        { "Edge", "Profit per input item: break-even price minus the current auction price." },
+        { "Status", "GOOD: buy under break-even. MISS: too expensive. STALE: a price is over 24 hours old." },
+    }
+    local PROCESS_HEADERS = {
+        { "Item", "Input item you would buy and process." },
         { "Process", "Processing method." },
-        { "Net EV", "Expected net resale value per input item after the 5% main Auction House sale cut." },
-        { "Max/ea", "Break-even buy price per input item (Net EV)." },
-        { "AH/ea", "Current Auctionator price per input item." },
-        { "Edge", "Net profit per input item (Net EV minus current AH price)." },
-        { "Status", "Partial/stale pricing state and whether the current input price is at or below break-even." },
+        { "Value", "Average value of the results per input item, before the 5% auction cut." },
+        { "Buy under", "Break-even buy price per input item after the 5% auction cut." },
+        { "AH now", "Current auction price per input item." },
+        { "Edge", "Profit per input item: break-even price minus the current auction price." },
+        { "Status", "GOOD: buy under break-even. PARTIAL: some result prices are missing. STALE: a price is over 24 hours old." },
     }
     local CRAFT_HEADERS = {
-        { "Item", "Crafted output item." },
-        { "Diff.", "Current profession difficulty reported for this recipe." },
-        { "Profit", "Expected net revenue minus the complete material basket cost for one craft." },
-        { "Cap", "Break-even material spend for one craft (expected net revenue)." },
-        { "Mats", "Current total Auctionator cost of the complete material basket for one craft." },
-        { "Room", "Expected profit per craft (material cap minus material cost)." },
-        { "Status", "Price freshness and whether the craft is currently profitable." },
+        { "Item", "Crafted item." },
+        { "Skill", "Recipe difficulty colour for this crafter." },
+        { "Profit", "Expected sale after the 5% cut, minus the full material cost of one craft." },
+        { "ROI", "Profit as a share of the material cost." },
+        { "Mats", "Current cost of all materials for one craft." },
+        { "Sells for", "Expected auction sale for one craft after the 5% cut." },
+        { "Status", "GOOD: profitable. MISS: loses money. STALE: a price is over 24 hours old." },
     }
-
     local VENDOR_CRAFT_HEADERS = {
-        { "Item", "Crafted output item." },
-        { "Diff.", "Current profession difficulty reported for this recipe." },
-        { "Vendor+", "Bulk Vendor profit per craft (Vendor sell payout minus complete material cost, 0% cut)." },
-        { "Vendor", "Total Vendor sell payout per craft (break-even max material spend)." },
-        { "Mats", "Current total Auction House / vendor cost of all reagents for one craft." },
-        { "Room", "Expected bulk vendor profit per craft (Vendor payout minus material cost)." },
-        { "Status", "Whether buying reagents on the AH and selling the craft to a vendor is profitable." },
+        { "Item", "Crafted item." },
+        { "Skill", "Recipe difficulty colour for this crafter." },
+        { "Vendor+", "Vendor payout minus the full material cost of one craft. No fee." },
+        { "ROI", "Profit as a share of the material cost." },
+        { "Mats", "Current cost of all materials for one craft." },
+        { "Vendor pays", "Vendor sell price for one craft." },
+        { "Status", "Whether buying the materials and selling the craft to a vendor makes money." },
     }
 
     RefreshResultHeaders = function()
-        local definitions = ARBITRAGE_HEADERS
+        local definitions = (panel.activeMode == "process") and PROCESS_HEADERS or TARGET_HEADERS
         if panel.activeMode == "craft" then
             definitions = (panel.craftSaleTarget == "vendor") and VENDOR_CRAFT_HEADERS or CRAFT_HEADERS
         end
@@ -934,11 +1384,7 @@ function MarketSync.CreateProcessingPanel(parent)
             local definition = definitions[i]
             if header.label and definition then
                 header.label:SetText(definition[1])
-                local title = definition[1]
-                if panel.activeMode == "craft" and (i >= 3 and i <= 6) then
-                    title = definition[1] .. " per Craft"
-                end
-                header.tooltipTitle = title
+                header.tooltipTitle = definition[1]
                 header.tooltipText = definition[2]
             end
         end
@@ -966,7 +1412,6 @@ function MarketSync.CreateProcessingPanel(parent)
         iconBorder:SetSize(60, 60)
         iconBorder:SetPoint("CENTER")
 
-        -- Modern clean row background matching native AH subtle alternation
         local rowBg = row:CreateTexture(nil, "BACKGROUND")
         rowBg:SetPoint("TOPLEFT", 34, 0)
         rowBg:SetPoint("BOTTOMRIGHT", 0, 0)
@@ -988,6 +1433,7 @@ function MarketSync.CreateProcessingPanel(parent)
         row.nameText:SetPoint("LEFT", iconButton, "RIGHT", 6, 0)
         row.nameText:SetPoint("RIGHT", row, "LEFT", c1 - 4, 0)
         row.nameText:SetJustifyH("LEFT")
+        if row.nameText.SetWordWrap then row.nameText:SetWordWrap(false) end
 
         row.typeText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         row.typeText:SetPoint("LEFT", row, "LEFT", c1 + 4, 0)
@@ -1015,7 +1461,7 @@ function MarketSync.CreateProcessingPanel(parent)
         row.deltaText:SetJustifyH("RIGHT")
 
         row.statusText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.statusText:SetPoint("LEFT", row, "LEFT", c6 + 4, 0)
+        row.statusText:SetPoint("LEFT", row, "LEFT", c6 + 6, 0)
         row.statusText:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         row.statusText:SetJustifyH("LEFT")
         for _, label in ipairs({ row.typeText, row.valueText, row.maxText, row.liveText, row.deltaText, row.statusText }) do
@@ -1048,12 +1494,10 @@ function MarketSync.CreateProcessingPanel(parent)
             GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
             local tooltipSet = false
             if row.link then
-                -- Try SetHyperlink first; if the item isn't cached it may fail
                 local ok = pcall(GameTooltip.SetHyperlink, GameTooltip, row.link)
                 if ok then
                     tooltipSet = true
                 elseif row.itemID then
-                    -- Fallback: use item:ID which WoW can request-and-show
                     local ok2 = pcall(GameTooltip.SetHyperlink, GameTooltip, "item:" .. tostring(row.itemID))
                     tooltipSet = ok2
                 end
@@ -1062,19 +1506,14 @@ function MarketSync.CreateProcessingPanel(parent)
                 tooltipSet = ok
             end
             if not tooltipSet then
-                -- Pure text fallback for completely unresolved items
                 local name = (row.nameText and row.nameText.GetText and row.nameText:GetText()) or tostring(row.itemID or "Unknown")
                 GameTooltip:SetText(name, 1, 1, 1)
             end
-            if row.detailLines and #row.detailLines > 0 then
-                GameTooltip:AddLine(" ")
-                for _, line in ipairs(row.detailLines) do
-                    GameTooltip:AddLine(line, 1, 1, 1, true)
-                end
-            elseif row.detailText and row.detailText ~= "" then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine(row.detailText, 0.85, 0.85, 0.85, true)
+            GameTooltip:AddLine(" ")
+            if row.data and row.data.approximate then
+                GameTooltip:AddLine(MarketSync.FOREVER_DISENCHANT_NOTE, 1, 0.67, 0, true)
             end
+            GameTooltip:AddLine("|cffa89e8cClick for details and to select. Right-click for more.|r", 1, 1, 1, true)
             GameTooltip:Show()
         end
         row.ShowTooltip = ShowRowTooltip
@@ -1091,11 +1530,11 @@ function MarketSync.CreateProcessingPanel(parent)
             if row.link and (HandleModifiedItemClick(row.link) or (IsModifiedClick("CHATLINK") and ChatEdit_InsertLink and ChatEdit_InsertLink(row.link))) then
                 return
             end
-            
+
             local isCraft = (panel.lastMode == "craft")
             local idKey = isCraft and row.craftID or row.itemID
             local selectTable = isCraft and panel.selectedCrafts or panel.selectedArbitrage
-            
+
             if not idKey then return end
 
             if button == "RightButton" then
@@ -1107,14 +1546,15 @@ function MarketSync.CreateProcessingPanel(parent)
                             selectTable[idKey] = not isSelected and true or nil
                             row.selectedBg:SetShown(not isSelected)
                             if row.data then row.data.isSelected = not isSelected end
+                            if UpdateSelectionSummary then UpdateSelectionSummary() end
                         end
                     },
                     {
                         text = "Create Price Alert...",
                         func = function()
                             if MarketSync.OpenAlertEditorWithItem then
-                                local targetPrice = (panel.lastMode == "craft") and (row.data and row.data.maxSort) or (row.data and row.data.maxSort)
-                                MarketSync.OpenAlertEditorWithItem(row.itemID or row.link, targetPrice)
+                                MarketSync.OpenAlertEditorWithItem(row.itemID or row.link, row.data and row.data.trackThreshold,
+                                    panel.lastMode == "craft" and "Craft Profit" or "Processing")
                             end
                         end
                     },
@@ -1156,6 +1596,8 @@ function MarketSync.CreateProcessingPanel(parent)
                 row.selectedBg:Show()
                 if row.data then row.data.isSelected = true end
             end
+            if ShowDetails and row.data then ShowDetails(row.data) end
+            if UpdateSelectionSummary then UpdateSelectionSummary() end
         end
 
         iconButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -1163,7 +1605,7 @@ function MarketSync.CreateProcessingPanel(parent)
 
         row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         row:SetScript("OnClick", function(self, button) HandleRowClick(button) end)
-        
+
         row:SetScript("OnEnter", function(self)
             self:LockHighlight()
             ShowRowTooltip(self)
@@ -1195,13 +1637,14 @@ function MarketSync.CreateProcessingPanel(parent)
 
 
     panel.noResultsText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    panel.noResultsText:SetPoint("TOP", panel, "TOP", 0, isEmbedded and -215 or -250)
+    panel.noResultsText:SetPoint("TOP", rightBox, "TOP", 0, -110)
+    panel.noResultsText:SetWidth(ROW_WIDTH - 40)
     panel.noResultsText:SetText("|cff888888Run a mode to see results.|r")
     panel.noResultsText:Show()
 
     local prevBtn = CreateFrame("Button", nil, panel)
     prevBtn:SetSize(20, 20)
-    prevBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", isEmbedded and -40 or -48, 14)
+    prevBtn:SetPoint("BOTTOMRIGHT", rightBox, "BOTTOMRIGHT", -32, 6)
     prevBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
     prevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     prevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
@@ -1218,118 +1661,183 @@ function MarketSync.CreateProcessingPanel(parent)
     if nnt and nnt.SetVertexColor then nnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
     panel.pageText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.pageText:SetPoint("RIGHT", prevBtn, "LEFT", -8, 0)
-    panel.pageText:SetText("0 results")
+    panel.pageText:SetPoint("RIGHT", prevBtn, "LEFT", -4, 0)
+    panel.pageText:SetText("1/1")
 
-    local btnResyncProf = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btnResyncProf:SetSize(28, 24)
-    btnResyncProf:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -86, isEmbedded and -8 or -34)
-    btnResyncProf:SetText("")
-    local syncArrows = {
-        { x = 0, y = 6, angle = 0 },
-        { x = 6, y = -3, angle = 2.094 },
-        { x = -6, y = -3, angle = 4.189 },
-    }
-    for _, spec in ipairs(syncArrows) do
-        local arrow = btnResyncProf:CreateTexture(nil, "OVERLAY")
-        arrow:SetTexture("Interface\\Buttons\\UI-SortArrow")
-        arrow:SetSize(9, 9)
-        arrow:SetTexCoord(0, 0.5625, 0, 1.0)
-        arrow:SetPoint("CENTER", btnResyncProf, "CENTER", spec.x, spec.y)
-        arrow:SetVertexColor(1, 0.82, 0)
-        if arrow.SetRotation then
-            arrow:SetRotation(spec.angle)
-        else
-            arrow:Hide()
-            btnResyncProf:SetText("Sync")
-            btnResyncProf:SetWidth(42)
+    -- ===================== Details view =====================
+    local detailIcon = detailsView:CreateTexture(nil, "ARTWORK")
+    detailIcon:SetSize(32, 32)
+    detailIcon:SetPoint("TOPLEFT", detailsView, "TOPLEFT", 8, -34)
+    local detailName = detailsView:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    detailName:SetPoint("TOPLEFT", detailIcon, "TOPRIGHT", 6, 0)
+    detailName:SetWidth(RAIL_W - 56)
+    detailName:SetJustifyH("LEFT")
+    if detailName.SetWordWrap then detailName:SetWordWrap(false) end
+    local detailSub = detailsView:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    detailSub:SetPoint("TOPLEFT", detailName, "BOTTOMLEFT", 0, -3)
+    detailSub:SetWidth(RAIL_W - 56)
+    detailSub:SetJustifyH("LEFT")
+
+    local function StatBox(x, labelText)
+        local box = CreateFrame("Frame", nil, detailsView)
+        box:SetSize(math.floor((RAIL_INNER_W - 4) / 2), 34)
+        box:SetPoint("TOPLEFT", detailsView, "TOPLEFT", x, -72)
+        local bg = box:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0, 0, 0, 0.35)
+        box.label = box:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+        box.label:SetPoint("TOPLEFT", 5, -4)
+        box.label:SetText(labelText)
+        box.value = box:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        box.value:SetPoint("BOTTOMLEFT", 5, 4)
+        box.value:SetPoint("RIGHT", box, "RIGHT", -4, 0)
+        box.value:SetJustifyH("LEFT")
+        return box
+    end
+    local statA = StatBox(8, "Profit")
+    local statB = StatBox(12 + math.floor((RAIL_INNER_W - 4) / 2), "ROI")
+
+    local detailLinesText = detailsView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    detailLinesText:SetPoint("TOPLEFT", detailsView, "TOPLEFT", 8, -114)
+    detailLinesText:SetPoint("BOTTOMRIGHT", detailsView, "BOTTOMRIGHT", -8, 60)
+    detailLinesText:SetJustifyH("LEFT")
+    if detailLinesText.SetJustifyV then detailLinesText:SetJustifyV("TOP") end
+    if detailLinesText.SetSpacing then detailLinesText:SetSpacing(2) end
+
+    local detailEmpty = detailsView:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    detailEmpty:SetPoint("TOPLEFT", detailsView, "TOPLEFT", 10, -40)
+    detailEmpty:SetWidth(RAIL_INNER_W)
+    detailEmpty:SetJustifyH("LEFT")
+    detailEmpty:SetText("|cffa89e8cClick a result to see where its numbers come from.|r")
+
+    local btnDetailSearch = CreateFrame("Button", nil, detailsView, "UIPanelButtonTemplate")
+    btnDetailSearch:SetSize(RAIL_INNER_W, 22)
+    btnDetailSearch:SetPoint("BOTTOMLEFT", detailsView, "BOTTOMLEFT", 8, 32)
+    btnDetailSearch:SetText("Search in AH")
+    local btnDetailList = CreateFrame("Button", nil, detailsView, "UIPanelButtonTemplate")
+    btnDetailList:SetSize(halfW, 22)
+    btnDetailList:SetPoint("BOTTOMLEFT", detailsView, "BOTTOMLEFT", 8, 8)
+    local btnDetailAlert = CreateFrame("Button", nil, detailsView, "UIPanelButtonTemplate")
+    btnDetailAlert:SetSize(halfW, 22)
+    btnDetailAlert:SetPoint("LEFT", btnDetailList, "RIGHT", 4, 0)
+    btnDetailAlert:SetText("Alert")
+    panel.detailButtons = { search = btnDetailSearch, list = btnDetailList, alert = btnDetailAlert }
+
+    local function YieldLines(itemID)
+        local def = MarketSync.ProcessingData and MarketSync.ProcessingData[tonumber(itemID)]
+        if type(def) ~= "table" or type(def.yields) ~= "table" or #def.yields == 0 then return nil end
+        local lines = { ColorLabel("Possible results:") }
+        for i, y in ipairs(def.yields) do
+            if i > 5 then lines[#lines + 1] = ColorMuted("..."); break end
+            local name = ResolveCachedItemVisual(y.itemID)
+            local chance = tonumber(y.chance) or tonumber(y.probability)
+            local qty = (y.min and y.max and y.min ~= y.max) and (tostring(y.min) .. "-" .. tostring(y.max))
+                or tostring(y.qty or y.min or 1)
+            local chanceText = chance and string.format(" %d%%", math.floor((chance <= 1 and chance * 100 or chance) + 0.5)) or ""
+            local price = MarketSync.GetAuctionPrice and MarketSync.GetAuctionPrice(y.itemID)
+            lines[#lines + 1] = string.format("%s x%s%s %s", Truncate(name, 18), qty, ColorMuted(chanceText),
+                price and price > 0 and ("|cffffffff" .. MoneyText(price) .. "|r") or ColorMuted("no price"))
         end
-    end
-    btnResyncProf:Hide()
-    btnResyncProf:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Resync profession cache", 1, 0.82, 0)
-        GameTooltip:AddLine("Refreshes cache for the profession window currently open.", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine("Open each crafting profession and press this once per profession.", 0.75, 0.75, 0.75, true)
-        GameTooltip:Show()
-    end)
-    btnResyncProf:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-
-    if MarketSync.SetAccessibility then
-        MarketSync.SetAccessibility(prevBtn, {
-            name = "Previous Page",
-            context = "Button",
-            description = "Navigate to previous page of results",
-        })
-        MarketSync.SetAccessibility(nextBtn, {
-            name = "Next Page",
-            context = "Button",
-            description = "Navigate to next page of results",
-        })
-        MarketSync.SetAccessibility(btnResyncProf, {
-            name = "Resync Professions",
-            context = "Button",
-            description = "Refreshes profession recipe cache for currently open trade skill window",
-            tooltipTitle = "Resync profession cache",
-            tooltipText = "Refreshes cache for the profession window currently open.",
-        })
+        return lines
     end
 
-    local customTitle = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    customTitle:SetPoint("TOPLEFT", 8, -8)
-    customTitle:SetText("|cffffd700Saved Analyses|r")
-
-    local closeSaved = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
-    closeSaved:SetSize(20, 18)
-    closeSaved:SetPoint("TOPRIGHT", leftBottomBox, "TOPRIGHT", -6, -5)
-    closeSaved:SetText("X")
-    closeSaved:SetScript("OnClick", function() leftBottomBox:Hide() end)
-
-    local customNameLabel = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    customNameLabel:SetPoint("TOPLEFT", 8, -28)
-    customNameLabel:SetText("Preset")
-
-    local btnSaveCustom = CreateFrame("Button", nil, leftBottomBox, "UIPanelButtonTemplate")
-    btnSaveCustom:SetSize(48, 22)
-    btnSaveCustom:SetPoint("TOPRIGHT", leftBottomBox, "TOPRIGHT", -8, -26)
-    btnSaveCustom:SetText("Save")
-
-    local customNameBox = CreateFrame("EditBox", nil, leftBottomBox, "InputBoxTemplate")
-    customNameBox:SetPoint("LEFT", customNameLabel, "RIGHT", 5, 0)
-    customNameBox:SetPoint("RIGHT", btnSaveCustom, "LEFT", -4, 0)
-    customNameBox:SetHeight(20)
-    customNameBox:SetAutoFocus(false)
-    customNameBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    customNameBox:SetScript("OnEnterPressed", function(self)
-        self:ClearFocus()
-    end)
-    if MarketSync.RegisterLinkAwareEditBox then
-        MarketSync.RegisterLinkAwareEditBox(customNameBox)
+    ShowDetails = function(data)
+        panel.detailData = data
+        if not data then
+            for _, region in ipairs({ detailIcon, detailName, detailSub, detailLinesText }) do region:Hide() end
+            statA:Hide(); statB:Hide()
+            btnDetailSearch:Hide(); btnDetailList:Hide(); btnDetailAlert:Hide()
+            detailEmpty:Show()
+            return
+        end
+        detailEmpty:Hide()
+        for _, region in ipairs({ detailIcon, detailName, detailSub, detailLinesText }) do region:Show() end
+        statA:Show(); statB:Show()
+        btnDetailSearch:Show(); btnDetailList:Show(); btnDetailAlert:Show()
+        detailIcon:SetTexture(data.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+        local quality = CachedItemField(data.itemID, "r")
+        local hex = quality and RARITY_HEX and RARITY_HEX[quality]
+        detailName:SetText(hex and ("|c" .. hex .. tostring(data.nameText) .. "|r") or tostring(data.nameText or ""))
+        detailSub:SetText("|cffa89e8c" .. MarketSync.StripColorCodes(tostring(data.typeText or "")) .. "|r")
+        local isCraft = panel.lastMode == "craft"
+        statA.label:SetText(isCraft and "Profit" or "Edge")
+        statA.value:SetText(isCraft and tostring(data.valueText or "-") or tostring(data.deltaText or "-"))
+        statB.label:SetText("ROI")
+        statB.value:SetText(data.roiText or "-")
+        local lines = {}
+        if not isCraft then
+            for _, line in ipairs(YieldLines(data.itemID) or {}) do lines[#lines + 1] = line end
+        end
+        for _, line in ipairs(data.detailLines or {}) do lines[#lines + 1] = line end
+        detailLinesText:SetText(table.concat(lines, "\n"))
+        btnDetailList:SetText(isCraft and "+ Craft list" or "+ Favorites")
+        ShowRailView("details")
     end
+    panel.ShowDetails = ShowDetails
+    ShowDetails(nil)
 
-    local customEmptyText = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    customEmptyText:SetPoint("TOPLEFT", 8, -48)
-    customEmptyText:SetPoint("BOTTOMRIGHT", -8, 28)
-    customEmptyText:SetJustifyH("CENTER")
-    if customEmptyText.SetJustifyV then customEmptyText:SetJustifyV("MIDDLE") end
-    customEmptyText:SetText("|cff666666No analyses saved.\n\nName and save the current controls for quick access.|r")
+    btnDetailSearch:SetScript("OnClick", function()
+        local data = panel.detailData
+        if not data or not data.itemID then return end
+        local ok = MarketSync.SearchInAuctionHouse and MarketSync.SearchInAuctionHouse(data.itemID)
+        if not ok then
+            statusSummary:SetText("|cffffd100Open the Auction House to search for this item.|r")
+        end
+    end)
+    btnDetailList:SetScript("OnClick", function()
+        local data = panel.detailData
+        if not data or not data.itemID then return end
+        if panel.lastMode == "craft" then
+            OpenCraftSidecar(data.itemID)
+        elseif MarketSync.Favorites and MarketSync.Favorites.AddToList then
+            MarketSync.Favorites.AddToList("Favorites", data.itemID)
+            statusSummary:SetText("|cff00ff00Added " .. tostring(data.nameText) .. " to Favorites.|r")
+        end
+    end)
+    btnDetailAlert:SetScript("OnClick", function()
+        local data = panel.detailData
+        if not data or not data.itemID or not MarketSync.OpenAlertEditorWithItem then return end
+        MarketSync.OpenAlertEditorWithItem(data.itemID, data.trackThreshold,
+            panel.lastMode == "craft" and "Craft Profit" or "Processing")
+    end)
 
-    local craftHelpText = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
-    craftHelpText:SetPoint("TOPLEFT", 8, -129)
-    craftHelpText:SetPoint("RIGHT", leftBottomBox, "RIGHT", -8, 0)
-    craftHelpText:SetJustifyH("LEFT")
-    craftHelpText:SetText("|cff999999Select craft rows, then Save.|r")
-    craftHelpText:Hide()
+    -- ===================== Saved views (bottom of the rail) =====================
+    -- Short hosts (Classic AH) keep two saved rows so the filters stay clear.
+    local railHeight = usableHeight + bodyTop - bottomInset
+    customRowCount = (railHeight < 370) and 2 or CUSTOM_ROWS
+    local savedBox = CreateFrame("Frame", nil, settingsView)
+    savedBox:SetPoint("BOTTOMLEFT", settingsView, "BOTTOMLEFT", 0, 0)
+    savedBox:SetPoint("BOTTOMRIGHT", settingsView, "BOTTOMRIGHT", 0, 0)
+    savedBox:SetHeight(28 + customRowCount * 20)
+    panel.leftBottomBox = savedBox
+    panel.savedBox = savedBox
+    local savedDivider = savedBox:CreateTexture(nil, "ARTWORK")
+    savedDivider:SetPoint("TOPLEFT", 8, 0)
+    savedDivider:SetPoint("TOPRIGHT", -8, 0)
+    savedDivider:SetHeight(1)
+    savedDivider:SetColorTexture(1, 0.82, 0, 0.18)
+
+    local customTitle = savedBox:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    customTitle:SetPoint("TOPLEFT", 8, -7)
+    customTitle:SetText("Saved views")
+
+    local btnSaveCustom = CreateFrame("Button", nil, savedBox, "UIPanelButtonTemplate")
+    btnSaveCustom:SetSize(62, 18)
+    btnSaveCustom:SetPoint("TOPRIGHT", savedBox, "TOPRIGHT", -8, -4)
+    btnSaveCustom:SetText("+ Save")
+    panel.saveViewButton = btnSaveCustom
+
+    local customEmptyText = savedBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightExtraSmall")
+    customEmptyText:SetPoint("TOPLEFT", 8, -26)
+    customEmptyText:SetWidth(RAIL_INNER_W)
+    customEmptyText:SetJustifyH("LEFT")
+    customEmptyText:SetText("|cff8a806eNothing saved yet. + Save keeps these settings.|r")
 
     local customRows = {}
-    for i = 1, CUSTOM_ROWS do
-        local row = CreateFrame("Frame", nil, leftBottomBox)
-        row:SetSize(LEFT_W - 16, 18)
-        row:SetPoint("TOPLEFT", 8, -48 - ((i - 1) * 20))
+    for i = 1, customRowCount do
+        local row = CreateFrame("Button", nil, savedBox)
+        row:SetSize(RAIL_INNER_W, 18)
+        row:SetPoint("TOPLEFT", 8, -24 - ((i - 1) * 20))
 
         if i % 2 == 0 then
             local bg = row:CreateTexture(nil, "BACKGROUND")
@@ -1341,43 +1849,70 @@ function MarketSync.CreateProcessingPanel(parent)
         row.deleteBtn:SetSize(20, 16)
         row.deleteBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
         row.deleteBtn:SetText("X")
-
-        row.applyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.applyBtn:SetSize(22, 16)
-        row.applyBtn:SetPoint("RIGHT", row.deleteBtn, "LEFT", -2, 0)
-        row.applyBtn:SetText("L")
+        row.applyBtn = row
 
         row.nameText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        row.nameText:SetPoint("LEFT", row, "LEFT", 2, 0)
-        row.nameText:SetPoint("RIGHT", row.applyBtn, "LEFT", -4, 0)
+        row.nameText:SetPoint("LEFT", row, "LEFT", 4, 0)
+        row.nameText:SetPoint("RIGHT", row.deleteBtn, "LEFT", -4, 0)
         row.nameText:SetJustifyH("LEFT")
         if row.nameText.SetWordWrap then row.nameText:SetWordWrap(false) end
+
+        local hl = row:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 0.82, 0, 0.12)
 
         row:Hide()
         customRows[i] = row
     end
+    panel.customRows = customRows
 
-    panel.customPageText = leftBottomBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    panel.customPageText:SetPoint("BOTTOMLEFT", 8, 8)
+    panel.customPageText = savedBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    panel.customPageText:SetPoint("RIGHT", btnSaveCustom, "LEFT", -40, 0)
     panel.customPageText:SetText("1/1")
 
-    local customPrevBtn = CreateFrame("Button", nil, leftBottomBox)
+    local customPrevBtn = CreateFrame("Button", nil, savedBox)
     customPrevBtn:SetSize(16, 16)
-    customPrevBtn:SetPoint("BOTTOMRIGHT", -26, 6)
+    customPrevBtn:SetPoint("LEFT", panel.customPageText, "RIGHT", 2, 0)
     customPrevBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Left-Up")
     customPrevBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Left-Down")
     customPrevBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Left-Disabled")
     local cpnt = customPrevBtn.GetNormalTexture and customPrevBtn:GetNormalTexture()
     if cpnt and cpnt.SetVertexColor then cpnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
 
-    local customNextBtn = CreateFrame("Button", nil, leftBottomBox)
+    local customNextBtn = CreateFrame("Button", nil, savedBox)
     customNextBtn:SetSize(16, 16)
-    customNextBtn:SetPoint("LEFT", customPrevBtn, "RIGHT", 4, 0)
+    customNextBtn:SetPoint("LEFT", customPrevBtn, "RIGHT", 2, 0)
     customNextBtn:SetNormalTexture("Interface\\Buttons\\Arrow-Right-Up")
     customNextBtn:SetPushedTexture("Interface\\Buttons\\Arrow-Right-Down")
     customNextBtn:SetDisabledTexture("Interface\\Buttons\\Arrow-Right-Disabled")
     local cnnt = customNextBtn.GetNormalTexture and customNextBtn:GetNormalTexture()
     if cnnt and cnnt.SetVertexColor then cnnt:SetVertexColor(MarketSync.GetThemeColor("arrow")) end
+
+    -- Name prompt for + Save.
+    local customNameBox = { _text = "" }
+    function customNameBox:GetText() return self._text end
+    function customNameBox:SetText(text) self._text = tostring(text or "") end
+    function customNameBox:ClearFocus() end
+    panel.customNameBox = customNameBox
+    if not StaticPopupDialogs then StaticPopupDialogs = {} end
+    StaticPopupDialogs["MARKETSYNC_PROCESSING_SAVE_VIEW"] = StaticPopupDialogs["MARKETSYNC_PROCESSING_SAVE_VIEW"] or {
+        text = "%s",
+        button1 = "Save",
+        button2 = "Cancel",
+        hasEditBox = true,
+        OnAccept = function(self, data)
+            local eb = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+            local text = eb and eb:GetText()
+            if data and data.onSave then data.onSave(text) end
+        end,
+        EditBoxOnEnterPressed = function(self)
+            local dialog = self:GetParent()
+            if dialog and dialog.button1 then dialog.button1:Click() end
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+    }
 
     local function ModeLabel(mode)
         if mode == "process" then return "Process Scan" end
@@ -1401,18 +1936,11 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     local function RefreshDropdownLabels()
-        if panel.selectedTargetID then
-            local id = tonumber(panel.selectedTargetID)
-            local targetText = FindTargetName(id) or ("Item " .. tostring(id))
-            SetDropdownLabel(targetDropdown, Truncate(targetText, 16))
-        else
-            SetDropdownLabel(targetDropdown, "Select material...")
-        end
-
+        SetDropdownLabel(targetDropdown, "Pick from list")
         if panel.selectedProcess and not IsSupportedProcessType(panel.selectedProcess) then
             panel.selectedProcess = nil
         end
-        SetDropdownLabel(processDropdown, panel.selectedProcess or "ALL")
+        if panel.RefreshProcessButtons then panel.RefreshProcessButtons() end
         SetDropdownLabel(professionDropdown, panel.selectedProfession or "No professions")
         SetDropdownLabel(characterDropdown, panel.selectedCharacterKey and Truncate(panel.selectedCharacterKey, 17) or "This character")
     end
@@ -1423,7 +1951,7 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.selectedProfession = professionOptions[1]
         end
 
-        local professionValid = false
+        local professionValid = panel.selectedProfession == "ALL"
         for _, p in ipairs(professionOptions) do
             if p == panel.selectedProfession then
                 professionValid = true
@@ -1444,31 +1972,24 @@ function MarketSync.CreateProcessingPanel(parent)
     end
 
     function panel:RefreshModeControls()
-        local isTarget = panel.activeMode == "target"
-        local isProcess = panel.activeMode == "process"
+        for mode, controls in pairs(modeControls) do
+            for _, control in ipairs(controls) do
+                SetControlVisible(control, mode == panel.activeMode)
+            end
+        end
+        if panel.RefreshRecentTargets then panel.RefreshRecentTargets() end
+        if panel.RefreshProcessButtons then panel.RefreshProcessButtons() end
+        if panel.RefreshQualityButtons then panel.RefreshQualityButtons() end
+        if panel.activeMode == "craft" and panel.RefreshProfessionStatus then panel.RefreshProfessionStatus() end
+        PlaceFilterChecks()
+        chkProfitable:SetChecked(panel.filters.onlyProfitable)
+        chkStale:SetChecked(panel.filters.hideStale)
+
         local isCraft = panel.activeMode == "craft"
-
-        SetControlVisible(targetLabel, isTarget)
-        SetControlVisible(targetInputBox, isTarget)
-        SetControlVisible(targetDropdown, isTarget)
-        SetControlVisible(targetDesc, isTarget)
-
-        SetControlVisible(processLabel, isProcess)
-        SetControlVisible(processDropdown, isProcess)
-        SetControlVisible(processDesc, isProcess)
-
-        SetControlVisible(professionLabel, isCraft)
-        SetControlVisible(characterLabel, isCraft)
-        SetControlVisible(characterDropdown, isCraft)
-        SetControlVisible(professionDropdown, isCraft)
-        SetControlVisible(craftDesc, isCraft)
-        SetControlVisible(btnResyncProf, isCraft)
-        SetControlVisible(saleTargetDropdown, isCraft)
-
-        customTitle:SetText(isCraft and "|cffffd700Craft Lists|r" or "|cffffd700Saved Analyses|r")
-        customNameLabel:SetText(isCraft and "List" or "Preset")
-        btnSaved:SetText(isCraft and "Craft Lists" or "Saved...")
-        SetControlVisible(craftHelpText, isCraft)
+        customTitle:SetText(isCraft and "Craft lists" or "Saved views")
+        btnSaveCustom:SetText(isCraft and "+ List" or "+ Save")
+        customEmptyText:SetText(isCraft and "|cff8a806eSelect rows, then + List to save them.|r"
+            or "|cff8a806eNothing saved yet. + Save keeps these settings.|r")
 
         RefreshResultHeaders()
     end
@@ -1552,7 +2073,7 @@ function MarketSync.CreateProcessingPanel(parent)
         end
 
         local pageShown = (total > 0) and (panel.page + 1) or 1
-        panel.pageText:SetText(string.format("%d results (Page %d/%d)", total, pageShown, totalPages))
+        panel.pageText:SetText(string.format("%d/%d", pageShown, totalPages))
 
         local hasPrev = panel.page > 0
         local hasNext = total > 0 and panel.page < (totalPages - 1)
@@ -1578,6 +2099,57 @@ function MarketSync.CreateProcessingPanel(parent)
         end
     end
     panel.UpdateResultRows = UpdateResultRows
+
+    -- Footer line: what the last run found, how many rows the filters show,
+    -- and how many rows are selected for Track / Export / craft lists.
+    UpdateSelectionSummary = function()
+        local base = panel.runSummaryText
+        if not base then return end
+        local selected = 0
+        local selectTable = (panel.lastMode == "craft") and panel.selectedCrafts or panel.selectedArbitrage
+        for _, v in pairs(selectTable or {}) do
+            if v then selected = selected + 1 end
+        end
+        local shown, all = #(panel.displayRows or {}), #(panel.allRows or {})
+        local parts = { base }
+        if shown ~= all then parts[#parts + 1] = string.format("|cffa89e8c%d shown|r", shown) end
+        if selected > 0 then parts[#parts + 1] = string.format("|cffffd700%d selected|r", selected) end
+        statusSummary:SetText(table.concat(parts, " | "))
+    end
+    panel.UpdateSelectionSummary = UpdateSelectionSummary
+
+    local function RowPassesFilters(data)
+        local f = panel.filters
+        if f.onlyProfitable and not data.isProfitable then return false end
+        if f.hideStale and data.isStale then return false end
+        if panel.activeMode == "target" and f.madeBy and data.processType ~= f.madeBy then return false end
+        if panel.activeMode == "process" then
+            local quality = tonumber(CachedItemField(data.itemID, "r"))
+            if quality and quality >= 2 and quality <= 4 and not f.qualities[quality] then return false end
+            local ilvl = tonumber(CachedItemField(data.itemID, "i"))
+            if ilvl and f.minLevel and ilvl < f.minLevel then return false end
+            if ilvl and f.maxLevel and ilvl > f.maxLevel then return false end
+        end
+        return true
+    end
+
+    -- Filters only hide rows; prices and calculations stay as they were.
+    ApplyFilters = function(skipSort)
+        local out = {}
+        for _, data in ipairs(panel.allRows or {}) do
+            if RowPassesFilters(data) then out[#out + 1] = data end
+        end
+        panel.displayRows = out
+        if skipSort then return end
+        if ApplyDisplaySort then ApplyDisplaySort() else UpdateResultRows() end
+        UpdateSelectionSummary()
+    end
+    panel.ApplyFilters = ApplyFilters
+
+    local function PublishRows(rows)
+        panel.allRows = rows or {}
+        ApplyFilters(true)
+    end
 
     HandleTableMouseWheel = function(delta)
         if tableScrollBar and tableScrollBar.HandleWheel then
@@ -1670,20 +2242,22 @@ function MarketSync.CreateProcessingPanel(parent)
 
             local status
             local statusRank = 0
+            -- The ROI sits in the details panel; the narrow Status column
+            -- keeps only the verdict.
             if r.partialEV then
-                status = "|cffffaa00PARTIAL|r" .. pctLabel
+                status = "|cffffaa00PARTIAL|r"
                 statusRank = 2
             elseif r.liveStale or r.evStale or r.targetStale then
-                status = "|cffffaa00STALE|r" .. pctLabel
+                status = "|cffffaa00STALE|r"
                 statusRank = 2
             elseif livePrice <= 0 then
                 status = "|cff888888NO AH|r"
                 statusRank = 1
             elseif delta >= 0 then
-                status = "|cff00ff00GOOD|r" .. pctLabel
+                status = "|cff00ff00GOOD|r"
                 statusRank = 3
             else
-                status = "|cffff4444MISS|r" .. pctLabel
+                status = "|cffff4444MISS|r"
                 statusRank = 0
             end
 
@@ -1742,21 +2316,47 @@ function MarketSync.CreateProcessingPanel(parent)
             if r.liveStale or r.evStale or r.targetStale then
                 detailLines[#detailLines + 1] = ColorWarn("One or more prices are stale (>24h).")
             end
+            local approximateDE = tostring(r.processType or ""):upper() == "DISENCHANT"
+                and MarketSync.IsDisenchantApproximate and MarketSync.IsDisenchantApproximate()
+            if approximateDE then
+                detailLines[#detailLines + 1] = ColorWarn(MarketSync.FOREVER_DISENCHANT_NOTE)
+            end
+
+            -- Target Material shows how many materials one input yields;
+            -- Process Scan shows the results' value before the auction cut.
+            local isTargetRow = r.expectedTarget ~= nil
+            local stackSize = math.max(1, tonumber(r.stackSize) or 1)
+            local grossPerUnit = tonumber(r.grossEVPerAction) and math.floor(r.grossEVPerAction / stackSize) or evPerUnit
+            local valueText, valueSort
+            if isTargetRow then
+                valueText = ExpectedQuantityText(r.expectedTarget)
+                valueSort = tonumber(r.expectedTarget) or 0
+            else
+                valueText = MoneyText(grossPerUnit)
+                valueSort = grossPerUnit
+            end
+            local roiText = roiPct and (pctColor .. ((roiPct >= 0) and "+" or "") .. roiPct .. "%|r") or "-"
 
             rows[#rows + 1] = {
                 itemID = r.inputItemID,
                 link = itemLink,
                 icon = icon,
                 nameText = itemName,
-                typeText = FormatProcessType(r.processType),
-                valueText = MoneyText(evPerUnit),
+                -- "~" marks an approximate Forever disenchant estimate.
+                typeText = FormatProcessType(r.processType) .. (approximateDE and " |cffffb347~|r" or ""),
+                approximate = approximateDE,
+                processType = r.processType and tostring(r.processType):upper() or nil,
+                roiText = roiText,
+                isProfitable = statusRank == 3,
+                isStale = statusRank == 2,
+                valueText = valueText,
                 maxText = MoneyText(maxBuy),
                 liveText = (livePrice > 0) and MoneyText(livePrice) or "-",
                 deltaText = FormatDelta(delta),
                 statusText = status,
                 itemSort = string.lower(itemName or ""),
                 typeSort = string.lower(tostring(r.processType or "")),
-                valueSort = tonumber(evPerUnit) or 0,
+                valueSort = valueSort,
                 maxSort = tonumber(maxBuy) or 0,
                 liveSort = tonumber(livePrice) or 0,
                 deltaSort = tonumber(delta) or 0,
@@ -1851,15 +2451,16 @@ function MarketSync.CreateProcessingPanel(parent)
                 status = "|cffffaa00NO PRICE|r"
                 statusRank = 1
             elseif (not useVendor and c.outputStale) or c.hasStaleMat then
-                status = "|cffffaa00STALE|r" .. pctLabel
+                status = "|cffffaa00STALE|r"
                 statusRank = 2
             elseif (useVendor and c.vendorMeetsMargin) or (not useVendor and c.meetsMargin) then
-                status = "|cff00ff00GOOD|r" .. pctLabel
+                status = "|cff00ff00GOOD|r"
                 statusRank = 3
             else
-                status = "|cffff4444MISS|r" .. pctLabel
+                status = "|cffff4444MISS|r"
                 statusRank = 0
             end
+            local roiText = (profitPct and pctLabel ~= "") and pctLabel:gsub("[%(%)]", ""):gsub("^ ", "") or "-"
 
             local detailLines = {}
             local outputQty = tonumber(c.outputQty) or 1
@@ -1951,24 +2552,29 @@ function MarketSync.CreateProcessingPanel(parent)
                 end
             end
 
+            local difficulty = SKILL_DIFFICULTY[string.lower(tostring(c.skillType or ""))]
             rows[#rows + 1] = {
                 recipeName = outputName,
                 itemID = c.outputItemID,
                 link = itemLink,
                 icon = icon,
                 nameText = itemName or outputName,
-                typeText = tostring(c.profession or c.skillType or "Craft"),
+                typeText = difficulty and difficulty.text or tostring(c.profession or "Craft"),
+                roiText = roiText,
+                isProfitable = statusRank == 3,
+                isStale = statusRank == 2,
                 valueText = valueDisplay,
-                maxText = missingPrice and "-" or MoneyText(maxSpend),
+                maxText = missingPrice and "-" or roiText,
                 liveText = missingPrice and "-" or MoneyText(craftCost),
-                deltaText = missingPrice and "-" or FormatDelta(capDelta),
+                deltaText = (revenue > 0) and MoneyText(revenue) or "-",
                 statusText = status,
+                trackThreshold = craftCost > 0 and craftCost or nil,
                 itemSort = string.lower(itemName or ""),
-                typeSort = string.lower(tostring(c.profession or c.skillType or "")),
+                typeSort = difficulty and difficulty.rank or 9,
                 valueSort = missingPrice and -math.huge or margin,
-                maxSort = tonumber(maxSpend) or 0,
+                maxSort = profitPct or -math.huge,
                 liveSort = tonumber(craftCost) or 0,
-                deltaSort = tonumber(capDelta) or 0,
+                deltaSort = tonumber(revenue) or 0,
                 statusSort = statusRank,
                 detail = table.concat(detailLines, "\n"),
                 detailLines = detailLines,
@@ -1992,9 +2598,9 @@ function MarketSync.CreateProcessingPanel(parent)
         -- Rebuild presentation only: auction prices and craft calculations
         -- stay intact while freshly loaded, client-localized names replace IDs.
         if panel.lastMode == "craft" then
-            panel.displayRows = BuildCraftDisplay(panel.lastCraftResults)
+            PublishRows(BuildCraftDisplay(panel.lastCraftResults))
         elseif panel.lastMode == "target" or panel.lastMode == "process" then
-            panel.displayRows = BuildArbitrageDisplay(panel.lastArbitrageResults)
+            PublishRows(BuildArbitrageDisplay(panel.lastArbitrageResults))
         else
             return
         end
@@ -2018,7 +2624,27 @@ function MarketSync.CreateProcessingPanel(parent)
             local sources = MarketSync.GetProcessingIndexSources
                 and MarketSync.GetProcessingIndexSources()
             if not sources then
-                statusSummary:SetText("|cffffaa00Market cache not ready. Build it in Personal Scan or Guild Sync first.|r")
+                -- Low RAM leaves prices unloaded until something needs them.
+                -- Load Personal and Guild once, then run again; Low RAM frees
+                -- them later when they sit idle.
+                if not panel.loadingPrices and MarketSync.LoadPersonalCache and MarketSync.LoadGuildCache then
+                    panel.loadingPrices = true
+                    statusSummary:SetText("|cffffd700Loading market prices...|r")
+                    MarketSync.LoadPersonalCache(function()
+                        MarketSync.LoadGuildCache(function()
+                            panel.loadingPrices = false
+                            if MarketSync.TouchLowRamSource then
+                                MarketSync.TouchLowRamSource("personal")
+                                MarketSync.TouchLowRamSource("guild")
+                            end
+                            Start()
+                        end)
+                    end)
+                    return
+                end
+                if not panel.loadingPrices then
+                    statusSummary:SetText("|cffffaa00No market prices yet. Scan the Auction House or sync with your guild first.|r")
+                end
                 return
             end
 
@@ -2027,7 +2653,19 @@ function MarketSync.CreateProcessingPanel(parent)
                 local function YieldStep() coroutine.yield() end
                 local snapshot = MarketSync.BuildProcessingCacheSnapshot(YieldStep)
                 if not snapshot then return nil end
-                return work(snapshot, YieldStep)
+                local result = work(snapshot, YieldStep)
+                -- Newest observation in the cache, for the freshness badge.
+                if type(result) == "table" then
+                    local newest, n = 0, 0
+                    for _, entry in pairs(snapshot.prices or {}) do
+                        local stamp = type(entry) == "table" and tonumber(entry.exactTime) or 0
+                        if stamp > newest then newest = stamp end
+                        n = n + 1
+                        if n % 500 == 0 then YieldStep() end
+                    end
+                    result.newestPriceAt = newest
+                end
+                return result
             end)
             local function Step()
                 if runID ~= panel.cacheRunID then return end
@@ -2037,7 +2675,25 @@ function MarketSync.CreateProcessingPanel(parent)
                     return
                 end
                 if coroutine.status(worker) == "dead" then
-                    if result then onComplete(result) end
+                    if result then
+                        local newest = tonumber(result.newestPriceAt) or 0
+                        if newest > 0 and MarketSync.FormatRelativeTime then
+                            local age = time() - newest
+                            local color = age > 86400 and "|cffffb347" or "|cff4fd06a"
+                            priceBadge:SetText("Prices: " .. color .. "newest "
+                                .. MarketSync.FormatRelativeTime(newest) .. "|r")
+                        else
+                            priceBadge:SetText("|cffa89e8cPrices: market cache|r")
+                        end
+                        panel.runSummaryText = nil
+                        onComplete(result)
+                        if not panel.runSummaryText and statusSummary.GetText then
+                            panel.runSummaryText = statusSummary:GetText()
+                        end
+                        if ShowDetails then ShowDetails(nil) end
+                        if panel.railView == "details" then ShowRailView("settings") end
+                        UpdateSelectionSummary()
+                    end
                 elseif C_Timer and C_Timer.After then
                     C_Timer.After(0, Step)
                 else
@@ -2062,7 +2718,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 else
                     panel.selectedTargetID = nil
                     statusSummary:SetText("|cffff4444Target not found. Enter item link, itemID, or cached name.|r")
-                    panel.displayRows = {}
+                    PublishRows({})
                     SetNoResultsMessage("Unknown target. Use an item link, itemID, or a cached item name.")
                     UpdateResultRows()
                     return
@@ -2071,8 +2727,8 @@ function MarketSync.CreateProcessingPanel(parent)
 
             if not panel.selectedTargetID then
                 statusSummary:SetText("|cffff4444Enter a target item name, link, or ID first.|r")
-                panel.displayRows = {}
-                SetNoResultsMessage("Enter a target item name/link/ID, then click Run Target.")
+                PublishRows({})
+                SetNoResultsMessage("Drop an item on Target material, or type its name and press Enter.")
                 UpdateResultRows()
                 return
             end
@@ -2087,7 +2743,8 @@ function MarketSync.CreateProcessingPanel(parent)
                 panel.lastMode = "target"
                 panel.lastArbitrageResults = data.results
                 panel.lastCraftResults = {}
-                panel.displayRows = data.rows
+                PublishRows(data.rows)
+                RememberTarget(targetID)
                 local targetName = (data.targetEntry and data.targetEntry.name)
                     or ("Item " .. tostring(targetID))
                 local targetPrice = data.targetEntry and tonumber(data.targetEntry.price)
@@ -2095,7 +2752,10 @@ function MarketSync.CreateProcessingPanel(parent)
                     statusSummary:SetText(string.format("|cffffaa00%s: No cached AH price|r", targetName))
                     SetNoResultsMessage(string.format("'%s' has no price in the built market cache.", targetName))
                 else
-                    statusSummary:SetText(string.format("|cff00ff00%s|r: %d result(s)", targetName, #panel.displayRows))
+                    local good = 0
+                    for _, row in ipairs(panel.allRows) do if row.isProfitable then good = good + 1 end end
+                    statusSummary:SetText(string.format("|cff00ff00%s|r %s: %d under break-even of %d",
+                        Truncate(targetName, 20), MoneyText(targetPrice), good, #panel.allRows))
                     local hasTargetDefinition = MarketSync.HasProcessingDefinitionForTarget
                         and MarketSync.HasProcessingDefinitionForTarget(targetID)
                     if hasTargetDefinition then
@@ -2119,9 +2779,11 @@ function MarketSync.CreateProcessingPanel(parent)
                 panel.lastMode = "process"
                 panel.lastArbitrageResults = data.results
                 panel.lastCraftResults = {}
-                panel.displayRows = data.rows
-                statusSummary:SetText(string.format("|cff00ff00%s|r: %d cached result(s)",
-                    processType or "ALL", #panel.displayRows))
+                PublishRows(data.rows)
+                local good = 0
+                for _, row in ipairs(panel.allRows) do if row.isProfitable then good = good + 1 end end
+                statusSummary:SetText(string.format("|cff00ff00%s|r: %d profitable of %d",
+                    processType and FormatProcessType(processType) or "All processes", good, #panel.allRows))
                 SetNoResultsMessage("No processable items with prices in the built market cache.")
                 ApplyDisplaySort()
             end)
@@ -2131,8 +2793,8 @@ function MarketSync.CreateProcessingPanel(parent)
         local profession = panel.selectedProfession
         if not profession or profession == "" then
             statusSummary:SetText("|cffff4444Select a profession first.|r")
-            panel.displayRows = {}
-            SetNoResultsMessage("Select a profession, then click Run Craft.")
+            PublishRows({})
+            SetNoResultsMessage("No professions scanned yet. Open a profession window, or press Professions... to see what is missing.")
             UpdateResultRows()
             return
         end
@@ -2155,7 +2817,7 @@ function MarketSync.CreateProcessingPanel(parent)
             panel.lastMode = "craft"
             panel.lastCraftResults = data.results
             panel.lastArbitrageResults = {}
-            panel.displayRows = data.rows
+            PublishRows(data.rows)
 
             local profitableCount = 0
             local useVendor = panel.craftSaleTarget == "vendor"
@@ -2165,13 +2827,14 @@ function MarketSync.CreateProcessingPanel(parent)
             end
             local sourceLabel = characterKey and Truncate(characterKey, 14) or "This character"
             local setLabel = setName and (" / " .. Truncate(setName, 14)) or ""
-            statusSummary:SetText(string.format("|cff00ff00%s / %s%s|r: %d profitable / %d cached",
-                sourceLabel, profession, setLabel, profitableCount, #panel.displayRows))
-            if #panel.displayRows == 0 then
+            statusSummary:SetText(string.format("|cff00ff00%s / %s%s|r: %d profitable of %d",
+                sourceLabel, profession, setLabel, profitableCount, #panel.allRows))
+            if #panel.allRows == 0 then
                 local knownCount = MarketSync.GetCraftRecipeCount
                     and MarketSync.GetCraftRecipeCount(profession, characterKey) or 0
                 if knownCount == 0 then
-                    SetNoResultsMessage("No known recipes cached yet. Open your profession window once to index recipes.")
+                    SetNoResultsMessage("No recipes saved for " .. tostring(profession)
+                        .. " yet. Open its profession window once and MarketSync reads it on its own.")
                 elseif setName then
                     SetNoResultsMessage("No recipes in this list are known by the selected crafter and profession.")
                 else
@@ -2229,7 +2892,19 @@ function MarketSync.CreateProcessingPanel(parent)
         RefreshDropdownLabels()
         if panel.RefreshCustomRows then panel.RefreshCustomRows() end
 
-        statusSummary:SetText("|cff00ff00Loaded preset:|r " .. Truncate(selection.name or "Preset", 22))
+        if type(selection.filters) == "table" then
+            panel.filters.onlyProfitable = selection.filters.onlyProfitable == true
+            panel.filters.hideStale = selection.filters.hideStale == true
+            local madeBy = selection.filters.madeBy
+            panel.filters.madeBy = (madeBy and madeBy ~= "ALL") and madeBy or nil
+            panel.filters.minLevel = tonumber(selection.filters.minLevel)
+            panel.filters.maxLevel = tonumber(selection.filters.maxLevel)
+            panel:RefreshModeControls()
+        end
+        statusSummary:SetText("|cff00ff00Loaded view:|r " .. Truncate(selection.name or "View", 22))
+        if panel.activeMode ~= "target" or panel.selectedTargetID then
+            if RunActiveMode then RunActiveMode() end
+        end
     end
 
     local RefreshCustomRows
@@ -2245,13 +2920,13 @@ function MarketSync.CreateProcessingPanel(parent)
             selections = MarketSync.ListProcessingCustomSelections and MarketSync.ListProcessingCustomSelections() or {}
         end
         local total = #selections
-        local totalPages = math.max(1, math.ceil(total / CUSTOM_ROWS))
+        local totalPages = math.max(1, math.ceil(total / customRowCount))
 
         if panel.customPage < 0 then panel.customPage = 0 end
         if panel.customPage > (totalPages - 1) then panel.customPage = totalPages - 1 end
 
-        local firstIndex = (panel.customPage * CUSTOM_ROWS) + 1
-        for i = 1, CUSTOM_ROWS do
+        local firstIndex = (panel.customPage * customRowCount) + 1
+        for i = 1, customRowCount do
             local row = customRows[i]
             local selection = selections[firstIndex + i - 1]
 
@@ -2259,7 +2934,7 @@ function MarketSync.CreateProcessingPanel(parent)
                 row.selection = selection
                 local active = isCraft and (selection.all and not panel.activeCraftSet
                     or panel.activeCraftSet and panel.activeCraftSet.name == selection.name)
-                row.applyBtn:SetText(isCraft and "Go" or "L")
+
                 row.nameText:SetText((active and "|cffffd700" or "")
                     .. Truncate(selection.name or "Preset", 15) .. (active and "|r" or ""))
                 if isCraft and selection.all then row.deleteBtn:Hide() else row.deleteBtn:Show() end
@@ -2302,12 +2977,6 @@ function MarketSync.CreateProcessingPanel(parent)
                     GameTooltip:Hide()
                 end)
 
-                row.applyBtn:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(isCraft and "Run craft list" or "Load preset", 1, 0.82, 0)
-                    GameTooltip:Show()
-                end)
-                row.applyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
                 row.deleteBtn:SetScript("OnEnter", function(self)
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -2323,18 +2992,12 @@ function MarketSync.CreateProcessingPanel(parent)
             end
         end
 
-        if total > 0 then
-            if customEmptyText then customEmptyText:Hide() end
-            panel.customPageText:Show()
-            customPrevBtn:Show()
-            customNextBtn:Show()
-            panel.customPageText:SetText(string.format("%d/%d", panel.customPage + 1, totalPages))
-        else
-            if customEmptyText then customEmptyText:Show() end
-            panel.customPageText:Hide()
-            customPrevBtn:Hide()
-            customNextBtn:Hide()
-        end
+        SetControlVisible(customEmptyText, total == 0)
+        local paged = totalPages > 1
+        SetControlVisible(panel.customPageText, paged)
+        SetControlVisible(customPrevBtn, paged)
+        SetControlVisible(customNextBtn, paged)
+        panel.customPageText:SetText(string.format("%d/%d", panel.customPage + 1, totalPages))
 
         local hasCPrev = total > 0 and panel.customPage > 0
         local hasCNext = total > 0 and panel.customPage < (totalPages - 1)
@@ -2589,29 +3252,7 @@ function MarketSync.CreateProcessingPanel(parent)
         statusSummary:SetText(string.format("|cff00ff00Tracked %d item(s).|r", tracked))
     end)
 
-    btnResyncProf:SetScript("OnClick", function()
-        if not MarketSync.ResyncProfessionCache then
-            statusSummary:SetText("|cffff4444Profession resync is unavailable.|r")
-            return
-        end
-
-        local ok, msg = MarketSync.ResyncProfessionCache()
-
-        RefreshProfessionOptions()
-        if characterDropdown and characterDropdown._initFunc then
-            UIDropDownMenu_Initialize(characterDropdown._menu, characterDropdown._initFunc)
-        end
-        RefreshDropdownLabels()
-        if ok then
-            statusSummary:SetText("|cff00ff00" .. tostring(msg or "Profession resync complete.") .. "|r")
-        elseif msg and string.find(msg, "Open", 1, true) then
-            statusSummary:SetText("|cffffff00" .. tostring(msg) .. "|r")
-        else
-            statusSummary:SetText("|cffff4444" .. tostring(msg or "Unable to resync professions.") .. "|r")
-        end
-    end)
-
-    btnSaveCustom:SetScript("OnClick", function()
+    local function SaveCurrentView()
         local isCraft = panel.activeMode == "craft"
         if isCraft and not MarketSync.UpsertProcessingCraftSet then
             statusSummary:SetText("|cffff4444Craft lists unavailable.|r")
@@ -2683,6 +3324,13 @@ function MarketSync.CreateProcessingPanel(parent)
             profession = panel.selectedProfession,
             marginPct = 0,
             minCraftMarginGold = 0,
+            filters = {
+                onlyProfitable = panel.filters.onlyProfitable,
+                hideStale = panel.filters.hideStale,
+                madeBy = panel.filters.madeBy,
+                minLevel = panel.filters.minLevel,
+                maxLevel = panel.filters.maxLevel,
+            },
         }
 
         local saved, err = MarketSync.UpsertProcessingCustomSelection(payload)
@@ -2694,12 +3342,28 @@ function MarketSync.CreateProcessingPanel(parent)
         customNameBox:SetText("")
         panel.customPage = 0
         RefreshCustomRows()
-        statusSummary:SetText("|cff00ff00Saved preset:|r " .. Truncate(saved.name or name, 22))
-    end)
+        statusSummary:SetText("|cff00ff00Saved view:|r " .. Truncate(saved.name or name, 22))
+    end
+    panel.SaveCurrentView = function(name)
+        customNameBox:SetText(name or "")
+        SaveCurrentView()
+    end
 
-    customNameBox:SetScript("OnEnterPressed", function(self)
-        self:ClearFocus()
-        btnSaveCustom:Click()
+    btnSaveCustom:SetScript("OnClick", function()
+        local isCraft = panel.activeMode == "craft"
+        if isCraft then
+            local any = false
+            for _, v in pairs(panel.selectedCrafts or {}) do if v then any = true break end end
+            if not any then
+                statusSummary:SetText("|cffffd100Click the recipes to keep first, then + List.|r")
+                return
+            end
+        end
+        if StaticPopup_Show then
+            StaticPopup_Show("MARKETSYNC_PROCESSING_SAVE_VIEW",
+                isCraft and "Name this craft list:" or "Name this saved view:", nil,
+                { onSave = function(text) panel.SaveCurrentView(text) end })
+        end
     end)
 
     prevBtn:SetScript("OnClick", function()
@@ -2747,9 +3411,7 @@ function MarketSync.CreateProcessingPanel(parent)
         if targetDropdown and targetDropdown._initFunc then
             UIDropDownMenu_Initialize(targetDropdown._menu, targetDropdown._initFunc)
         end
-        if processDropdown and processDropdown._initFunc then
-            UIDropDownMenu_Initialize(processDropdown._menu, processDropdown._initFunc)
-        end
+
 
         RefreshModeButtons()
         UpdateRunButtonText()

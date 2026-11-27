@@ -46,8 +46,8 @@ function MarketSync.BuildCraftPurchasePlan(request)
  return {buys=buys,provided=provided,recipes={{outputQty=request.quantity}},buyCount=1}
 end
 `);
-for (const file of ['Favorites.lua', 'Ledger/CraftLedger.lua', 'Ledger/ItemLedger.lua', 'InventoryTracking.lua',
-  'Ledger/TransactionTracking.lua', 'Ledger/UI_ItemLedger.lua']) {
+for (const file of ['Favorites.lua', '../MarketSyncLedger/CraftLedger.lua', '../MarketSyncLedger/ItemLedger.lua', 'InventoryTracking.lua',
+  '../MarketSyncLedger/TransactionTracking.lua', '../MarketSyncLedger/UI_ItemLedger.lua']) {
   const code = fs.readFileSync(path.join(__dirname, '../MarketSync', file), 'utf8');
   luaparse.parse(code, { luaVersion: '5.1' }); run(code);
 }
@@ -93,7 +93,9 @@ for _,lot in ipairs(I.Store().lots) do if lot.owner==I.Owner() and lot.qty>0 the
 assert(valued==2,'Own-character transfers preserve cost once')
 assert(not I.LinkTransfer(sent.id,received.id))
 assert(#I.Holdings(10)==2)
-faction='Alliance';assert(#I.Holdings(10)==0,'Faction inventories stay partitioned');faction='Horde'
+faction='Alliance';assert(#I.Holdings(10)==0,'Faction inventories stay partitioned on PvP realms')
+MarketSync.GetForeverAuctionRuleset=function() return 'normal' end
+assert(#I.Holdings(10)==2,'PvE realms share holdings across both factions');MarketSync.GetForeverAuctionRuleset=nil;faction='Horde'
 interface=11509; assert(#I.Holdings(10)==0,'Client inventories stay partitioned');interface=16001
 who='Alice'
 local recipe={outputItemID=100,name='Widget',outputQty=1,mats={{itemID=10,qty=2}}}
@@ -434,6 +436,6 @@ C_Timer = nil
 
 
 `);
-run(fs.readFileSync(path.join(__dirname, '../MarketSync/Ledger/ItemLedger.lua'), 'utf8'));
+run(fs.readFileSync(path.join(__dirname, '../MarketSyncLedger/ItemLedger.lua'), 'utf8'));
 run(`assert(MarketSync.ItemLedger.Store().transactions[1], 'Reload preserves saved transactions')`);
 console.log('PASS item ledger custody, costs, reservations, transfers, service profits, mail/trade confirmation and ownership isolation');

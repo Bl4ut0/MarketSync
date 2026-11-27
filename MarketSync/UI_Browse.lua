@@ -138,35 +138,88 @@ local function GetLatestIndex()
     end
     return LatestCache
 end
+-- Declared before the release function, which wipes it. A later "local" would
+-- leave the release function writing to a global that is nil.
+local PersonalDirtyKeys = {}
+-- True while a source was freed after building Latest (Low RAM); its rows live on in Latest.
+local PersonalReleasedForLatest, GuildReleasedForLatest = false, false
+-- Background resolution tracking. Declared here, before the release
+-- function, for the same reason as PersonalDirtyKeys.
+local PersonalPending = {}    -- { dbKey = itemID }
+local GuildPending = {}       -- { dbKey = itemID }
+local NeutralPending = {}     -- { dbKey = itemID }
+local PersonalTotal, PersonalResolved = 0, 0
+local GuildTotal, GuildResolved = 0, 0
+local NeutralTotal, NeutralResolved = 0, 0
+
+-- While Personal or Guild is released for Latest (Low RAM), Latest is the only
+-- copy of their rows in memory. New scan and sync rows are merged into it
+-- directly instead of discarding it: a rebuild from the released (empty)
+-- indexes would leave Latest empty.
+local function LatestHoldsReleased()
+    return LatestCache ~= nil and (PersonalReleasedForLatest or GuildReleasedForLatest)
+end
+local function MergeIntoLatest(dbKey, entry)
+    if not (LatestCache and dbKey) then return end
+    if type(entry) ~= "table" or (entry.price or 0) <= 0 then return end
+    local current = LatestCache[dbKey]
+    local newer = MarketSync.IsLatestEntryNewer
+    if not current or (newer and newer(entry, current)) or not newer then
+        LatestCache[dbKey] = entry
+    end
+end
+local LatestPersonalQueue = {}
+local latestQueueScheduled = false
+
+-- Low RAM mode with "keep Main tab source loaded": the source the Main tab
+-- shows (latest, personal or guild) stays built; everything else stays
+-- on demand. Returns the kept source, or nil.
+function MarketSync.LowRamKeptSource()
+    if not (MarketSyncDB and MarketSyncDB.LowRamMode and MarketSyncDB.LowRamKeepMain) then return nil end
+    local source = MarketSyncDB.MainSource or "latest"
+    if source ~= "personal" and source ~= "guild" then source = "latest" end
+    return source
+end
+
+-- True when Low RAM mode should leave this index unbuilt until it is needed.
+-- Building Latest needs Personal and Guild, so keeping Latest builds both.
+function MarketSync.IsLowRamDeferred(source)
+    if not (MarketSyncDB and MarketSyncDB.LowRamMode) then return false end
+    local kept = MarketSync.LowRamKeptSource()
+    if kept == source then return false end
+    if kept == "latest" and (source == "personal" or source == "guild") then return false end
+    return true
+end
+
 -- Low RAM: keep only the merged Latest index. Personal and Guild are released
--- and load again on demand when a source needs them. Returns true if released.
+-- and load again on demand when a source needs them, except a source kept
+-- loaded for the Main tab. Returns true if released.
 function MarketSync.ReleaseSourceIndexesForLowRam()
     if not (MarketSyncDB and MarketSyncDB.LowRamMode) then return false end
     if not (PersonalIndexReady and GuildIndexReady) then return false end
+    local kept = MarketSync.LowRamKeptSource()
     GetLatestIndex()
-    wipe(PersonalIndex)
-    wipe(GuildIndex)
-    wipe(PersonalDirtyKeys)
-    PersonalIndexReady = false
-    GuildIndexReady = false
+    -- New tables, not wipe(): a wiped Lua table keeps its allocated slots, so
+    -- the memory would never come back. Latest keeps the entries it uses.
+    if kept ~= "personal" then
+        PersonalIndex, PersonalDirtyKeys, PersonalPending = {}, {}, {}
+        PersonalIndexReady, PersonalTotal, PersonalResolved = false, 0, 0
+        PersonalReleasedForLatest = true
+    end
+    if kept ~= "guild" then
+        GuildIndex, GuildPending = {}, {}
+        GuildIndexReady, GuildTotal, GuildResolved = false, 0, 0
+        GuildReleasedForLatest = true
+    end
+    collectgarbage("collect")
     return true
 end
 local IndexCallbacks = {}
 
 -- Tracking for background resolution
-local PersonalPending = {}    -- { dbKey = itemID }
-local PersonalDirtyKeys = {}
 local personalRefreshScheduled = false
 local browsePanels = setmetatable({}, { __mode = "k" })
 local unresolvedBrowseEntries = {}
-local GuildPending = {}       -- { dbKey = itemID }
-local NeutralPending = {}     -- { dbKey = itemID }
-local PersonalTotal = 0
-local PersonalResolved = 0
-local GuildTotal = 0
-local GuildResolved = 0
-local NeutralTotal = 0
-local NeutralResolved = 0
 local GuildIncomingCount = 0
 local NeutralIncomingCount = 0
 local GuildSyncActive = false
@@ -471,6 +524,9 @@ end
 
 -- ================================================================
 function MarketSync.InvalidateIndexCache()
+    if MarketSync.LowRamKeptSource and MarketSync.LowRamKeptSource() and C_Timer and C_Timer.After then
+        C_Timer.After(2, function() MarketSync.PreloadKeptSource() end)
+    end
     MarkLatestStale()
     wipe(unresolvedBrowseEntries)
     wipe(loadedBrowseIDs)
@@ -478,16 +534,15 @@ function MarketSync.InvalidateIndexCache()
     GuildIndexReady = false
     NeutralIndexReady = false
     PersonalIndexBuilding = false
-    wipe(PersonalIndex)
-    wipe(GuildIndex)
-    wipe(NeutralIndex)
+    -- New tables, not wipe(): a wiped Lua table keeps its allocated slots.
+    PersonalIndex, GuildIndex, NeutralIndex = {}, {}, {}
     wipe(GuildIncomingBuffer)
     wipe(NeutralIncomingBuffer)
-    wipe(PersonalPending)
-    wipe(PersonalDirtyKeys)
+    PersonalPending = {}
+    PersonalDirtyKeys = {}
     personalRefreshScheduled = false
-    wipe(GuildPending)
-    wipe(NeutralPending)
+    GuildPending, NeutralPending = {}, {}
+    PersonalReleasedForLatest, GuildReleasedForLatest = false, false
     PersonalTotal = 0
     GuildTotal = 0
     NeutralTotal = 0
@@ -548,7 +603,54 @@ local function ProcessPersonalDirtyKeys()
     end
 end
 
+-- An entry for Latest. Like the full build's last pass, an item the client
+-- has not cached yet gets a placeholder name now and is requested for later.
+local function BuildLatestEntry(dbKey, itemID, data, mode)
+    local entry = BuildIndexEntry(dbKey, itemID, data, mode)
+    if entry then return entry end
+    if MarketSync.RequestItemData then MarketSync.RequestItemData(itemID) end
+    return BuildIndexEntry(dbKey, itemID, data, mode, true)
+end
+
+-- Builds queued personal rows into Latest in small batches (Low RAM, Personal released).
+local function ProcessLatestPersonalQueue()
+    local store = MarketSync.GetRealmDB() and MarketSync.GetRealmDB().PersonalData or {}
+    local processed = 0
+    while processed < 50 do
+        local dbKey = next(LatestPersonalQueue)
+        if not dbKey then break end
+        LatestPersonalQueue[dbKey] = nil
+        local itemID = ParseItemID(dbKey)
+        local data = store[dbKey]
+        if data and itemID then
+            MergeIntoLatest(dbKey, BuildLatestEntry(dbKey, itemID, data, "personal"))
+        end
+        processed = processed + 1
+    end
+    if next(LatestPersonalQueue) then
+        if C_Timer and C_Timer.After then C_Timer.After(0, ProcessLatestPersonalQueue)
+        else ProcessLatestPersonalQueue() end
+        return
+    end
+    latestQueueScheduled = false
+    for panel in pairs(browsePanels) do
+        if panel.dataSource == "latest" and panel.IsShown and panel:IsShown() and panel.RunSearch then
+            panel:RunSearch()
+        end
+    end
+end
+
 function MarketSync.RefreshPersonalBrowseIndexKeys(keys)
+    if type(keys) == "table" and PersonalReleasedForLatest and not PersonalIndexReady
+        and not PersonalIndexBuilding and LatestHoldsReleased() then
+        for dbKey in pairs(keys) do LatestPersonalQueue[dbKey] = true end
+        if not latestQueueScheduled and next(LatestPersonalQueue) then
+            latestQueueScheduled = true
+            if C_Timer and C_Timer.After then C_Timer.After(0, ProcessLatestPersonalQueue)
+            else ProcessLatestPersonalQueue() end
+        end
+        return true
+    end
     MarkLatestStale()
     if type(keys) ~= "table" then return false end
     if not PersonalIndexReady and not PersonalIndexBuilding then return true end
@@ -620,7 +722,7 @@ local function BuildSearchIndex(callback)
 
         -- 1. BUILD PERSONAL CACHE
         if MarketSyncDB and MarketSync.GetRealmDB().PersonalData then
-            if MarketSyncDB.LowRamMode and not PersonalIndexReady and not MarketSync.ForcePersonal then
+            if MarketSync.IsLowRamDeferred("personal") and not PersonalIndexReady and not MarketSync.ForcePersonal then
                 if MarketSync.LogCacheEvent then
                     MarketSync.LogCacheEvent("|cffffff00[Personal]|r On-Demand enabled (Low RAM). Skipping Personal index build.")
                 end
@@ -660,7 +762,7 @@ local function BuildSearchIndex(callback)
         end
 
         -- 2. BUILD GUILD SYNC CACHE
-        if MarketSyncDB.LowRamMode and not GuildIndexReady and not MarketSync.ForceGuild then
+        if MarketSync.IsLowRamDeferred("guild") and not GuildIndexReady and not MarketSync.ForceGuild then
             if MarketSync.LogCacheEvent then
                 MarketSync.LogCacheEvent("|cff88aaff[Guild]|r On-Demand enabled (Low RAM). Skipping Guild index build.")
             end
@@ -696,7 +798,7 @@ local function BuildSearchIndex(callback)
         end
 
         -- 3. BUILD NEUTRAL CACHE
-        if MarketSyncDB.LowRamMode and not NeutralIndexReady and not MarketSync.ForceNeutral then
+        if MarketSync.IsLowRamDeferred("neutral") and not NeutralIndexReady and not MarketSync.ForceNeutral then
             if MarketSync.LogCacheEvent then
                 MarketSync.LogCacheEvent("|cff00ccff[Neutral]|r On-Demand enabled (Low RAM). Skipping Neutral index build.")
             end
@@ -955,7 +1057,17 @@ end
 
 -- Called by sync module for each item received during sync
 function MarketSync.AddToGuildIncoming(dbKey)
-    if not GuildIndexReady then return end  -- Index hasn't been built yet
+    if not GuildIndexReady then
+        -- Guild released for Latest (Low RAM): put the synced row straight into Latest.
+        if GuildReleasedForLatest and LatestHoldsReleased() then
+            local data = MarketSync.GetRealmDB().GuildData and MarketSync.GetRealmDB().GuildData[dbKey]
+            local itemID = ParseItemID(dbKey)
+            if data and itemID then
+                MergeIntoLatest(dbKey, BuildLatestEntry(dbKey, itemID, data, "guild"))
+            end
+        end
+        return  -- Index hasn't been built yet
+    end
     local liveStore = MarketSync.GetRealmDB().GuildData
         or (Auctionator and Auctionator.Database and Auctionator.Database.db)
     if not liveStore then return end
@@ -994,7 +1106,8 @@ end
 
 -- Called when sync session ends â€” merge incoming buffer into live Guild index
 function MarketSync.CommitGuildSync()
-    MarkLatestStale()
+    -- A released Guild index merged its sync rows into Latest as they arrived.
+    if not (GuildReleasedForLatest and LatestHoldsReleased()) then MarkLatestStale() end
     local merged = 0
     local removed = 0
     for dbKey, entry in pairs(GuildIncomingBuffer) do
@@ -1108,6 +1221,8 @@ end
 -- ================================================================
 MarketSync.GetIndexStatus = function()
     local pPending, gPending, nPending = 0, 0, 0
+    local latestCount = 0
+    if LatestCache then for _ in pairs(LatestCache) do latestCount = latestCount + 1 end end
     for _ in pairs(PersonalPending) do pPending = pPending + 1 end
     for _ in pairs(GuildPending) do gPending = gPending + 1 end
     for _ in pairs(NeutralPending) do nPending = nPending + 1 end
@@ -1131,12 +1246,22 @@ MarketSync.GetIndexStatus = function()
         neutralPending = nPending,
         neutralSyncActive = NeutralSyncActive,
         neutralIncoming = NeutralIncomingCount,
+        latestReady = LatestCache ~= nil,
+        latestCount = latestCount,
+        personalReleased = PersonalReleasedForLatest and not PersonalIndexReady,
+        guildReleased = GuildReleasedForLatest and not GuildIndexReady,
+        lowRam = (MarketSyncDB and MarketSyncDB.LowRamMode) == true,
     }
 end
 
 -- Processing consumes only rows already resolved by the throttled Browse
 -- index build. Never hand it the raw Auctionator DB or pending item IDs.
 MarketSync.GetProcessingIndexSources = function()
+    -- Low RAM keeps only the merged Latest index once it is built. It already
+    -- holds the newest Personal or Guild row per item, so Processing reads it.
+    if LatestCache ~= nil and not (PersonalIndexReady and GuildIndexReady) then
+        return LatestCache, nil
+    end
     if PersonalIndexBuilding or (not PersonalIndexReady and not GuildIndexReady) then return nil end
     return PersonalIndexReady and PersonalIndex or {}, GuildIndexReady and GuildIndex or nil
 end
@@ -1808,10 +1933,11 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     panel.noResultsText:SetText("Search for items using the box above.")
     panel.noResultsText:Show()
 
-    -- Low RAM notice card (loading screen with manual trigger or link to settings)
+    -- Low RAM notice card: shown in place of results while this tab's search
+    -- list is not in memory. Load builds it; Memory Settings opens the options.
     local lowRamNotice = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    lowRamNotice:SetSize(470, 148)
-    lowRamNotice:SetPoint("TOP", panel, "TOP", 115, -140)
+    lowRamNotice:SetSize(440, 172)
+    lowRamNotice:SetPoint("TOP", panel, "TOP", 115, -128)
     if lowRamNotice.SetBackdrop then
         lowRamNotice:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -1820,36 +1946,67 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             insets = { left = 4, right = 4, top = 4, bottom = 4 },
         })
         if lowRamNotice.SetBackdropColor then
-            lowRamNotice:SetBackdropColor(MarketSync.GetThemeColor("notice"))
+            lowRamNotice:SetBackdropColor(MarketSync.GetThemeColor("dialog"))
         end
         if lowRamNotice.SetBackdropBorderColor then
             lowRamNotice:SetBackdropBorderColor(MarketSync.GetThemeColor("border"))
         end
     end
 
-    local lowRamTitle = lowRamNotice:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    lowRamTitle:SetPoint("TOP", lowRamNotice, "TOP", 0, -16)
-    lowRamTitle:SetText("|cffffd700Low RAM Mode Active|r")
+    local lowRamIcon = lowRamNotice:CreateTexture(nil, "ARTWORK")
+    lowRamIcon:SetSize(36, 36)
+    lowRamIcon:SetPoint("TOPLEFT", lowRamNotice, "TOPLEFT", 20, -18)
+    lowRamIcon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+    if lowRamIcon.SetTexCoord then lowRamIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
+    lowRamNotice.icon = lowRamIcon
+
+    local lowRamTitle = lowRamNotice:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    lowRamTitle:SetPoint("TOPLEFT", lowRamIcon, "TOPRIGHT", 12, -1)
+    lowRamTitle:SetPoint("RIGHT", lowRamNotice, "RIGHT", -20, 0)
+    lowRamTitle:SetJustifyH("LEFT")
+    lowRamTitle:SetText("Search list not loaded")
     lowRamNotice.title = lowRamTitle
 
     local lowRamText = lowRamNotice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    lowRamText:SetPoint("TOP", lowRamTitle, "BOTTOM", 0, -8)
-    lowRamText:SetWidth(430)
-    lowRamText:SetJustifyH("CENTER")
+    lowRamText:SetPoint("TOPLEFT", lowRamTitle, "BOTTOMLEFT", 0, -5)
+    lowRamText:SetPoint("RIGHT", lowRamNotice, "RIGHT", -20, 0)
+    lowRamText:SetJustifyH("LEFT")
+    lowRamText:SetTextColor(0.85, 0.82, 0.75)
     lowRamNotice.text = lowRamText
     lowRamNotice.desc = lowRamText
 
+    local divider = lowRamNotice:CreateTexture(nil, "ARTWORK")
+    divider:SetHeight(1)
+    divider:SetPoint("TOPLEFT", lowRamNotice, "TOPLEFT", 20, -72)
+    divider:SetPoint("TOPRIGHT", lowRamNotice, "TOPRIGHT", -20, -72)
+    divider:SetColorTexture(MarketSync.GetThemeColor("headerBorder", 0.8))
+
+    local lowRamStats = lowRamNotice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    lowRamStats:SetPoint("TOPLEFT", divider, "BOTTOMLEFT", 0, -9)
+    lowRamStats:SetPoint("RIGHT", lowRamNotice, "RIGHT", -20, 0)
+    lowRamStats:SetJustifyH("LEFT")
+    lowRamNotice.stats = lowRamStats
+
+    local lowRamHint = lowRamNotice:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    lowRamHint:SetPoint("TOPLEFT", lowRamStats, "BOTTOMLEFT", 0, -5)
+    lowRamHint:SetPoint("RIGHT", lowRamNotice, "RIGHT", -20, 0)
+    lowRamHint:SetJustifyH("LEFT")
+    lowRamHint:SetText("Tooltips, scanning and Analytics work without loading. Loaded data is freed after 5 minutes unused.")
+    lowRamNotice.hint = lowRamHint
+
+    local BUTTON_W, BUTTON_H = 160, 24
     local btnLoad = CreateFrame("Button", nil, lowRamNotice, "UIPanelButtonTemplate")
-    btnLoad:SetSize(154, 24)
-    btnLoad:SetPoint("BOTTOMRIGHT", lowRamNotice, "BOTTOM", -8, 16)
-    btnLoad:SetText("⚡ Load Scan Data")
-    if StyleModernPillButton then StyleModernPillButton(btnLoad, "⚡ Load Scan Data", true) end
+    btnLoad:SetSize(BUTTON_W, BUTTON_H)
+    btnLoad:SetPoint("BOTTOMRIGHT", lowRamNotice, "BOTTOM", -5, 16)
+    btnLoad:SetText("Load Scan Data")
+    if StyleModernPillButton then StyleModernPillButton(btnLoad, "Load Scan Data", true) end
     btnLoad:SetScript("OnClick", function()
         btnLoad:SetText("Loading...")
         if btnLoad.SetEnabled then btnLoad:SetEnabled(false) end
-        lowRamText:SetText("|cffffcc00Loading scan records into memory... Please wait.|r")
+        lowRamTitle:SetText("Loading scan data...")
+        lowRamText:SetText("Building this tab's search list. Results appear when it is ready.")
         local onDone = function()
-            btnLoad:SetText("⚡ Load Scan Data")
+            btnLoad:SetText("Load Scan Data")
             if btnLoad.SetEnabled then btnLoad:SetEnabled(true) end
             panel:RunSearch()
         end
@@ -1867,8 +2024,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     btnLoad:SetScript("OnEnter", function(self)
         if GameTooltip then
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Load Cache on Demand", 1, 0.82, 0)
-            GameTooltip:AddLine("Loads scan data for this tab into memory for the current session.", 0.9, 0.9, 0.9, true)
+            GameTooltip:SetText("Load Scan Data", 1, 0.82, 0)
+            GameTooltip:AddLine("Loads this tab's scan data into memory so you can search and browse it.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end
     end)
@@ -1878,10 +2035,10 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     lowRamNotice.btnLoad = btnLoad
 
     local btnLowRamSettings = CreateFrame("Button", nil, lowRamNotice, "UIPanelButtonTemplate")
-    btnLowRamSettings:SetSize(174, 24)
-    btnLowRamSettings:SetPoint("BOTTOMLEFT", lowRamNotice, "BOTTOM", 8, 16)
-    btnLowRamSettings:SetText("Settings (Disable Low RAM)")
-    if StyleModernPillButton then StyleModernPillButton(btnLowRamSettings, "Settings (Disable Low RAM)", false) end
+    btnLowRamSettings:SetSize(BUTTON_W, BUTTON_H)
+    btnLowRamSettings:SetPoint("BOTTOMLEFT", lowRamNotice, "BOTTOM", 5, 16)
+    btnLowRamSettings:SetText("Memory Settings")
+    if StyleModernPillButton then StyleModernPillButton(btnLowRamSettings, "Memory Settings", false) end
     btnLowRamSettings:SetScript("OnClick", function()
         if MarketSync.OpenSettings then
             MarketSync.OpenSettings()
@@ -1890,8 +2047,8 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     btnLowRamSettings:SetScript("OnEnter", function(self)
         if GameTooltip then
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Addon Settings", 1, 0.82, 0)
-            GameTooltip:AddLine("Opens Settings to disable Low RAM Mode for instant searches across all tabs.", 0.9, 0.9, 0.9, true)
+            GameTooltip:SetText("Memory Settings", 1, 0.82, 0)
+            GameTooltip:AddLine("Turn Low RAM mode off, or keep the Main tab's source loaded.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end
     end)
@@ -2167,6 +2324,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
 
     -- --- SEARCH LOGIC ---
     function panel:RunSearch()
+        if MarketSync.TouchLowRamSource then MarketSync.TouchLowRamSource(self.dataSource) end
         local query = self.searchBox:GetText():lower()
         self.currentResults = {}
         self.page = 0
@@ -2178,11 +2336,18 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
             or (not isGuild and not isNeutral and self.dataSource ~= "latest" and PersonalIndexReady)
 
         if not isReady then
-            if MarketSyncDB and MarketSyncDB.LowRamMode then
+            local lowRam = MarketSyncDB and MarketSyncDB.LowRamMode
+            if lowRam and self.dataSource ~= "latest" then
                 if self.noResultsText then self.noResultsText:Hide() end
                 self:UpdateResults()
                 return
             else
+                if lowRam then
+                    -- Latest was cleared after a scan or sync while Personal and Guild were
+                    -- released. Reload both so the merged index can be rebuilt.
+                    MarketSync.ForcePersonal = true
+                    MarketSync.ForceGuild = true
+                end
                 self.noResultsText:SetText("Building index, please wait...")
                 self.noResultsText:Show()
                 self:UpdateResults()
@@ -2287,6 +2452,7 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
     end
 
     function panel:UpdateResults()
+        if MarketSync.TouchLowRamSource then MarketSync.TouchLowRamSource(self.dataSource) end
         local offset = self.page * NUM_RESULTS_TO_DISPLAY
         local total = #self.currentResults
 
@@ -2378,22 +2544,29 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     estMB, totalStored = MarketSync.GetEstimatedRAMUsage()
                 end
 
+                local notice = self.lowRamNotice
+                local function Thousands(n)
+                    local text = tostring(math.floor(n or 0))
+                    local formatted = text:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+                    return (formatted:gsub("^,", ""))
+                end
+                if notice.stats then
+                    notice.stats:SetText(string.format("|cffffd100%s|r items stored   |cff888888-|r   about |cffffd100%.1f MB|r saved",
+                        Thousands(totalStored), estMB))
+                end
                 if PersonalIndexBuilding then
-                    if self.lowRamNotice.title then self.lowRamNotice.title:SetText("|cffffd700Loading Cache into Memory...|r") end
-                    self.lowRamNotice.text:SetText("|cffaaaaaaPopulating search records from disk. Please wait a moment...|r")
-                    if self.lowRamNotice.btnLoad then
-                        self.lowRamNotice.btnLoad:SetText("Loading...")
-                        if self.lowRamNotice.btnLoad.SetEnabled then self.lowRamNotice.btnLoad:SetEnabled(false) end
+                    if notice.title then notice.title:SetText("Loading scan data...") end
+                    notice.text:SetText("Building this tab's search list. Results appear when it is ready.")
+                    if notice.btnLoad then
+                        notice.btnLoad:SetText("Loading...")
+                        if notice.btnLoad.SetEnabled then notice.btnLoad:SetEnabled(false) end
                     end
                 else
-                    if self.lowRamNotice.title then self.lowRamNotice.title:SetText("|cffffd700Low RAM Mode Active|r") end
-                    self.lowRamNotice.text:SetText(string.format(
-                        "|cffccccccSearch index is not loaded in memory to keep the addon lightweight.\nEstimated memory saved: ~%.1f MB (%d items stored).\nScanner, price checks, and analytics remain fully accessible.|r",
-                        estMB, totalStored
-                    ))
-                    if self.lowRamNotice.btnLoad then
-                        self.lowRamNotice.btnLoad:SetText("⚡ Load Scan Data")
-                        if self.lowRamNotice.btnLoad.SetEnabled then self.lowRamNotice.btnLoad:SetEnabled(true) end
+                    if notice.title then notice.title:SetText("Search list not loaded") end
+                    notice.text:SetText("Low RAM mode keeps this tab's scan data out of memory until you need it.")
+                    if notice.btnLoad then
+                        notice.btnLoad:SetText("Load Scan Data")
+                        if notice.btnLoad.SetEnabled then notice.btnLoad:SetEnabled(true) end
                     end
                 end
                 self.lowRamNotice:Show()
@@ -2460,6 +2633,25 @@ function MarketSync.LoadGuildCache(callback)
     end
 end
 
+-- Builds the source kept loaded for the Main tab (Low RAM "keep Main tab
+-- source loaded"). Latest is merged from Personal and Guild, which are then
+-- released again.
+function MarketSync.PreloadKeptSource()
+    local kept = MarketSync.LowRamKeptSource()
+    if kept == "personal" then
+        MarketSync.LoadPersonalCache()
+    elseif kept == "guild" then
+        MarketSync.LoadGuildCache()
+    elseif kept == "latest" then
+        MarketSync.LoadPersonalCache(function()
+            MarketSync.LoadGuildCache(function()
+                if MarketSync.ReleaseSourceIndexesForLowRam then MarketSync.ReleaseSourceIndexesForLowRam() end
+            end)
+        end)
+    end
+    return kept ~= nil
+end
+
 function MarketSync.LoadNeutralCache(callback)
     if not NeutralIndexReady then
         MarketSync.ForceNeutral = true
@@ -2467,4 +2659,87 @@ function MarketSync.LoadNeutralCache(callback)
     elseif callback then
         callback()
     end
+end
+
+-- ================================================================
+-- Low RAM idle purge
+-- In Low RAM mode a source loaded with the Load button stays in memory while it
+-- is used, then is freed once it has not been used for LOW_RAM_IDLE_SECONDS
+-- and is not on screen. The source kept loaded for the Main tab is never freed.
+-- Analytics reads saved history directly, so it needs none of these indexes.
+-- ================================================================
+local LOW_RAM_IDLE_SECONDS = 300
+local lowRamLastUsed = {}
+
+local function LowRamNow()
+    return (GetTime and GetTime()) or time()
+end
+
+-- Which search indexes are in memory right now.
+function MarketSync.GetLoadedSources()
+    return { personal = PersonalIndexReady == true, guild = GuildIndexReady == true,
+        neutral = NeutralIndexReady == true, latest = LatestCache ~= nil }
+end
+
+function MarketSync.TouchLowRamSource(source)
+    if source then lowRamLastUsed[source] = LowRamNow() end
+end
+
+local function SourceOnScreen(source)
+    for browsePanel in pairs(browsePanels) do
+        if browsePanel.dataSource == source and browsePanel.IsVisible and browsePanel:IsVisible() then
+            return true
+        end
+    end
+    return false
+end
+
+local function ReleaseSourceIndex(source)
+    if source == "personal" and PersonalIndexReady then
+        PersonalIndex, PersonalPending, PersonalDirtyKeys = {}, {}, {}
+        PersonalIndexReady, PersonalTotal, PersonalResolved = false, 0, 0
+        return true
+    elseif source == "guild" and GuildIndexReady then
+        GuildIndex, GuildPending = {}, {}
+        GuildIndexReady, GuildTotal, GuildResolved = false, 0, 0
+        return true
+    elseif source == "neutral" and NeutralIndexReady then
+        NeutralIndex, NeutralPending = {}, {}
+        NeutralIndexReady, NeutralTotal, NeutralResolved = false, 0, 0
+        return true
+    elseif source == "latest" and LatestCache ~= nil then
+        MarkLatestStale()
+        PersonalReleasedForLatest, GuildReleasedForLatest = false, false
+        return true
+    end
+    return false
+end
+
+-- Frees every Low RAM source that has been idle long enough. Returns the freed sources.
+function MarketSync.PurgeIdleLowRamSources(now)
+    local freed = {}
+    if not (MarketSyncDB and MarketSyncDB.LowRamMode) or PersonalIndexBuilding then return freed end
+    now = now or LowRamNow()
+    local kept = MarketSync.LowRamKeptSource and MarketSync.LowRamKeptSource()
+    for _, source in ipairs({ "personal", "guild", "neutral", "latest" }) do
+        local keep = source == kept
+            or (kept == "latest" and source == "latest")
+        local lastUsed = lowRamLastUsed[source]
+        if not keep and not SourceOnScreen(source)
+            and (not lastUsed or now - lastUsed >= LOW_RAM_IDLE_SECONDS)
+            and ReleaseSourceIndex(source) then
+            freed[#freed + 1] = source
+        end
+    end
+    if #freed > 0 then
+        if MarketSync.LogCacheEvent then
+            MarketSync.LogCacheEvent("|cffffff00[Low RAM]|r Freed idle data: " .. table.concat(freed, ", "))
+        end
+        collectgarbage("collect")
+    end
+    return freed
+end
+
+if C_Timer and C_Timer.NewTicker then
+    C_Timer.NewTicker(60, function() MarketSync.PurgeIdleLowRamSources() end)
 end

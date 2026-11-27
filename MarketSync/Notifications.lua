@@ -66,18 +66,25 @@ end
 
 function MarketSync.PlayNotificationSound(soundID, preview)
     local id = tonumber(soundID)
+    if MarketSync.ResolveNotificationSoundID then id = MarketSync.ResolveNotificationSoundID(id) end
     if not id or id <= 0 then return false end
     if MarketSync.NotificationsMuted and not preview then return false end
-    if not preview and (not MarketSyncDB or not MarketSyncDB.EnableNotificationSounds) then
+    if not preview and (not MarketSyncDB or MarketSyncDB.EnableNotificationSounds == false) then
         return false
     end
 
     -- WoW does not expose a per-PlaySound gain parameter. A zero preference is
-    -- still honored as a hard mute; non-zero alerts use the player's Master mix.
+    -- still honored as a hard mute; non-zero alerts use the player's Master mix
+    -- so they are heard even with game sound effects turned off.
     local volume = MarketSyncDB and tonumber(MarketSyncDB.NotificationVolume) or 1
     if volume <= 0 then return false end
-    local ok = pcall(PlaySound, id, "Master")
-    return ok
+    local ok, willPlay = pcall(PlaySound, id, "Master")
+    -- PlaySound reports false when the client has no such sound kit. Fall
+    -- back to the raid warning so an alert is never silent by mistake.
+    if ok and willPlay == false and id ~= 8959 then
+        ok, willPlay = pcall(PlaySound, 8959, "Master")
+    end
+    return ok and willPlay ~= false
 end
 
 function MarketSync.AcknowledgeNotifications()
@@ -130,12 +137,13 @@ local function AlertNotification(req, state, itemName, price, eventScope, source
     )
     print(msg)
 
-    if MarketSyncDB and MarketSyncDB.EnableRaidWarningAlerts ~= false
+    -- Urgent alerts always use the on-screen banner; others follow the setting.
+    if (isUrgent or not MarketSyncDB or MarketSyncDB.EnableRaidWarningAlerts ~= false)
         and RaidNotice_AddMessage and RaidWarningFrame then
         RaidNotice_AddMessage(RaidWarningFrame, StripColorCodes(msg), ChatTypeInfo["RAID_WARNING"])
     end
 
-    if MarketSyncDB and MarketSyncDB.EnableNotificationSounds then
+    if MarketSyncDB and MarketSyncDB.EnableNotificationSounds ~= false then
         local soundID = MarketSyncDB.NotificationSoundID or 8959
         local perID = req.id and MarketSyncDB.PerNotificationSounds and MarketSyncDB.PerNotificationSounds[req.id]
         if perID == 0 then
@@ -281,6 +289,8 @@ function MarketSync.UpsertNotificationRequest(req)
     existing.createdAt = existing.createdAt or now
     existing.quantityHint = tonumber(req.quantityHint) or existing.quantityHint
     existing.importSource = req.importSource or existing.importSource
+    -- Where the alert was made (for example "Processing"), shown in History.
+    existing.origin = req.origin or existing.origin
 
     realmDB.NotificationRequests[requestID] = existing
     local state = GetRequestState(realmDB, requestID)
@@ -477,6 +487,61 @@ local function GetNeutralTrackedPrice(req, itemID, byKey, byItemID)
         return byKey[tostring(req.matchValue)]
     end
     return itemID and byItemID[itemID] or nil
+end
+
+-- What the Alerts page shows for one alert: the cheapest current price in
+-- the auction houses it watches, and when it last fired. Stale observations
+-- still count here (the page shows a price, not a trigger).
+local function StatusForRequest(realmDB, req, now, neutralIndex)
+    local itemID = ResolveTrackedItemID(req)
+    local scope = NormalizeScope(req.scope)
+    local best
+    if scope ~= "neutral" then
+        local ok, p = pcall(GetMainTrackedPrice, realmDB, req, itemID, now, false)
+        if ok and p and p > 0 then best = p end
+    end
+    if scope ~= "main" and neutralIndex then
+        local p = GetNeutralTrackedPrice(req, itemID, neutralIndex.byKey, neutralIndex.byItemID)
+        if p and p > 0 and (not best or p < best) then best = p end
+    end
+    local state = realmDB.NotificationState and req.id and realmDB.NotificationState[req.id] or {}
+    local threshold = tonumber(req.thresholdCopper) or 0
+    local gapPct
+    if best and threshold > 0 then
+        gapPct = math.floor(((best - threshold) / threshold) * 100 + 0.5)
+    end
+    return {
+        itemID = itemID,
+        currentPrice = best,
+        lastAlertAt = tonumber(state.lastAlertAt) or 0,
+        gapPct = gapPct,
+        isBelow = best ~= nil and threshold > 0 and best <= threshold,
+    }
+end
+
+-- Status for many alerts at once (the neutral index is built one time).
+function MarketSync.GetNotificationRequestStatuses(requests)
+    local realmDB = MarketSync.GetRealmDB()
+    local now = time()
+    local needsNeutral = false
+    for _, req in ipairs(requests or {}) do
+        if NormalizeScope(req.scope) ~= "main" then needsNeutral = true break end
+    end
+    local neutralIndex
+    if needsNeutral then
+        local byKey, byItemID = BuildNeutralTrackedPriceIndex(realmDB, now, false)
+        neutralIndex = { byKey = byKey, byItemID = byItemID }
+    end
+    local out = {}
+    for _, req in ipairs(requests or {}) do
+        if req.id then out[req.id] = StatusForRequest(realmDB, req, now, neutralIndex) end
+    end
+    return out
+end
+
+function MarketSync.GetNotificationRequestStatus(req)
+    if type(req) ~= "table" or not req.id then return {} end
+    return MarketSync.GetNotificationRequestStatuses({ req })[req.id] or {}
 end
 
 function MarketSync.GetImportableListNames()

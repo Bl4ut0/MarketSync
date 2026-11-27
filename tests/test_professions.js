@@ -167,6 +167,108 @@ test('falls back gracefully to legacy GetTradeSkillInfo API', () => {
   `);
 });
 
+// 3b. Classic scanner: collapsed headers, filtered rescans, the Craft window,
+// and the per-profession status the Processing page shows.
+test('scanner expands headers, keeps recipes across filtered scans, reads the Craft window and reports status', () => {
+  const L = createLuaState(`
+    C_TradeSkillUI = nil
+    ExpandedHeaders = {}
+    TradeRows = {
+      { "Cloth", "header", 0, false },
+      { "Linen Bandage", "optimal", 0, false, nil, 1, item = 1251 },
+      { "Heavy Linen Bandage", "easy", 0, false, nil, 1, item = 2581 },
+    }
+    TradeVisible = 1 -- only the collapsed header is visible until expanded
+    GetTradeSkillLine = function() return "First Aid", 120, 150 end
+    GetNumTradeSkills = function() return TradeVisible end
+    GetTradeSkillInfo = function(i) local r = TradeRows[i]; return r[1], r[2], r[3], r[4], r[5], r[6] end
+    ExpandTradeSkillSubClass = function(i) ExpandedHeaders[i] = true; TradeVisible = #TradeRows end
+    GetTradeSkillItemLink = function(i) return "|Hitem:" .. TradeRows[i].item .. ":0|h[x]|h" end
+    GetTradeSkillNumMade = function() return 1, 1 end
+    GetTradeSkillNumReagents = function() return 1 end
+    GetTradeSkillReagentItemLink = function() return "|Hitem:2592:0|h[Linen Cloth]|h" end
+    GetTradeSkillReagentInfo = function() return "Linen Cloth", "icon", 1 end
+    GetNumSkillLines = function() return 2 end
+    GetSkillLineInfo = function(i)
+      if i == 1 then return "First Aid", false, false, 120, 0, 0, 150 end
+      return "Enchanting", false, false, 75, 0, 0, 150
+    end
+    Toasts = {}
+    MarketSync.OnProfessionScanned = function(prof, total, added) Toasts[#Toasts + 1] = { prof, total, added } end
+  `);
+
+  execLua(L, `
+    assert(MarketSync.RefreshKnownCraftingRecipes("trade") == true, "Trade window scan should succeed")
+    assert(ExpandedHeaders[1], "Collapsed categories must be expanded before reading recipes")
+    assert(MarketSync.GetCraftRecipeCount("First Aid (Health)") == 2, "Both bandages should be saved")
+    assert(#Toasts == 1 and Toasts[1][2] == 2, "First scan confirms once")
+
+    -- A filtered rescan (search text) sees one recipe but must not forget the other.
+    TradeRows = { { "Linen Bandage", "optimal", 0, false, nil, 1, item = 1251 } }
+    TradeVisible = 1
+    MarketSync.RefreshKnownCraftingRecipes("trade")
+    assert(MarketSync.GetCraftRecipeCount("First Aid (Health)") == 2, "Filtered scans add to the list, never shrink it")
+    assert(#Toasts == 1, "No repeat confirmation when nothing new was found")
+
+    -- Enchanting on Classic uses the Craft window.
+    CraftFrame = { IsShown = function() return true end }
+    GetNumCrafts = function() return 2 end
+    GetCraftInfo = function(i)
+      if i == 1 then return "Enchant Bracer - Minor Health", nil, "optimal" end
+      return "Runed Copper Rod", nil, "easy"
+    end
+    GetCraftItemLink = function(i)
+      if i == 1 then return "|cffffffff|Henchant:7418|h[Enchant Bracer]|h|r" end
+      return "|Hitem:6218:0|h[Runed Copper Rod]|h"
+    end
+    GetCraftNumReagents = function() return 1 end
+    GetCraftReagentItemLink = function() return "|Hitem:6217:0|h[Copper Rod]|h" end
+    GetCraftReagentInfo = function() return "Copper Rod", "icon", 1 end
+    GetCraftDisplaySkillLine = function() return "Enchanting", 75, 150 end
+    assert(MarketSync.RefreshKnownCraftingRecipes("craft") == true, "Craft window scan should succeed")
+    assert(MarketSync.GetCraftRecipeCount("Enchanting") == 1, "Only item recipes (the rod) count; enchant spells have no item")
+
+    local rows = MarketSync.GetProfessionScanStatus()
+    local byName = {}
+    for _, row in ipairs(rows) do byName[row.name] = row end
+    assert(byName["Enchanting"] and byName["Enchanting"].state == "ready", "Enchanting should be ready after the Craft scan")
+    assert(byName["First Aid (Health)"].label == "First Aid" and byName["First Aid (Health)"].recipes == 2)
+
+    -- A skill-up after the scan asks for a refresh.
+    GetSkillLineInfo = function(i)
+      if i == 1 then return "First Aid", false, false, 140, 0, 0, 150 end
+      return "Enchanting", false, false, 75, 0, 0, 150
+    end
+    byName = {}
+    for _, row in ipairs(MarketSync.GetProfessionScanStatus()) do byName[row.name] = row end
+    assert(byName["First Aid (Health)"].state == "stale", "Higher skill than the scan should read as stale")
+    local ready, needs = MarketSync.GetProfessionScanSummary()
+    assert(ready == 1 and needs == 1, "Summary counts ready and stale professions")
+  `);
+});
+
+test('Forever disenchant estimates are marked approximate everywhere they show', () => {
+  const L = createLuaState(`MarketSync.GetClientFlavor = function() return ClientFlavor end`);
+  execLua(L, `
+    ClientFlavor = "forever"
+    assert(MarketSync.IsDisenchantApproximate() == true, "Forever estimates are approximate")
+    assert(MarketSync.FOREVER_DISENCHANT_NOTE:find("Forever uses its own disenchant table", 1, true))
+    ClientFlavor = "classic"
+    assert(MarketSync.IsDisenchantApproximate() == false, "Classic uses its real table")
+  `);
+  const uiSource = fs.readFileSync(path.join(marketSyncDir, 'UI_Processing.lua'), 'utf8');
+  const chatSource = fs.readFileSync(path.join(marketSyncDir, 'Chat.lua'), 'utf8');
+  if (!processingLua.includes('Disenchant Value (approx.):') || !processingLua.includes('tooltip:AddLine(MarketSync.FOREVER_DISENCHANT_NOTE')) {
+    throw new Error('Item tooltips must label Forever disenchant values as approximate');
+  }
+  if (!uiSource.includes('ColorWarn(MarketSync.FOREVER_DISENCHANT_NOTE)')) {
+    throw new Error('Processing details must carry the Forever disenchant note');
+  }
+  if (!chatSource.includes('approx and " (approx.)"')) {
+    throw new Error('Chat price output must label Forever disenchant values as approximate');
+  }
+});
+
 // 4. Secondary Profession Detection without inventing learned recipes
 test('lists First Aid but does not invent unscanned recipes', () => {
   const L = createLuaState(`

@@ -198,6 +198,25 @@ function MarketSync.RecordPersonalScan(realmDB, timestamp)
     realmDB.PersonalScanCharacter = MarketSync.GetPlayerScanName()
 end
 
+-- Removes rows the old MarketSyncData loader copied into GuildData (tagged
+-- src = "DataPack" with no source of their own). They are not scans, so they
+-- must not be synced or uploaded; tooltips read the pack directly instead.
+-- Returns the number removed.
+function MarketSync.PurgeDataPackRowsFromGuildData(realmDB)
+    realmDB = realmDB or (MarketSync.GetRealmDB and MarketSync.GetRealmDB())
+    local guildData = realmDB and realmDB.GuildData
+    if type(guildData) ~= "table" then return 0 end
+    local removed = 0
+    for key, row in pairs(guildData) do
+        if type(row) == "table" and row.src == "DataPack" and (row.source == nil or row.source == "DataPack") then
+            guildData[key] = nil
+            removed = removed + 1
+        end
+    end
+    if removed > 0 and MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
+    return removed
+end
+
 function MarketSync.IsWebAuctionRecord(record)
     return type(record) == "table" and (record.source == "Web" or record.source == "DataPack"
         or (record.src == "DataPack" and not record.source))
@@ -601,6 +620,7 @@ function MarketSync.InitializeDB()
     end
     if MarketSyncDB.EnableNotificationSounds == nil then MarketSyncDB.EnableNotificationSounds = true end
     if MarketSyncDB.LowRamMode == nil then MarketSyncDB.LowRamMode = true end
+    if MarketSyncDB.LowRamKeepMain == nil then MarketSyncDB.LowRamKeepMain = false end
     if MarketSyncDB.OnDemandPersonal == nil then MarketSyncDB.OnDemandPersonal = true end
     if MarketSyncDB.OnDemandGuild == nil then MarketSyncDB.OnDemandGuild = true end
     if MarketSyncDB.OnDemandNeutral == nil then MarketSyncDB.OnDemandNeutral = true end
@@ -615,6 +635,7 @@ function MarketSync.InitializeDB()
     if not MarketSyncDB.NotificationVolume then MarketSyncDB.NotificationVolume = 1.0 end
     if not MarketSyncDB.NotificationMode then MarketSyncDB.NotificationMode = "on_scan" end
     if not MarketSyncDB.AlertUndercutPct then MarketSyncDB.AlertUndercutPct = 10 end
+    if MarketSync.MigrateNotificationSounds then MarketSync.MigrateNotificationSounds() end
     -- Legacy PurgeCycleDays is superseded by tiered retention (Hot/Warm/Cold/Purge).
     -- Default to 180 days (6 months of weekly macro-history) if not set.
     if MarketSyncDB.PurgeCycleDays == nil then MarketSyncDB.PurgeCycleDays = 180 end
@@ -824,9 +845,23 @@ function MarketSync.GetEstimatedRAMUsage()
         for _ in pairs(realmDB.NeutralData) do neutralCount = neutralCount + 1 end
     end
     local totalItems = personalCount + guildCount + neutralCount
-    -- Lua search index table overhead is ~0.95 KB per fully resolved entry
-    local estMB = math.max(0.5, (totalItems * 0.95) / 1024)
-    return estMB, totalItems, personalCount, guildCount, neutralCount
+    -- Lua search index overhead is ~0.95 KB per resolved entry. Count only the
+    -- index rows actually in memory: Low RAM frees Personal and Guild once
+    -- Latest is built, and Latest shares its entries with them while loaded.
+    local loadedRows = 0
+    local status = MarketSync.GetIndexStatus and MarketSync.GetIndexStatus()
+    if status then
+        if status.personalReady then loadedRows = loadedRows + (tonumber(status.personalResolved) or 0) end
+        if status.guildReady then loadedRows = loadedRows + (tonumber(status.guildResolved) or 0) end
+        if status.neutralReady then loadedRows = loadedRows + (tonumber(status.neutralResolved) or 0) end
+        if status.latestReady and not (status.personalReady and status.guildReady) then
+            loadedRows = loadedRows + (tonumber(status.latestCount) or 0)
+        end
+    else
+        loadedRows = totalItems
+    end
+    local estMB = (loadedRows * 0.95) / 1024
+    return estMB, totalItems, personalCount, guildCount, neutralCount, loadedRows
 end
 
 -- Diagnostic sizes are sampled Lua-table footprint estimates, not allocator
@@ -919,6 +954,36 @@ local function MeasureAddOnKB(addonName)
     return nil
 end
 
+-- Measured memory per MarketSync add-on (KB), including each loaded data
+-- pack. The game charges memory to the add-on whose code allocated it, so
+-- pack tables count under the pack, and rows the loader copies into
+-- MarketSync's saved data count under MarketSyncData.
+function MarketSync.GetMemoryBreakdown()
+    if type(UpdateAddOnMemoryUsage) == "function" then pcall(UpdateAddOnMemoryUsage) end
+    local out = {
+        marketSync = MeasureAddOnKB("MarketSync") or 0,
+        dataLoader = MeasureAddOnKB("MarketSyncData") or 0,
+        ledger = MeasureAddOnKB("MarketSyncLedger") or 0,
+        packs = {},
+        packTotal = 0,
+    }
+    local count = (C_AddOns and C_AddOns.GetNumAddOns and C_AddOns.GetNumAddOns())
+        or (type(GetNumAddOns) == "function" and GetNumAddOns()) or 0
+    local getInfo = (C_AddOns and C_AddOns.GetAddOnInfo) or GetAddOnInfo
+    for i = 1, count do
+        local name = getInfo and getInfo(i)
+        if type(name) == "string" and name:find("^MarketSyncData_") then
+            local kb = MeasureAddOnKB(name)
+            if kb and kb > 0 then
+                out.packs[#out.packs + 1] = { name = name, kb = kb }
+                out.packTotal = out.packTotal + kb
+            end
+        end
+    end
+    out.total = out.marketSync + out.dataLoader + out.ledger + out.packTotal
+    return out
+end
+
 function MarketSync.GetDiagnosticsSnapshot(force)
     local realmDB = MarketSync.GetRealmDB and MarketSync.GetRealmDB() or {}
     local db = MarketSyncDB or {}
@@ -1000,9 +1065,14 @@ function MarketSync.GetDiagnosticsSnapshot(force)
     end
 
     local indexes = MarketSync.GetIndexStatus and MarketSync.GetIndexStatus() or {}
-    local indexRows = (tonumber(indexes.personalResolved) or 0)
-        + (tonumber(indexes.guildResolved) or 0)
-        + (tonumber(indexes.neutralResolved) or 0)
+    -- Rows actually in memory: a released index holds none, and Latest only
+    -- adds rows of its own once Personal and Guild are released.
+    local indexRows = (indexes.personalReady and tonumber(indexes.personalResolved) or 0)
+        + (indexes.guildReady and tonumber(indexes.guildResolved) or 0)
+        + (indexes.neutralReady and tonumber(indexes.neutralResolved) or 0)
+    if indexes.latestReady and not (indexes.personalReady and indexes.guildReady) then
+        indexRows = indexRows + (tonumber(indexes.latestCount) or 0)
+    end
     local scanner = MarketSync.Scanner or {}
     local runtime = {
         indexRows = indexRows,
@@ -1025,6 +1095,7 @@ function MarketSync.GetDiagnosticsSnapshot(force)
     return {
         addonKB = addonKB,
         dataPackAddonKB = dataPackAddonKB,
+        memory = MarketSync.GetMemoryBreakdown and MarketSync.GetMemoryBreakdown() or nil,
         ledgerAddonKB = ledgerAddonKB,
         luaHeapKB = luaHeapKB,
         storage = storage,
@@ -1073,6 +1144,15 @@ function MarketSync.PrintDiagnosticsSnapshot()
         snapshot.dataPackAddonKB and string.format("%.1f KB", snapshot.dataPackAddonKB) or (pack.loaded and "unavailable" or "not loaded"),
         snapshot.ledgerAddonKB and string.format("%.1f KB", snapshot.ledgerAddonKB) or "not loaded",
         snapshot.luaHeapKB and string.format("%.1f KB", snapshot.luaHeapKB) or "unavailable"))
+    local memory = snapshot.memory
+    if memory then
+        print(string.format("[MarketSync diagnostics] Measured memory, all MarketSync add-ons: %.1f MB (MarketSync %.1f MB, MarketSyncData loader %.1f MB, data packs %.1f MB, Ledger %.1f MB)",
+            (memory.total or 0) / 1024, (memory.marketSync or 0) / 1024, (memory.dataLoader or 0) / 1024,
+            (memory.packTotal or 0) / 1024, (memory.ledger or 0) / 1024))
+        for _, packInfo in ipairs(memory.packs or {}) do
+            print(string.format("[MarketSync diagnostics]   %s: %.1f MB", packInfo.name, packInfo.kb / 1024))
+        end
+    end
     DescribePart("Personal", storage.personal)
     DescribePart("Guild sync prices", storage.guildPrices)
     DescribePart("DataPack active (in GuildData)", storage.dataPackActive)
@@ -1089,10 +1169,16 @@ function MarketSync.PrintDiagnosticsSnapshot()
             tostring(pack.flavor), tostring(pack.version), tostring(pack.dataDate or "—"),
             pack.partitionCount or 0, pack.totalRecords or 0, pack.estimatedKB or 0))
     end
-    print(string.format("[MarketSync diagnostics] Indexes: personal %d/%d (%d pending), guild %d/%d (%d pending), neutral %d/%d (%d pending); ~%.1f KB estimated active indexes",
-        index.personalResolved or 0, index.personalTotal or 0, index.personalPending or 0,
-        index.guildResolved or 0, index.guildTotal or 0, index.guildPending or 0,
-        index.neutralResolved or 0, index.neutralTotal or 0, index.neutralPending or 0,
+    local function IndexState(ready, released, resolved, total, pending)
+        if ready then return string.format("loaded %d/%d (%d pending)", resolved or 0, total or 0, pending or 0) end
+        if released then return "released (rows kept in Latest)" end
+        return "not loaded"
+    end
+    print(string.format("[MarketSync diagnostics] Indexes: personal %s; guild %s; neutral %s; latest %s; ~%.1f KB estimated in memory",
+        IndexState(index.personalReady, index.personalReleased, index.personalResolved, index.personalTotal, index.personalPending),
+        IndexState(index.guildReady, index.guildReleased, index.guildResolved, index.guildTotal, index.guildPending),
+        IndexState(index.neutralReady, false, index.neutralResolved, index.neutralTotal, index.neutralPending),
+        index.latestReady and string.format("loaded (%d items)", index.latestCount or 0) or "not loaded",
         runtime.indexEstimatedKB or 0))
     print(string.format("[MarketSync diagnostics] Scanner: %s; %d/%d; scope=%s; %s",
         scanner.active and "active" or "idle", scanner.current, scanner.total,
@@ -1907,40 +1993,88 @@ function MarketSync.IsDetailsKeyDown()
 end
 
 
+local function TooltipItemID(link)
+    return type(link) == "string" and tonumber(link:match("item:(%d+)")) or nil
+end
+
+local function ContainerSlotItemID(bag, slot)
+    local slotLink
+    if C_Container and C_Container.GetContainerItemLink then
+        local ok, value = pcall(C_Container.GetContainerItemLink, bag, slot)
+        if ok then slotLink = value end
+    elseif GetContainerItemLink then
+        local ok, value = pcall(GetContainerItemLink, bag, slot)
+        if ok then slotLink = value end
+    end
+    return TooltipItemID(slotLink)
+end
+
+-- True when the tooltip still shows the item it showed before the refresh.
+local function TooltipStillShows(tip, itemID)
+    if not (tip:IsShown() and tip.GetItem) then return false end
+    local _, link = tip:GetItem()
+    return MarketSync.IsSafeString(link) and TooltipItemID(link) == itemID
+end
+
+-- Rebuilds the visible item tooltip after the details modifier changes, so the
+-- MarketSync lines switch between the short and detailed form.
+-- Order: the tooltip's own data refresh (modern clients), then the owner's OnEnter
+-- (rebuilds it exactly as the bag or addon button built it, other addons' lines
+-- included), then a slot or link reload. A refresh that would leave the tooltip
+-- empty or showing another item falls back to the item link, so the tooltip never
+-- disappears.
 function MarketSync.RefreshActiveTooltip()
     for _, tip in ipairs({ GameTooltip, ItemRefTooltip }) do
         if tip and tip.IsShown and tip:IsShown() and tip.GetItem then
             local _, link = tip:GetItem()
-            if MarketSync.IsSafeString(link) then
+            local itemID = MarketSync.IsSafeString(link) and TooltipItemID(link)
+            if itemID then
                 tip.MarketSyncOwnershipItem = nil
                 tip.MarketSyncOwnershipShift = nil
                 tip.MarketSyncProcessingItem = nil
                 tip.MarketSyncProcessingShift = nil
                 local owner = tip.GetOwner and tip:GetOwner()
-                local ownerName = owner and owner.GetName and owner:GetName()
-                local isCharacterSlot = (type(ownerName) == "string" and ownerName:find("Character.*Slot"))
-                if owner and owner.GetBagID and owner.GetID and tip.SetBagItem then
-                    local bag = owner:GetBagID()
+                local refreshed = false
+
+                if tip.RefreshData and tip.supportsDataRefresh then
+                    refreshed = pcall(tip.RefreshData, tip) and TooltipStillShows(tip, itemID)
+                end
+
+                if not refreshed and tip == GameTooltip and owner and owner.GetScript
+                    and owner.IsMouseOver and owner:IsMouseOver() then
+                    local onEnter = owner:GetScript("OnEnter")
+                    if onEnter then
+                        refreshed = pcall(onEnter, owner) and TooltipStillShows(tip, itemID)
+                    end
+                end
+
+                if not refreshed and owner and owner.GetBagID and owner.GetID and tip.SetBagItem then
+                    local okBag, bag = pcall(owner.GetBagID, owner)
                     local slot = owner:GetID()
-                    if bag and slot then
-                        pcall(tip.SetBagItem, tip, bag, slot)
-                    elseif tip.SetHyperlink then
-                        pcall(tip.SetHyperlink, tip, link)
+                    -- Only reload from the slot when it really holds this item; bag addons
+                    -- that show other characters' items have no live slot behind the button.
+                    if okBag and bag and slot and ContainerSlotItemID(bag, slot) == itemID then
+                        refreshed = pcall(tip.SetBagItem, tip, bag, slot) and TooltipStillShows(tip, itemID)
                     end
-                elseif owner and tip.SetInventoryItem and (owner.slot or owner.slotID or isCharacterSlot) then
-                    local slot = tonumber(owner.slot or owner.slotID or (owner.GetID and owner:GetID()))
-                    if slot and slot >= 1 and slot <= 19 then
-                        pcall(tip.SetInventoryItem, tip, "player", slot)
-                    elseif tip.SetHyperlink then
-                        pcall(tip.SetHyperlink, tip, link)
+                end
+
+                if not refreshed and owner and tip.SetInventoryItem then
+                    local ownerName = owner.GetName and owner:GetName()
+                    local isCharacterSlot = type(ownerName) == "string" and ownerName:find("Character.*Slot")
+                    if owner.slot or owner.slotID or isCharacterSlot then
+                        local slot = tonumber(owner.slot or owner.slotID or (owner.GetID and owner:GetID()))
+                        if slot and slot >= 1 and slot <= 19 then
+                            refreshed = pcall(tip.SetInventoryItem, tip, "player", slot) and TooltipStillShows(tip, itemID)
+                        end
                     end
-                elseif tip.RefreshData and tip.supportsDataRefresh then
-                    local ok = pcall(tip.RefreshData, tip)
-                    if not ok and tip.SetHyperlink then
-                        pcall(tip.SetHyperlink, tip, link)
+                end
+
+                if not refreshed and tip.SetHyperlink then
+                    if not tip:IsShown() and owner and tip.SetOwner then
+                        pcall(tip.SetOwner, tip, owner, "ANCHOR_RIGHT")
                     end
-                elseif tip.SetHyperlink then
                     pcall(tip.SetHyperlink, tip, link)
+                    if tip.Show then tip:Show() end
                 end
             end
         end
@@ -2008,7 +2142,340 @@ function MarketSync.FormatAuctionAge(ageDays, exactTime, isDetailed)
     end
 end
 
-function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
+-- Data Pack regional & market context helpers. Pack rows stay in MarketSyncData
+-- and LoadOnDemand sub-packs; only the active flavor/region/realm/faction pack
+-- is loaded at login and read for prices, so unrelated packs are never loaded.
+local REGION_ID_MAP = {
+    [1] = "us",
+    [2] = "kr",
+    [3] = "eu",
+    [4] = "tw",
+    [5] = "cn",
+}
+
+local function AppendUnique(list, seen, value)
+    if type(value) ~= "string" or value == "" or seen[value] then return end
+    seen[value] = true
+    list[#list + 1] = value
+end
+
+function MarketSync.GetClientRegion()
+    if type(GetCurrentRegionName) == "function" then
+        local ok, name = pcall(GetCurrentRegionName)
+        if ok and MarketSync.IsSafeString(name) and name ~= "" then
+            return string.lower(name)
+        end
+    end
+    if type(GetCurrentRegion) == "function" then
+        local ok, id = pcall(GetCurrentRegion)
+        local num = ok and tonumber(id)
+        if num and REGION_ID_MAP[num] then
+            return REGION_ID_MAP[num]
+        end
+    end
+    return nil
+end
+
+function MarketSync.IsDataPackFlavorCompatible(packFlavor)
+    if packFlavor == nil or packFlavor == "" then return true end
+    local current = MarketSync.GetClientFlavor and MarketSync.GetClientFlavor()
+    if not current or current == "" then return true end
+    if type(packFlavor) == "table" then
+        for _, entry in pairs(packFlavor) do
+            if string.lower(tostring(entry)) == string.lower(current) then
+                return true
+            end
+        end
+        return false
+    end
+    return string.lower(tostring(packFlavor)) == string.lower(current)
+end
+
+function MarketSync.IsDataPackRegionCompatible(packRegion)
+    if packRegion == nil or packRegion == "" then return true end
+    local current = MarketSync.GetClientRegion and MarketSync.GetClientRegion()
+    if not current or current == "" then return true end
+    if type(packRegion) == "table" then
+        for _, entry in pairs(packRegion) do
+            if string.lower(tostring(entry)) == current then
+                return true
+            end
+        end
+        return false
+    end
+    return string.lower(tostring(packRegion)) == current
+end
+
+function MarketSync.GetDataPackMarketContext(opts)
+    opts = type(opts) == "table" and opts or {}
+    local flavor = MarketSync.GetClientFlavor and MarketSync.GetClientFlavor() or "classicEra"
+    local region = MarketSync.GetClientRegion and MarketSync.GetClientRegion()
+    local homeFaction = opts.faction or (MarketSync.GetPlayerMarketFaction and MarketSync.GetPlayerMarketFaction()) or "Unknown"
+    local targetFaction = (opts.neutral and "Neutral") or homeFaction
+    local partitionKeys, seenKeys = {}, {}
+    local candidateAddons, seenAddons = {}, {}
+    local realm, realmSlug, ruleset, marketLabel
+
+    if flavor == "forever" then
+        ruleset = opts.ruleset or (MarketSync.GetForeverAuctionRuleset and MarketSync.GetForeverAuctionRuleset())
+        realm = ruleset
+        realmSlug = ruleset and string.lower(tostring(ruleset)) or nil
+        if ruleset and ruleset ~= "" and (targetFaction == "Alliance" or targetFaction == "Horde" or targetFaction == "Neutral") then
+            AppendUnique(partitionKeys, seenKeys, ruleset .. "@" .. targetFaction)
+            local addonFaction = (homeFaction == "Alliance" or homeFaction == "Horde") and homeFaction or targetFaction
+            if region then
+                AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Forever_" .. region .. "_" .. ruleset .. "_" .. addonFaction)
+                if opts.neutral and addonFaction ~= "Neutral" then
+                    AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Forever_" .. region .. "_" .. ruleset .. "_Neutral")
+                end
+            end
+            AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Forever_" .. ruleset .. "_" .. addonFaction)
+            if opts.neutral and addonFaction ~= "Neutral" then
+                AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Forever_" .. ruleset .. "_Neutral")
+            end
+            marketLabel = ruleset .. " / " .. targetFaction
+        end
+    elseif flavor == "retail" then
+        realm = "region"
+        realmSlug = "region"
+        targetFaction = "Commodities"
+        homeFaction = "Commodities"
+        if region then
+            AppendUnique(partitionKeys, seenKeys, region .. "@Commodities")
+            AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Retail_" .. region)
+            AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Retail_" .. string.upper(region))
+        end
+        AppendUnique(partitionKeys, seenKeys, "region@Commodities")
+        AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Retail")
+        marketLabel = (region and (string.upper(region) .. " ") or "") .. "region / Commodities"
+    elseif flavor == "classic" then
+        realm = opts.realm or GetAuctionRealmName()
+        realmSlug = realm and string.lower(tostring(realm)):gsub("[%s%-_']+", "") or nil
+        targetFaction = "CrossFaction"
+        homeFaction = "CrossFaction"
+        if realmSlug and realmSlug ~= "" then
+            if region then
+                AppendUnique(partitionKeys, seenKeys, region .. "_" .. realmSlug .. "@CrossFaction")
+                AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Classic_" .. region .. "_" .. realmSlug)
+            end
+            AppendUnique(partitionKeys, seenKeys, tostring(realm) .. "@CrossFaction")
+            AppendUnique(partitionKeys, seenKeys, realmSlug .. "@CrossFaction")
+            AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Classic_" .. realmSlug)
+            marketLabel = tostring(realm) .. " / CrossFaction"
+        end
+        if region then
+            AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Classic_" .. region)
+            AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Classic_" .. string.upper(region))
+        end
+        AppendUnique(candidateAddons, seenAddons, "MarketSyncData_Classic")
+    else
+        realm = opts.realm or GetAuctionRealmName()
+        realmSlug = realm and string.lower(tostring(realm)):gsub("[%s%-_']+", "") or nil
+        local prefix = (flavor == "anniversary") and "MarketSyncData_Anniversary_" or "MarketSyncData_ClassicEra_"
+        if realmSlug and realmSlug ~= "" and (targetFaction == "Alliance" or targetFaction == "Horde" or targetFaction == "Neutral") then
+            local addonFaction = (homeFaction == "Alliance" or homeFaction == "Horde") and homeFaction or targetFaction
+            if region then
+                AppendUnique(partitionKeys, seenKeys, region .. "_" .. realmSlug .. "@" .. targetFaction)
+                AppendUnique(candidateAddons, seenAddons, prefix .. region .. "_" .. realmSlug .. "_" .. addonFaction)
+                AppendUnique(candidateAddons, seenAddons, prefix .. region .. "_" .. realmSlug)
+            end
+            AppendUnique(partitionKeys, seenKeys, tostring(realm) .. "@" .. targetFaction)
+            AppendUnique(partitionKeys, seenKeys, realmSlug .. "@" .. targetFaction)
+            AppendUnique(candidateAddons, seenAddons, prefix .. realmSlug .. "_" .. addonFaction)
+            AppendUnique(candidateAddons, seenAddons, prefix .. realmSlug)
+            if region then
+                AppendUnique(candidateAddons, seenAddons, prefix .. region)
+            end
+            marketLabel = tostring(realm) .. " / " .. targetFaction
+        end
+    end
+
+    return {
+        flavor = flavor,
+        region = region,
+        realm = realm,
+        realmSlug = realmSlug,
+        ruleset = ruleset,
+        faction = targetFaction,
+        homeFaction = homeFaction,
+        partitionKeys = partitionKeys,
+        candidateAddons = candidateAddons,
+        marketLabel = marketLabel,
+    }
+end
+
+local function IsAddonEnabledAndLoadable(name)
+    if type(name) ~= "string" or name == "" then return false, false end
+    local api = C_AddOns or {}
+    local isLoadedFn = api.IsAddOnLoaded or IsAddOnLoaded
+    if type(isLoadedFn) == "function" then
+        local ok, loaded = pcall(isLoadedFn, name)
+        if ok and loaded then return true, true end
+    end
+    local getInfoFn = api.GetAddOnInfo or GetAddOnInfo
+    if type(getInfoFn) == "function" then
+        local ok, infoName, _, _, loadable, reason = pcall(getInfoFn, name)
+        if not ok or not infoName then
+            return false, false
+        end
+        if loadable == false and reason ~= "DEMAND_LOADED" and reason ~= nil then
+            return false, false
+        end
+    end
+    local getEnableFn = api.GetAddOnEnableState or GetAddOnEnableState
+    if type(getEnableFn) == "function" then
+        local player = UnitName and UnitName("player") or nil
+        local ok, state = pcall(getEnableFn, name, player)
+        if ok and tonumber(state) == 0 then
+            return false, false
+        end
+    end
+    return true, false
+end
+
+local function LoadMatchingPackAddon(name)
+    local canLoad, alreadyLoaded = IsAddonEnabledAndLoadable(name)
+    if alreadyLoaded then return true end
+    if not canLoad then return false end
+    local api = C_AddOns or {}
+    local loadFn = api.LoadAddOn or LoadAddOn
+    if type(loadFn) ~= "function" then return false end
+    local ok, loaded = pcall(loadFn, name)
+    if not ok then return false end
+    local isLoadedFn = api.IsAddOnLoaded or IsAddOnLoaded
+    if type(isLoadedFn) == "function" then
+        local okChk, nowLoaded = pcall(isLoadedFn, name)
+        if okChk then return nowLoaded == true end
+    end
+    return loaded ~= false
+end
+
+function MarketSync.EnsureCurrentDataPack(opts)
+    local ctx = MarketSync.GetDataPackMarketContext(opts)
+    local packCore = _G.MarketSyncData
+
+    if type(packCore) == "table" then
+        if not MarketSync.IsDataPackFlavorCompatible(packCore.flavor or packCore.Flavor) then
+            return nil, nil, nil, "flavor_mismatch"
+        end
+        if not MarketSync.IsDataPackRegionCompatible(packCore.region or packCore.Region) then
+            return nil, nil, nil, "region_mismatch"
+        end
+    end
+
+    local loadedAddon = nil
+    local candidates, seenCandidates = {}, {}
+    local index = type(packCore) == "table" and (packCore.Index or packCore.index)
+    if type(index) == "table" then
+        for _, pkey in ipairs(ctx.partitionKeys) do
+            local entry = index[pkey]
+            if type(entry) == "string" then
+                AppendUnique(candidates, seenCandidates, entry)
+            elseif type(entry) == "table" and MarketSync.IsDataPackRegionCompatible(entry.region) then
+                AppendUnique(candidates, seenCandidates, entry.addon or entry.name)
+            end
+        end
+    end
+    for _, addonName in ipairs(ctx.candidateAddons) do
+        AppendUnique(candidates, seenCandidates, addonName)
+    end
+
+    if type(packCore) == "table" then
+        if type(packCore.EnsurePack) == "function" then
+            pcall(packCore.EnsurePack, ctx)
+        elseif ctx.flavor == "forever" and type(packCore.EnsureForeverPack) == "function"
+            and ctx.ruleset and (ctx.homeFaction == "Alliance" or ctx.homeFaction == "Horde") then
+            pcall(packCore.EnsureForeverPack, ctx.ruleset, ctx.homeFaction)
+        end
+    end
+
+    for _, addonName in ipairs(candidates) do
+        if LoadMatchingPackAddon(addonName) then
+            loadedAddon = addonName
+            packCore = _G.MarketSyncData
+            break
+        end
+    end
+
+    if type(packCore) == "table" then
+        if not MarketSync.IsDataPackFlavorCompatible(packCore.flavor or packCore.Flavor) then
+            return nil, nil, loadedAddon, "flavor_mismatch"
+        end
+        if not MarketSync.IsDataPackRegionCompatible(packCore.region or packCore.Region) then
+            return nil, nil, loadedAddon, "region_mismatch"
+        end
+    end
+
+    if type(packCore) == "table" and type(packCore.GetCurrentMarketPrices) == "function"
+        and not (opts and opts.neutral) then
+        local ok, prices, label = pcall(packCore.GetCurrentMarketPrices)
+        if ok and type(prices) == "table" then
+            return prices, (label or ctx.marketLabel), loadedAddon
+        end
+    end
+
+    local packDB = _G.MarketSyncDataDB
+    if type(packDB) == "table" then
+        local partMeta = type(packCore) == "table" and (packCore.PartitionRegions or packCore.partitionRegions)
+        for _, pkey in ipairs(ctx.partitionKeys) do
+            local part = packDB[pkey]
+            if type(part) == "table" then
+                local partRegion = type(partMeta) == "table" and partMeta[pkey] or nil
+                if MarketSync.IsDataPackRegionCompatible(partRegion) then
+                    return part, (ctx.marketLabel or pkey), loadedAddon
+                end
+            end
+        end
+    end
+
+    if not (opts and opts.neutral) and type(packCore) == "table" then
+        local directPrices = packCore.prices or packCore.Prices
+        if type(directPrices) == "table" then
+            return directPrices, ctx.marketLabel, loadedAddon
+        end
+    end
+
+    return nil, ctx.marketLabel, loadedAddon, "not_available"
+end
+
+-- Data Pack price for one item in this character's market, read straight from
+-- the MarketSyncData add-on. Pack rows are never copied into MarketSync's own
+-- data, so guild sync and uploads can't pass them on as scans. The first
+-- call loads this character's matching market/region pack; later calls reuse it.
+local dataPackMarketKey, dataPackPrices, dataPackNextTry = nil, nil, 0
+function MarketSync.ResetDataPackCache()
+    dataPackMarketKey, dataPackPrices, dataPackNextTry = nil, nil, 0
+end
+
+function MarketSync.GetDataPackPrice(key)
+    local ctx = MarketSync.GetDataPackMarketContext()
+    local marketKey = table.concat({
+        tostring(ctx.flavor or ""),
+        tostring(ctx.region or ""),
+        tostring(ctx.partitionKeys[1] or ctx.marketLabel or ""),
+    }, ":")
+    if dataPackMarketKey ~= marketKey then
+        dataPackMarketKey = marketKey
+        dataPackPrices = nil
+        dataPackNextTry = 0
+    end
+    if not dataPackPrices then
+        -- Before login the market may be unknown; try again at most once a minute.
+        local now = (GetTime and GetTime()) or time()
+        if now < dataPackNextTry then return nil end
+        dataPackNextTry = now + 60
+        local prices = MarketSync.EnsureCurrentDataPack()
+        if type(prices) == "table" then dataPackPrices = prices end
+    end
+    local rec = dataPackPrices and key ~= nil and dataPackPrices[tostring(key)]
+    local price = type(rec) == "table" and tonumber(rec.m)
+    if not price or price <= 0 then return nil end
+    return price, tonumber(rec.t)
+end
+
+-- opts.allowDataPack: fall back to the Data Pack when there is no Personal,
+-- Guild or Neutral price (item tooltips only).
+function MarketSync.GetItemPriceAndScanInfo(keyOrLink, opts)
     if not keyOrLink then return nil end
     local itemID, suffix = MarketSync.ParseItemIDFromDBKey(tostring(keyOrLink))
     if not itemID then
@@ -2083,6 +2550,17 @@ function MarketSync.GetItemPriceAndScanInfo(keyOrLink)
     local nEntry = nData and nData[priceKey]
     if nEntry and nEntry.m and nEntry.m > 0 then
         neutralPrice = nEntry.m
+    end
+
+    -- 4. Data Pack, only when nothing was scanned or synced for this item.
+    if not price and not neutralPrice and opts and opts.allowDataPack then
+        local packPrice, packTime = MarketSync.GetDataPackPrice(priceKey)
+        if packPrice then
+            price = packPrice
+            scanTime = packTime
+            ageDays = packTime and math.max(0, time() - packTime) / 86400 or nil
+            source = "Data Pack"
+        end
     end
 
     if not price and not neutralPrice then
@@ -2177,16 +2655,95 @@ end
 -- ================================================================
 -- NOTIFICATION SOUNDS DATA
 -- ================================================================
-MarketSync.StandardSounds = {
-    { name = "Raid Warning", id = 8959 },
-    { name = "Auction Open", id = 3171 },
-    { name = "Level Up",     id = 124 },
-    { name = "Quest Done",   id = 125 },
-    { name = "Ready Check",  id = 8960 },
-    { name = "Inbox Open",   id = 1404 },
-    { name = "Item Sold",    id = 1195 },
-    { name = "Hush",         id = 0 }, -- Mute
+-- Every entry is a named SOUNDKIT that ships in the Classic Era, Anniversary
+-- (TBC) and Wrath-era clients. The id is resolved through SOUNDKIT at load so
+-- a client that renumbers one still plays the right sound; the number is the
+-- fallback shared by all three.
+local SOUND_CHOICES = {
+    { name = "Raid Warning",    key = "RAID_WARNING",           id = 8959 },
+    { name = "Ready Check",     key = "READY_CHECK",            id = 8960 },
+    { name = "Auction Open",    key = "AUCTION_WINDOW_OPEN",    id = 5274 },
+    { name = "Quest Complete",  key = "IG_QUEST_LIST_COMPLETE", id = 878 },
+    { name = "Whisper",         key = "TELL_MESSAGE",           id = 3081 },
+    { name = "Coins",           key = "LOOT_WINDOW_COIN_SOUND", id = 120 },
+    { name = "Map Ping",        key = "MAP_PING",               id = 3175 },
+    { name = "Group Invite",    key = "IG_PLAYER_INVITE",       id = 880 },
+    { name = "Alarm Clock",     key = "ALARM_CLOCK_WARNING_3",  id = 12889 },
+    { name = "Hush",            id = 0 }, -- Mute
 }
+MarketSync.StandardSounds = {}
+for _, choice in ipairs(SOUND_CHOICES) do
+    local id = choice.id
+    if choice.key and type(SOUNDKIT) == "table" and tonumber(SOUNDKIT[choice.key]) then
+        id = tonumber(SOUNDKIT[choice.key])
+    end
+    MarketSync.StandardSounds[#MarketSync.StandardSounds + 1] = { name = choice.name, id = id, key = choice.key }
+end
+
+-- Earlier releases offered ids that are not sound kits on these clients
+-- (they played nothing). Saved choices move to the closest working sound.
+local RETIRED_SOUND_IDS = {
+    [3171] = 5274, -- "Auction Open"
+    [124] = 878,   -- "Level Up"
+    [125] = 878,   -- "Quest Done"
+    [1404] = 880,  -- "Inbox Open"
+    [1195] = 120,  -- "Item Sold"
+}
+function MarketSync.ResolveNotificationSoundID(id)
+    local n = tonumber(id)
+    if not n then return nil end
+    return RETIRED_SOUND_IDS[n] or n
+end
+
+function MarketSync.GetNotificationSoundName(id)
+    local n = MarketSync.ResolveNotificationSoundID(id)
+    for _, s in ipairs(MarketSync.StandardSounds) do
+        if s.id == n then return s.name end
+    end
+    return n and ("Sound " .. tostring(n)) or "Default"
+end
+
+function MarketSync.MigrateNotificationSounds()
+    if not MarketSyncDB then return end
+    if MarketSyncDB.NotificationSoundID then
+        MarketSyncDB.NotificationSoundID = MarketSync.ResolveNotificationSoundID(MarketSyncDB.NotificationSoundID)
+    end
+    for requestID, soundID in pairs(MarketSyncDB.PerNotificationSounds or {}) do
+        MarketSyncDB.PerNotificationSounds[requestID] = MarketSync.ResolveNotificationSoundID(soundID)
+    end
+end
+
+-- ================================================================
+-- UI HELPER: CreateDropdownButton
+-- The one dropdown MarketSync uses everywhere: the game's own panel button
+-- and its own menu list, the same pair as the breakout's list picker. Both
+-- are drawn by the client, so they follow each game version's art and the
+-- active theme without any custom skin.
+--   initFunc(menu, level) adds rows with UIDropDownMenu_AddButton.
+--   button:SetLabel(text) shows the choice followed by the gold "v".
+-- ================================================================
+--   menuName names the hidden menu frame (older clients look menus up by name).
+function MarketSync.CreateDropdownButton(parent, menuName, width, height, initFunc)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width or 120, height or 22)
+    local menu = CreateFrame("Frame", menuName, parent, "UIDropDownMenuTemplate")
+    menu:Hide()
+    button._menu = menu
+    button._initFunc = initFunc
+    if initFunc then UIDropDownMenu_Initialize(menu, initFunc) end
+    function button:SetLabel(text)
+        self:SetText(tostring(text or "") .. "  |cFFFFD100v|r")
+    end
+    function button:SetMenuInit(fn)
+        self._initFunc = fn
+        UIDropDownMenu_Initialize(menu, fn)
+    end
+    button:SetScript("OnClick", function(self)
+        if GameTooltip then GameTooltip:Hide() end
+        ToggleDropDownMenu(1, nil, menu, self, 0, 0)
+    end)
+    return button
+end
 
 -- ================================================================
 -- UI HELPER: CreateModernDialog

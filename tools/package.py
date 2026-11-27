@@ -53,7 +53,7 @@ def build(output, interface=None, game_type=None, flavor=None, *, ledger=False):
 
     addon_dir = ROOT / ADDON
     archive_addon = "MarketSyncLedger" if ledger else ADDON
-    ledger_dir = addon_dir / "Ledger"
+    ledger_dir = ROOT / "MarketSyncLedger"
     files = {}
     if ledger:
         for path in ledger_dir.iterdir():

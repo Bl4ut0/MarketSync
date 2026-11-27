@@ -190,11 +190,11 @@ function testBagObservationAndRightClickResolution() {
   const sim = createAddonSim({ flavor: 'forever', interface: 16001 });
   sim.loadLuaFile(path.join(ADDON_DIR, 'Config.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Theme.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'CraftLedger.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'PurchaseList.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'ItemLedger.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'CraftLedger.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'PurchaseList.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'ItemLedger.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'InventoryTracking.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'UI_ItemLedger.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'UI_ItemLedger.lua'));
 
   sim.run(`
     MarketSync.InitializeDB()
@@ -250,11 +250,11 @@ function testTaintedSecretStringImmunity() {
   sim.loadLuaFile(path.join(ADDON_DIR, 'Config.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Theme.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'ObservationAPI.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'CraftLedger.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'PurchaseList.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'ItemLedger.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'CraftLedger.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'PurchaseList.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'ItemLedger.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'InventoryTracking.lua'));
-  sim.loadLuaFile(path.join(ADDON_DIR, 'Ledger', 'TransactionTracking.lua'));
+  sim.loadLuaFile(path.join(ADDON_DIR, '..', 'MarketSyncLedger', 'TransactionTracking.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Sync.lua'));
   sim.loadLuaFile(path.join(ADDON_DIR, 'Chat.lua'));
 

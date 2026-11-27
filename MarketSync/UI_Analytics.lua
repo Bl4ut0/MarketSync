@@ -232,7 +232,7 @@ local function CreateGraph(parent)
         lbl:Show()
     end
 
-    function graph:Plot(history, pointLimit)
+    function graph:Plot(history, pointLimit, emptyMessage)
         self:Clear()
         local curW = self:GetWidth()
         local curH = self:GetHeight()
@@ -240,7 +240,7 @@ local function CreateGraph(parent)
         if curH and curH > 60 then self.plotHeight = curH end
 
         if not history or #history == 0 then
-            self:AddLabel(self.plotWidth / 2, self.plotHeight / 2, "|cFF888888Insufficient historical scan data|r", "CENTER")
+            self:AddLabel(self.plotWidth / 2, self.plotHeight / 2, emptyMessage or "|cFF888888Insufficient historical scan data|r", "CENTER")
             return
         end
 
@@ -410,7 +410,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
         end
         rightInset:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", RIGHT_X, BOTTOM_Y)
         if self.graph and self.currentHistory then
-            self.graph:Plot(self.currentHistory, self.graphPointLimit)
+            self:ApplyFilter()
         end
     end
     listsToggle:SetScript("OnClick", function() panel:SetSidebarCollapsed(not panel.sidebarCollapsed) end)
@@ -939,7 +939,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     local searchAHBtn = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
     searchAHBtn:SetSize(100, 22)
-    searchAHBtn:SetPoint("RIGHT", -2, 0)
+    if isEmbedded then
+        -- In the Auction House the history-source buttons sit just below the
+        -- banner's top-right corner, so these ride at the top of the banner.
+        searchAHBtn:SetPoint("TOPRIGHT", banner, "TOPRIGHT", -2, 5)
+    else
+        searchAHBtn:SetPoint("RIGHT", -2, 0)
+    end
     searchAHBtn:SetText("Search in AH")
     searchAHBtn:SetScript("OnClick", function()
         if panel.currentItem and MarketSync.SearchInAuctionHouse then
@@ -1052,7 +1058,13 @@ function MarketSync.CreateAnalyticsPanel(parent)
         local btn = CreateFrame("Button", nil, rightInset, "UIPanelButtonTemplate")
         btn:SetSize(86, 20)
         btn:SetText(choice.label)
-        btn:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", choice.x, isEmbedded and -26 or -28)
+        if isEmbedded then
+            -- Just under Favorite / Search in AH (banner top-right), above the graph (-58).
+            btn:SetPoint("TOPRIGHT", rightInset, "TOPRIGHT", choice.x, -28)
+        else
+            -- Sit in the strip above the item banner so they don't cover Favorite / Search in AH.
+            btn:SetPoint("BOTTOMRIGHT", rightInset, "TOPRIGHT", choice.x, 4)
+        end
         btn:SetScript("OnClick", function() SetHistorySource(choice.key) end)
         sourceButtons[choice.key] = btn
     end
@@ -1072,59 +1084,247 @@ function MarketSync.CreateAnalyticsPanel(parent)
 
     local graphLegend = graphCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightExtraSmall")
     graphLegend:SetPoint("TOPLEFT", 14, -25)
-    graphLegend:SetText("|cFF33FF33— Daily Price|r    |cFF33B2FF● Granular 30-Min Snapshot|r")
+    graphLegend:SetText("|cFF33FF33- Daily Price|r    |TInterface\\Buttons\\WHITE8X8:7:7:0:0:8:8:0:8:0:8:51:178:255|t |cFF33B2FFGranular 30-Min Snapshot|r")
 
-    local zoomModes = {
-        { label = "12", limit = 12 },
-        { label = "24", limit = 24 },
-        { label = "48", limit = 48 },
-        { label = "96", limit = 96 },
+    -- Filter bar: choose which observations the chart shows.
+    --   Events: newest N observations (false = all)
+    --   Date:   observations between two UTC dates
+    --   Week:   one Monday-to-Sunday week at a time
+    --   Time:   one UTC half-hour on every day
+    local EVENT_LIMITS = { 12, 24, 48, 96, false }
+    local filterModes = {
+        { key = "events", label = "Events", tip = "Show the newest observations" },
+        { key = "date", label = "Date", tip = "Show observations between two dates (UTC)" },
+        { key = "week", label = "Week", tip = "Show one Monday-to-Sunday week at a time" },
+        { key = "time", label = "Time", tip = "Show one UTC time of day on every day" },
     }
-    local zoomButtons = {}
-    panel.graphPointLimit = 48
-    panel.zoomButtons = zoomButtons
+    local modeButtons, eventButtons, filterGroups = {}, {}, {}
+    local weekLabel, timeBox, fromBox, toBox
+    panel.filter = { mode = "events", count = 48 }
+    panel.currentView = {}
+
+    local function TodayUnixDay()
+        return MarketSync.UnixDayOfScanDay(MarketSync.GetCurrentScanDay and MarketSync.GetCurrentScanDay() or 0) or 0
+    end
+    -- Noon UTC keeps the calendar date correct for every local time zone.
+    local function UnixDayText(unixDay)
+        return date("%Y-%m-%d", unixDay * 86400 + 43200)
+    end
+
+    function panel:ApplyFilter()
+        local history = self.currentHistory or {}
+        local view = MarketSync.FilterAnalyticsHistory(history, self.filter)
+        self.currentView = view
+        local message = (#history == 0) and "Insufficient historical scan data" or "No observations match this filter"
+        self.graph:Plot(view, nil, "|cFF888888" .. message .. "|r")
+        self:UpdateVisibleRange()
+        self:RefreshFilterControls()
+    end
+
     function panel:SetGraphZoom(limit)
-        self.graphPointLimit = limit
-        for _, button in ipairs(zoomButtons) do
-            button:SetText(button.zoomLimit == limit and ("|cffffd700" .. button.zoomLabel .. "|r") or button.zoomLabel)
+        self.filter.mode = "events"
+        self.filter.count = limit or nil
+        self:ApplyFilter()
+    end
+
+    function panel:SetFilterMode(key)
+        local f = self.filter
+        f.mode = key
+        if key == "week" and not f.weekIndex then
+            local weeks = MarketSync.ListAnalyticsWeeks(self.currentHistory or {})
+            f.weekIndex = weeks[#weeks]
+        elseif key == "time" and not f.bucketOffset then
+            f.bucketOffset = (MarketSync.GetCurrentBucket and MarketSync.GetCurrentBucket() or 0) % 48
         end
-        if self.currentHistory then self.graph:Plot(self.currentHistory, limit) end
-        if self.UpdateVisibleRange then self:UpdateVisibleRange() end
+        self:ApplyFilter()
     end
-    for i, mode in ipairs(zoomModes) do
-        local button = CreateFrame("Button", nil, graphCard, "UIPanelButtonTemplate")
-        button:SetSize(35, 20)
-        button:SetPoint("TOPRIGHT", graphCard, "TOPRIGHT", -14 - ((#zoomModes - i) * 37), -4)
-        button.zoomLabel = mode.label
-        button.zoomLimit = mode.limit
-        button:SetText(mode.label)
-        button:SetScript("OnClick", function() panel:SetGraphZoom(mode.limit) end)
-        button:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Chart zoom: up to " .. mode.limit .. " observations", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        button:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        zoomButtons[i] = button
+
+    function panel:SetDateRange(fromDay, toDay)
+        self.filter.mode = "date"
+        self.filter.fromDay = fromDay
+        self.filter.toDay = toDay
+        self:ApplyFilter()
     end
+
+    function panel:StepWeek(delta)
+        local weeks = MarketSync.ListAnalyticsWeeks(self.currentHistory or {})
+        if #weeks == 0 then return end
+        local pos = #weeks
+        for i, w in ipairs(weeks) do
+            if w == self.filter.weekIndex then pos = i end
+        end
+        self.filter.weekIndex = weeks[math.max(1, math.min(#weeks, pos + delta))]
+        self:ApplyFilter()
+    end
+
+    function panel:StepTime(delta)
+        self.filter.bucketOffset = ((self.filter.bucketOffset or 0) + delta) % 48
+        self:ApplyFilter()
+    end
+
+    function panel:RefreshFilterControls()
+        local f = self.filter
+        for _, button in ipairs(modeButtons) do
+            local active = button.filterKey == f.mode
+            button:SetText(active and ("|cffffd700" .. button.filterLabel .. "|r") or button.filterLabel)
+        end
+        for key, group in pairs(filterGroups) do
+            if key == f.mode then group:Show() else group:Hide() end
+        end
+        for _, button in ipairs(eventButtons) do
+            local active = f.mode == "events" and button.limit == (f.count or false)
+            button:SetText(active and ("|cffffd700" .. button.zoomLabel .. "|r") or button.zoomLabel)
+        end
+        if weekLabel then
+            weekLabel:SetText(f.weekIndex and ("Week of " .. UnixDayText(MarketSync.AnalyticsWeekStartDay(f.weekIndex))) or "No weeks with data")
+        end
+        if timeBox then
+            local bucket = f.bucketOffset or 0
+            timeBox:SetText(string.format("%d:%s", math.floor(bucket / 2), (bucket % 2 == 0) and "00" or "30"))
+        end
+        if fromBox then fromBox:SetText(f.fromDay and UnixDayText(f.fromDay) or "") end
+        if toBox then toBox:SetText(f.toDay and UnixDayText(f.toDay) or "") end
+    end
+    local function CreateFilterButton(parent, x, y, width, text, onClick, tip)
+        local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+        b:SetSize(width, 22)
+        b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+        b:SetText(text)
+        b:SetScript("OnClick", onClick)
+        if tip then
+            b:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                GameTooltip:SetText(tip, 1, 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+        return b
+    end
+
+    local function CreateFilterBox(parent, x, width)
+        local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        box:SetSize(width, 20)
+        box:SetPoint("TOPLEFT", parent, "TOPLEFT", x, 0)
+        box:SetAutoFocus(false)
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus(); panel:RefreshFilterControls() end)
+        return box
+    end
+
+    -- Mode buttons sit on a row under the legend. The active mode's controls sit
+    -- above them, right-aligned in the header space beside the chart title.
+    local FILTER_ROW_Y = -44
+    local GROUP_ROW_Y = -10
+    for i, mode in ipairs(filterModes) do
+        local b = CreateFilterButton(graphCard, 14 + (i - 1) * 62, FILTER_ROW_Y, 58, mode.label,
+            function() panel:SetFilterMode(mode.key) end, mode.tip)
+        b.filterKey = mode.key
+        b.filterLabel = mode.label
+        modeButtons[i] = b
+    end
+
+    local function CreateFilterGroup(key, width)
+        local g = CreateFrame("Frame", nil, graphCard)
+        g:SetPoint("TOPRIGHT", graphCard, "TOPRIGHT", -12, GROUP_ROW_Y)
+        g:SetSize(width, 22)
+        g:Hide()
+        filterGroups[key] = g
+        return g
+    end
+
+    -- Events
+    local eventGroup = CreateFilterGroup("events", #EVENT_LIMITS * 46 - 4)
+    for i, limit in ipairs(EVENT_LIMITS) do
+        local label = limit and tostring(limit) or "All"
+        local b = CreateFilterButton(eventGroup, (i - 1) * 46, 0, 42, label,
+            function() panel:SetGraphZoom(limit) end,
+            limit and ("Show the newest " .. limit .. " observations") or "Show every observation")
+        b.limit = limit or false
+        b.zoomLabel = label
+        eventButtons[i] = b
+    end
+
+    -- Date
+    local dateGroup = CreateFilterGroup("date", 324)
+    CreateFilterButton(dateGroup, 0, 0, 34, "7d", function()
+        local t = TodayUnixDay()
+        panel:SetDateRange(t - 6, t)
+    end, "Last 7 days")
+    CreateFilterButton(dateGroup, 38, 0, 34, "30d", function()
+        local t = TodayUnixDay()
+        panel:SetDateRange(t - 29, t)
+    end, "Last 30 days")
+    local fromLabel = dateGroup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fromLabel:SetPoint("TOPLEFT", dateGroup, "TOPLEFT", 78, -4)
+    fromLabel:SetText("From")
+    fromBox = CreateFilterBox(dateGroup, 108, 76)
+    local toLabel = dateGroup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    toLabel:SetPoint("TOPLEFT", dateGroup, "TOPLEFT", 190, -4)
+    toLabel:SetText("To")
+    toBox = CreateFilterBox(dateGroup, 210, 76)
+    -- A blank box means open-ended; an unreadable date is discarded and the old value comes back.
+    local function ReadDateBox(box)
+        local text = box:GetText()
+        if text == "" then return nil, true end
+        local day = MarketSync.ParseAnalyticsDate(text)
+        return day, day ~= nil
+    end
+    fromBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        local day, valid = ReadDateBox(self)
+        if not valid then panel:RefreshFilterControls(); return end
+        panel:SetDateRange(day, panel.filter.toDay)
+    end)
+    toBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        local day, valid = ReadDateBox(self)
+        if not valid then panel:RefreshFilterControls(); return end
+        panel:SetDateRange(panel.filter.fromDay, day)
+    end)
+    CreateFilterButton(dateGroup, 290, 0, 34, "All", function() panel:SetDateRange(nil, nil) end, "Clear the date range")
+
+    -- Week
+    local weekGroup = CreateFilterGroup("week", 284)
+    CreateFilterButton(weekGroup, 0, 0, 24, "<", function() panel:StepWeek(-1) end, "Previous week with data")
+    weekLabel = weekGroup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    weekLabel:SetPoint("TOP", weekGroup, "TOPLEFT", 130, -5)
+    CreateFilterButton(weekGroup, 260, 0, 24, ">", function() panel:StepWeek(1) end, "Next week with data")
+
+    -- Time of day
+    local timeGroup = CreateFilterGroup("time", 236)
+    CreateFilterButton(timeGroup, 0, 0, 24, "<", function() panel:StepTime(-1) end, "Previous half-hour")
+    timeBox = CreateFilterBox(timeGroup, 30, 60)
+    timeBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        local bucket = MarketSync.ParseAnalyticsTime(self:GetText())
+        if not bucket then panel:RefreshFilterControls(); return end
+        panel.filter.bucketOffset = bucket
+        panel:ApplyFilter()
+    end)
+    CreateFilterButton(timeGroup, 96, 0, 24, ">", function() panel:StepTime(1) end, "Next half-hour")
+    local timeNote = timeGroup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    timeNote:SetPoint("TOPLEFT", timeGroup, "TOPLEFT", 128, -4)
+    timeNote:SetText("UTC  (type HH:MM)")
 
     local graph = CreateGraph(graphCard)
-    graph:SetPoint("TOPLEFT", 10, -42)
+    graph:SetPoint("TOPLEFT", 10, -70)
     graph:SetPoint("BOTTOMRIGHT", -10, 8)
     panel.graph = graph
+    -- Mouse wheel steps the event count while the Events filter is active.
     graph:EnableMouseWheel(true)
     graph:SetScript("OnMouseWheel", function(_, delta)
-        local currentIndex = 3
-        for i, mode in ipairs(zoomModes) do
-            if mode.limit == panel.graphPointLimit then currentIndex = i; break end
+        if panel.filter.mode ~= "events" then return end
+        local currentIndex = #EVENT_LIMITS
+        for i, limit in ipairs(EVENT_LIMITS) do
+            if limit == (panel.filter.count or false) then currentIndex = i; break end
         end
-        local nextIndex = math.max(1, math.min(#zoomModes, currentIndex - (delta > 0 and 1 or -1)))
-        panel:SetGraphZoom(zoomModes[nextIndex].limit)
+        local nextIndex = math.max(1, math.min(#EVENT_LIMITS, currentIndex - (delta > 0 and 1 or -1)))
+        panel:SetGraphZoom(EVENT_LIMITS[nextIndex])
     end)
-    graph:SetScript("OnSizeChanged", function(self)
-        if panel.currentHistory then self:Plot(panel.currentHistory, panel.graphPointLimit) end
+    graph:SetScript("OnSizeChanged", function()
+        if panel.currentHistory then panel:ApplyFilter() end
     end)
-    panel:SetGraphZoom(panel.graphPointLimit)
+    panel:RefreshFilterControls()
 
     -- Horizontal separator line between graph and metrics
     local sep2 = rightInset:CreateTexture(nil, "ARTWORK")
@@ -1212,8 +1412,8 @@ function MarketSync.CreateAnalyticsPanel(parent)
     panel.mVisibleRange = CreateRightMetricRow(metricsCard, rightMetricsTitle, rowOff4, "Visible Range")
 
     function panel:UpdateVisibleRange()
-        local history = self.currentHistory or {}
-        local count = math.min(#history, self.graphPointLimit or #history)
+        local history = self.currentView or {}
+        local count = #history
         if count == 0 then
             self.mVisibleRange:SetText("|cff888888No history|r")
             return
@@ -1351,8 +1551,7 @@ function MarketSync.CreateAnalyticsPanel(parent)
         -- Retrieve History Data
         local history = MarketSync.GetItemHistory and MarketSync.GetItemHistory(key, { source = self.historySource or "local" }) or {}
         self.currentHistory = history
-        self.graph:Plot(history, self.graphPointLimit)
-        self:UpdateVisibleRange()
+        self:ApplyFilter()
 
         -- Evaluate Data Freshness & Source Distribution
         local latestAge = 0

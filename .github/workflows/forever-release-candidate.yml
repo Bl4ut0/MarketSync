@@ -92,7 +92,7 @@ jobs:
           python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}-Era-test.zip" --interface 11509 --flavor era
           python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}-SoD-test.zip" --interface 11509 --flavor sod
           python tools/package.py --output "dist/MarketSync-${{ steps.metadata.outputs.version }}-TBC-test.zip" --interface 20506 --flavor tbc
-          ledger_version=$(sed -n 's/^## Version: //p' MarketSync/Ledger/MarketSyncLedger.toc)
+          ledger_version=$(sed -n 's/^## Version: //p' MarketSyncLedger/MarketSyncLedger.toc)
           test -n "$ledger_version"
           python tools/package.py --output "dist/MarketSyncLedger-${ledger_version}.zip" --ledger
           cd dist

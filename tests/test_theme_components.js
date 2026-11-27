@@ -281,7 +281,7 @@ for (const theme of ['legacy', 'forever']) {
       end
 
       CheckBottomEdge(AH.ScannerPanel, 2)
-      CheckBottomEdge(AH.ProcessingPanel, 1)
+      CheckBottomEdge(AH.ProcessingPanel, 2)
       CheckBottomEdge(AH.AlertsPanel, 2)
       CheckBottomEdge(AH.AnalyticsPanel, 2)
       AH.AnalyticsPanel.Content:SetSidebarCollapsed(true)

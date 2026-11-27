@@ -1,3 +1,20 @@
+-- Same shared dropdown as Config.lua; defined here too for hosts that load this file alone.
+MarketSync = MarketSync or {}
+if not MarketSync.CreateDropdownButton then function MarketSync.CreateDropdownButton(parent, menuName, width, height, initFunc)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width or 120, height or 22)
+    local menu = CreateFrame("Frame", menuName, parent, "UIDropDownMenuTemplate")
+    menu:Hide()
+    button._menu, button._initFunc = menu, initFunc
+    if initFunc and UIDropDownMenu_Initialize then UIDropDownMenu_Initialize(menu, initFunc) end
+    function button:SetLabel(text) self:SetText(tostring(text or "") .. "  |cFFFFD100v|r") end
+    button:SetScript("OnClick", function(self)
+        if GameTooltip then GameTooltip:Hide() end
+        if ToggleDropDownMenu then ToggleDropDownMenu(1, nil, menu, self, 0, 0) end
+    end)
+    return button
+end end
+
 -- =============================================================
 -- MarketSync - Main Frame
 -- Window shell, tabs, and settings
@@ -6,6 +23,38 @@
 local MainFrame, MainHost, BrowseContent, SyncContent, LatestContent, NeutralContent, ProcessingContent, NotificationsContent, SettingsContent
 local ItemHistoryPanel, AnalyticsPanel, ItemDetailPanel
 local activeBrowseTab = 1
+
+-- ================================================================
+-- HELPER: EnsureFrameOnScreen
+-- Moves a frame back inside the screen when any edge is past the border.
+-- A frame larger than the screen is centered instead.
+-- ================================================================
+function MarketSync.EnsureFrameOnScreen(frame)
+    if not (frame and frame.GetLeft and UIParent and UIParent.GetWidth) then return false end
+    local left, right, top, bottom = frame:GetLeft(), frame:GetRight(), frame:GetTop(), frame:GetBottom()
+    if not (left and right and top and bottom) then return false end
+    -- Frame coordinates are in the frame's own scale; convert the screen size into it.
+    local scale = (frame.GetEffectiveScale and frame:GetEffectiveScale()) or 1
+    local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    local ratio = parentScale / scale
+    local screenW = UIParent:GetWidth() * ratio
+    local screenH = UIParent:GetHeight() * ratio
+    local width, height = right - left, top - bottom
+
+    local dx, dy = 0, 0
+    if width > screenW or height > screenH then
+        frame:ClearAllPoints()
+        frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        return true
+    end
+    if left < 0 then dx = -left elseif right > screenW then dx = screenW - right end
+    if bottom < 0 then dy = -bottom elseif top > screenH then dy = screenH - top end
+    if dx == 0 and dy == 0 then return false end
+
+    frame:ClearAllPoints()
+    frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left + dx, bottom + dy)
+    return true
+end
 
 -- ================================================================
 -- HELPER: CreateModernInset
@@ -134,8 +183,18 @@ local function CreateMainFrame()
     MainFrame:EnableMouse(true)
     MainFrame:RegisterForDrag("LeftButton")
     MainFrame:SetScript("OnDragStart", MainFrame.StartMoving)
-    MainFrame:SetScript("OnDragStop", MainFrame.StopMovingOrSizing)
-    MainFrame:SetFrameStrata("HIGH")
+    MainFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        MarketSync.EnsureFrameOnScreen(self)
+    end)
+    -- Dragging cannot take the window past the screen edge; a position saved
+    -- off screen earlier (or after a resolution/UI scale change) is pulled back
+    -- every time the window opens, including from the minimap button.
+    if MainFrame.SetClampedToScreen then MainFrame:SetClampedToScreen(true) end
+    MainFrame:HookScript("OnShow", function(self) MarketSync.EnsureFrameOnScreen(self) end)
+    -- MEDIUM is the strata of bags and the standard UI panels. HIGH drew this window over
+    -- every open bag; at MEDIUM with Toplevel, whichever of them was clicked last is on top.
+    MainFrame:SetFrameStrata("MEDIUM")
     MainFrame:SetToplevel(true)
     if MarketSync.RegisterEscapeFrame then MarketSync.RegisterEscapeFrame(MainFrame) end
 
@@ -290,6 +349,13 @@ local function CreateMainFrame()
             if not lowRamIdleTicker then
                 lowRamIdleTicker = C_Timer.NewTicker(300, function()
                     if MainFrame:IsShown() then return end
+                    -- The kept Main tab source stays loaded; only the rest is freed.
+                    if MarketSync.LowRamKeptSource and MarketSync.LowRamKeptSource() then
+                        if MarketSync.ReleaseSourceIndexesForLowRam then MarketSync.ReleaseSourceIndexesForLowRam() end
+                        collectgarbage("collect")
+                        if lowRamIdleTicker then lowRamIdleTicker:Cancel(); lowRamIdleTicker = nil end
+                        return
+                    end
                     if MarketSync.InvalidateIndexCache then MarketSync.InvalidateIndexCache() end
                     if MarketSyncDB.ItemInfoCache then wipe(MarketSyncDB.ItemInfoCache) end
                     collectgarbage("collect")
@@ -488,8 +554,11 @@ local function CreateMainFrame()
             MarketSync.HideAllTabContent()
         end
 
-        -- Only auto-preload caches on tab change when Low RAM mode is disabled
-        if MarketSyncDB and not MarketSyncDB.LowRamMode then
+        -- Only auto-preload caches on tab change when Low RAM mode is disabled,
+        -- or for the Main tab when Low RAM keeps its source loaded.
+        if id == 1 and MarketSync.LowRamKeptSource and MarketSync.LowRamKeptSource() then
+            MarketSync.PreloadKeptSource()
+        elseif MarketSyncDB and not MarketSyncDB.LowRamMode then
             if id == 1 then
                 if MarketSync.PreloadMainSource then MarketSync.PreloadMainSource(MainFrame.mainSource) end
             elseif id == 2 and MarketSync.LoadNeutralCache then
@@ -763,21 +832,59 @@ local function CreateMainFrame()
     -- MAIN TAB SOURCE SELECTOR (Personal / Guild)
     -- Sits in the top-right dead space of the Main tab.
     -- ================================================================
-    local sourceButtons = {}
-    local function MakeSourceButton(label, source, offsetX)
-        local btn = CreateFrame("Button", nil, MainHost, "UIPanelButtonTemplate")
-        btn:SetSize(84, 22)
-        btn:SetText(label)
-        btn:SetPoint("TOPRIGHT", MainHost, "TOPRIGHT", offsetX, -30)
-        btn:SetScript("OnClick", function() MarketSync.ApplyMainSource(source, true) end)
-        sourceButtons[source] = btn
-        return btn
+    -- One selector button shows the current source; clicking it opens a small
+    -- menu of the sources. It sits on the Search / Reset / Filter row: in the
+    -- modern layout at the right end of that row, in the legacy layout between
+    -- Filter (ends at x=354) and the pager (starts at x=660).
+    local SOURCE_LABELS = { latest = "Latest", personal = "Personal", guild = "Guild" }
+    local SOURCE_ORDER = { "latest", "personal", "guild" }
+    local isLegacySource = MarketSync.IsLegacyUITheme and MarketSync.IsLegacyUITheme()
+
+    -- The same dropdown as the breakout's list picker: the game's own button and
+    -- menu list, so it follows each client's art and the active theme.
+    local sourceOptions = {}
+    for _, key in ipairs(SOURCE_ORDER) do
+        sourceOptions[key] = { key = key, label = SOURCE_LABELS[key], available = true }
     end
-    MakeSourceButton("Guild", "guild", -18)
-    MakeSourceButton("Personal", "personal", -106)
-    MakeSourceButton("Latest", "latest", -194)
-    MainHost.sourceButtons = sourceButtons
-    MainFrame.sourceButtons = sourceButtons
+    local sourceSelector = MarketSync.CreateDropdownButton(MainHost, "MarketSyncMainSourceMenu", 118, 22,
+        function(_, level)
+            for _, key in ipairs(SOURCE_ORDER) do
+                local option = sourceOptions[key]
+                if option.available then
+                    local info = UIDropDownMenu_CreateInfo()
+                    info.text = option.label
+                    info.checked = (MainFrame.mainSource == key)
+                    info.func = function()
+                        if CloseDropDownMenus then CloseDropDownMenus() end
+                        MarketSync.ApplyMainSource(key, true)
+                    end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end
+        end)
+    if isLegacySource then
+        sourceSelector:SetPoint("TOPLEFT", MainHost, "TOPLEFT", 370, -50)
+    else
+        sourceSelector:SetPoint("TOPRIGHT", MainHost, "TOPRIGHT", -18, -45)
+    end
+    sourceSelector:SetScript("OnEnter", function(self)
+        -- The game's usual tooltip position: a tooltip under the button would
+        -- cover the menu that opens there.
+        if GameTooltip_SetDefaultAnchor then
+            GameTooltip_SetDefaultAnchor(GameTooltip, self)
+        else
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        end
+        GameTooltip:SetText("Data source", 1, 0.82, 0)
+        GameTooltip:AddLine("Latest: newest price per item from your scans and guild sync.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("Personal: only your own scans.  Guild: only guild sync.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    sourceSelector:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    MainHost.sourceOptions = sourceOptions
+    MainFrame.sourceOptions = sourceOptions
+    MainHost.sourceSelector = sourceSelector
+    MainFrame.sourceSelector = sourceSelector
 
     -- Shows the chosen source (personal or guild) on the Main tab. The guild
     -- source is unavailable while PassiveSync is off, so it falls back to personal.
@@ -799,14 +906,14 @@ local function CreateMainFrame()
         ShowIf(BrowseContent, source == "personal")
         ShowIf(SyncContent, source == "guild")
         ShowIf(LatestContent, source == "latest")
-        ShowIf(sourceButtons.guild, not (MarketSyncDB and MarketSyncDB.PassiveSync == false))
-        for key, btn in pairs(sourceButtons) do
-            if btn.LockHighlight and btn.UnlockHighlight then
-                if key == source then btn:LockHighlight() else btn:UnlockHighlight() end
-            end
-        end
+        sourceOptions.guild.available = not (MarketSyncDB and MarketSyncDB.PassiveSync == false)
+        sourceSelector:SetLabel(SOURCE_LABELS[source] or source)
         if userChosen and MarketSyncDB and not MarketSyncDB.LowRamMode then
             MarketSync.PreloadMainSource(source)
+        elseif userChosen and MarketSync.LowRamKeptSource and MarketSync.LowRamKeptSource() then
+            -- The kept source follows the Main tab: load the new one, free the old.
+            if MarketSync.ReleaseSourceIndexesForLowRam then MarketSync.ReleaseSourceIndexesForLowRam() end
+            MarketSync.PreloadKeptSource()
         end
     end
     -- Loads the caches that a source reads: latest needs both Personal and Guild.
@@ -818,7 +925,8 @@ local function CreateMainFrame()
             MarketSync.LoadGuildCache()
         end
     end
-    MarketSync.ApplyMainSource(MarketSyncDB and MarketSyncDB.MainSource or "latest")
+    -- Every session starts on Latest; a source picked in the selector lasts for the session.
+    MarketSync.ApplyMainSource("latest")
 
     -- Global function to show item history from any browse panel (redirected to unified modern Analytics)
     function MarketSync.ShowItemHistory(dbKey, itemLink, name, icon, price, sourceTab)
@@ -920,6 +1028,16 @@ local function CreateMainFrame()
         if UpdateMemorySettingsVisibility then UpdateMemorySettingsVisibility() end
     end)
 
+    local chkKeepMain = CreateCheckbox(boxMemory, chkLowRam, "BOTTOMLEFT",
+        "Keep Main tab source loaded", "In Low RAM mode, keep the source shown on the Main tab (Latest, Personal or Guild) loaded so it opens instantly. Everything else still loads on demand.")
+    chkKeepMain:SetScript("OnClick", function(self)
+        MarketSyncDB.LowRamKeepMain = self:GetChecked() and true or false
+        if MarketSyncDB.LowRamKeepMain and MarketSync.PreloadKeptSource then MarketSync.PreloadKeptSource() end
+    end)
+    chkKeepMain:SetScript("OnShow", function(self)
+        if MarketSyncDB then self:SetChecked(MarketSyncDB.LowRamKeepMain == true) end
+    end)
+
     chkCache = CreateCheckbox(boxMemory, chkLowRam, "BOTTOMLEFT",
         "Pre-Build on Startup", "Pre-load and index item data shortly after login (disabled by default in Low RAM mode).")
     chkCache:SetScript("OnClick", function(self)
@@ -939,11 +1057,13 @@ local function CreateMainFrame()
         local isLowRam = MarketSyncDB and (MarketSyncDB.LowRamMode ~= false)
         if isLowRam then
             if chkCache then chkCache:Hide() end
+            chkKeepMain:Show()
             if speedHeader then
                 speedHeader:ClearAllPoints()
-                speedHeader:SetPoint("TOPLEFT", chkLowRam, "BOTTOMLEFT", 4, -12)
+                speedHeader:SetPoint("TOPLEFT", chkKeepMain, "BOTTOMLEFT", 4, -10)
             end
         else
+            chkKeepMain:Hide()
             if chkCache then chkCache:Show() end
             if speedHeader then
                 speedHeader:ClearAllPoints()
@@ -1007,29 +1127,23 @@ local function CreateMainFrame()
     local themeHeader = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     themeHeader:SetPoint("TOPLEFT", boxMemory, "TOPLEFT", 12, -220)
     themeHeader:SetText("Window Theme")
-    local themeDropdown = CreateFrame("Frame", nil, boxMemory, "UIDropDownMenuTemplate")
-    themeDropdown:SetPoint("TOPLEFT", themeHeader, "BOTTOMLEFT", -15, -4)
-    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(themeDropdown, 130) end
-    if UIDropDownMenu_Initialize then
-        UIDropDownMenu_Initialize(themeDropdown, function()
-            for _, theme in ipairs({{"auto", "Auto (game version)"}, {"forever", "Forever"}, {"legacy", "Legacy"}}) do
-                local info = UIDropDownMenu_CreateInfo()
-                info.text, info.value = theme[2], theme[1]
-                info.checked = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() == theme[1]
-                info.func = function()
-                    if CloseDropDownMenus then CloseDropDownMenus() end
-                    if MarketSync.SetUITheme then MarketSync.SetUITheme(theme[1]) end
-                end
-                UIDropDownMenu_AddButton(info)
+    local themeDropdown = MarketSync.CreateDropdownButton(boxMemory, "MarketSyncMainThemeMenu", 150, 22, function(_, level)
+        for _, theme in ipairs({{"auto", "Auto (game version)"}, {"forever", "Forever"}, {"legacy", "Legacy"}}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text, info.value = theme[2], theme[1]
+            info.checked = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() == theme[1]
+            info.func = function()
+                if CloseDropDownMenus then CloseDropDownMenus() end
+                if MarketSync.SetUITheme then MarketSync.SetUITheme(theme[1]) end
             end
-        end)
-    end
-    themeDropdown:SetScript("OnShow", function(self)
-        if UIDropDownMenu_SetText then
-            local preference = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() or "auto"
-            UIDropDownMenu_SetText(self, preference == "auto" and "Auto (" .. (MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever") .. ")"
-                or (preference == "legacy" and "Legacy" or "Forever"))
+            UIDropDownMenu_AddButton(info, level)
         end
+    end)
+    themeDropdown:SetPoint("TOPLEFT", themeHeader, "BOTTOMLEFT", 0, -4)
+    themeDropdown:SetScript("OnShow", function(self)
+        local preference = MarketSync.GetUIThemePreference and MarketSync.GetUIThemePreference() or "auto"
+        self:SetLabel(preference == "auto" and "Auto (" .. (MarketSync.GetUITheme() == "legacy" and "Legacy" or "Forever") .. ")"
+            or (preference == "legacy" and "Legacy" or "Forever"))
     end)
 
     local ramText = boxMemory:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -1179,46 +1293,35 @@ local function CreateMainFrame()
     soundHeader:SetText("Notification Sound")
     soundHeader:SetTextColor(1, 0.82, 0)
 
-    local soundDropdown = CreateFrame("Frame", "MarketSyncMainSoundDropdown", boxAudio, "UIDropDownMenuTemplate")
-    soundDropdown:SetPoint("TOPLEFT", soundHeader, "BOTTOMLEFT", -15, -4)
-    UIDropDownMenu_SetWidth(soundDropdown, 110)
-
     local function PlaySelectedSound()
         local soundID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
         if MarketSync.PlayNotificationSound then MarketSync.PlayNotificationSound(soundID, true) end
     end
 
-    local function OnSoundSelect(self)
-        MarketSyncDB.NotificationSoundID = self.arg1
-        UIDropDownMenu_SetText(soundDropdown, self.value)
-        CloseDropDownMenus()
-    end
-
-    UIDropDownMenu_Initialize(soundDropdown, function()
-        local info = UIDropDownMenu_CreateInfo()
+    local soundDropdown
+    soundDropdown = MarketSync.CreateDropdownButton(boxAudio, "MarketSyncMainSoundDropdown", 130, 22, function(_, level)
         for _, s in ipairs(MarketSync.StandardSounds or {}) do
+            local info = UIDropDownMenu_CreateInfo()
             info.text = s.name
-            info.value = s.name
-            info.arg1 = s.id
-            info.func = OnSoundSelect
             info.checked = (MarketSyncDB.NotificationSoundID == s.id)
-            UIDropDownMenu_AddButton(info)
+            info.func = function()
+                MarketSyncDB.NotificationSoundID = s.id
+                soundDropdown:SetLabel(s.name)
+                if CloseDropDownMenus then CloseDropDownMenus() end
+            end
+            UIDropDownMenu_AddButton(info, level)
         end
     end)
+    soundDropdown:SetPoint("TOPLEFT", soundHeader, "BOTTOMLEFT", 0, -4)
 
     soundDropdown:SetScript("OnShow", function(self)
         local currentID = MarketSyncDB and MarketSyncDB.NotificationSoundID or 8959
-        for _, s in ipairs(MarketSync.StandardSounds or {}) do
-            if s.id == currentID then
-                UIDropDownMenu_SetText(self, s.name)
-                break
-            end
-        end
+        self:SetLabel(MarketSync.GetNotificationSoundName and MarketSync.GetNotificationSoundName(currentID) or "Raid Warning")
     end)
 
     local btnPlaySound = CreateFrame("Button", nil, boxAudio, "UIPanelButtonTemplate")
     btnPlaySound:SetSize(22, 22)
-    btnPlaySound:SetPoint("LEFT", soundDropdown, "RIGHT", -5, 2)
+    btnPlaySound:SetPoint("LEFT", soundDropdown, "RIGHT", 4, 0)
     btnPlaySound:SetText(">")
     btnPlaySound:SetScript("OnClick", PlaySelectedSound)
     AttachTooltip(btnPlaySound, "Preview selected sound.")
@@ -1856,6 +1959,20 @@ local function CreateMainFrame()
                 idxStatus.neutralReady,
                 idxStatus.neutralBuilding
             )
+            -- Low RAM frees Personal and Guild once Latest is built; say so
+            -- instead of showing them as never built.
+            local freed = "|cffa89e8cFreed (Low RAM, rows kept in Latest)|r"
+            if idxStatus.personalReleased then personalCache = freed end
+            if idxStatus.guildReleased then guildCache = freed end
+            if not idxStatus.neutralReady and not idxStatus.neutralBuilding and idxStatus.lowRam then
+                neutralCache = "|cffa89e8cNot loaded (Low RAM, loads when opened)|r"
+            end
+        end
+        local latestCache = "|cff888888-|r"
+        if idxStatus and idxStatus.latestReady then
+            latestCache = "|cff00ff00" .. tostring(idxStatus.latestCount or 0) .. " items|r"
+        elseif idxStatus and idxStatus.personalBuilding then
+            latestCache = "|cffff8800building...|r"
         end
 
         -- Right column: all stats consolidated
@@ -1870,12 +1987,17 @@ local function CreateMainFrame()
             "|cff00ccffNeutral:|r " .. neutralItems .. "  |cff00ff00Partners:|r " .. uniqueSyncers .. "\n" ..
             "|cff00ff00Personal cache:|r " .. personalCache .. "\n" ..
             "|cff00ff00Guild cache:|r " .. guildCache .. "\n" ..
-            "|cff00ccffNeutral cache:|r " .. neutralCache ..
+            "|cff00ccffNeutral cache:|r " .. neutralCache .. "\n" ..
+            "|cff00ff00Latest cache:|r " .. latestCache ..
             syncActiveStr
         )
         if SettingsContent.ramText and MarketSync.GetEstimatedRAMUsage then
-            local estMB, totalStored = MarketSync.GetEstimatedRAMUsage()
-            SettingsContent.ramText:SetText(string.format("|cff888888Est. Index RAM:|r |cffffffff~%.1f MB|r\n|cff888888(%d stored items)|r", estMB, totalStored))
+            local estMB, totalStored, _, _, _, loadedRows = MarketSync.GetEstimatedRAMUsage()
+            local mem = MarketSync.GetMemoryBreakdown and MarketSync.GetMemoryBreakdown()
+            local measured = (mem and mem.total > 0)
+                and string.format("\n|cff888888Measured:|r |cffffffff%.1f MB|r |cff888888(packs %.1f)|r", mem.total / 1024, mem.packTotal / 1024) or ""
+            SettingsContent.ramText:SetText(string.format("|cff888888Index RAM:|r |cffffffff~%.1f MB|r\n|cff888888(%d of %d items loaded)|r%s",
+                estMB, loadedRows or 0, totalStored, measured))
         end
     end
     -- The legacy in-window controls are retained only for their existing helper

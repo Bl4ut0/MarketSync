@@ -5,7 +5,7 @@
 ## Version: 0.9.8-rc1
 ## SavedVariables: MarketSyncDB
 ## OptionalDeps: Auctionator, MarketSyncData
-## AllowLoadGameType: camelot, classic, tbc
+## AllowLoadGameType: camelot, mainline, classic, tbc, wrath, cata, mists
 ## X-Forever-Target: 1.60.1 (70205)
 
 # Libs
@@ -61,6 +61,7 @@ UI_ItemDetail.lua
 # Native Auction House Embedded Panel, Scanner & Sidecar UI
 UI_AHScanner.lua
 UI_LegacySearch.lua
+UI_LegacyMultiScan.lua
 UI_AHSidecar.lua
 AuctionHouse.lua
 LegacyAuctionHouse.lua

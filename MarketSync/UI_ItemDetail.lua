@@ -1,7 +1,25 @@
+-- Same shared dropdown as Config.lua; defined here too for hosts that load this file alone.
+MarketSync = MarketSync or {}
+if not MarketSync.CreateDropdownButton then function MarketSync.CreateDropdownButton(parent, menuName, width, height, initFunc)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width or 120, height or 22)
+    local menu = CreateFrame("Frame", menuName, parent, "UIDropDownMenuTemplate")
+    menu:Hide()
+    button._menu, button._initFunc = menu, initFunc
+    if initFunc and UIDropDownMenu_Initialize then UIDropDownMenu_Initialize(menu, initFunc) end
+    function button:SetLabel(text) self:SetText(tostring(text or "") .. "  |cFFFFD100v|r") end
+    button:SetScript("OnClick", function(self)
+        if GameTooltip then GameTooltip:Hide() end
+        if ToggleDropDownMenu then ToggleDropDownMenu(1, nil, menu, self, 0, 0) end
+    end)
+    return button
+end end
+
 -- =============================================================
 -- MarketSync - Item Detail Dashboard
 -- Centralized view for Price History, Notifications, and Processing
 -- =============================================================
+
 
 local ItemDetailPanel
 local LEFT_MARGIN = 25
@@ -255,40 +273,25 @@ function MarketSync.CreateItemDetailPanel(parent)
     panel.urgentCheck = urgentCheck
 
     CreateLabel(alertsBox, 15, -65, "Sound Override")
-    local soundDropdown = CreateFrame("Frame", "MarketSyncItemDetailSoundDD", alertsBox, "UIDropDownMenuTemplate")
-    soundDropdown:SetPoint("TOPLEFT", 0, -80)
-    UIDropDownMenu_SetWidth(soundDropdown, 140)
-
-    local function OnSoundSelect(self)
-        panel.currentPerSound = self.arg1
-        UIDropDownMenu_SetText(soundDropdown, self.value)
-    end
-
-    UIDropDownMenu_Initialize(soundDropdown, function()
+    local soundDropdown
+    local function AddSoundChoice(level, text, label, id)
         local info = UIDropDownMenu_CreateInfo()
-        info.text = "Default (Global)"
-        info.value = "Default"
-        info.arg1 = nil
-        info.func = OnSoundSelect
-        info.checked = (panel.currentPerSound == nil)
-        UIDropDownMenu_AddButton(info)
-
-        info.text = "|cff888888Mute Item|r"
-        info.value = "Mute"
-        info.arg1 = 0
-        info.func = OnSoundSelect
-        info.checked = (panel.currentPerSound == 0)
-        UIDropDownMenu_AddButton(info)
-
+        info.text = text
+        info.checked = (panel.currentPerSound == id)
+        info.func = function()
+            panel.currentPerSound = id
+            soundDropdown:SetLabel(label)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+    soundDropdown = MarketSync.CreateDropdownButton(alertsBox, "MarketSyncItemDetailSoundDD", 160, 22, function(_, level)
+        AddSoundChoice(level, "Default (Global)", "Default (Global)", nil)
+        AddSoundChoice(level, "|cff888888Mute Item|r", "Mute Item", 0)
         for _, s in ipairs(MarketSync.StandardSounds or {}) do
-            info.text = s.name
-            info.value = s.name
-            info.arg1 = s.id
-            info.func = OnSoundSelect
-            info.checked = (panel.currentPerSound == s.id)
-            UIDropDownMenu_AddButton(info)
+            if s.id ~= 0 then AddSoundChoice(level, s.name, s.name, s.id) end
         end
     end)
+    soundDropdown:SetPoint("TOPLEFT", 15, -82)
 
     local btnSave = CreateFrame("Button", nil, alertsBox, "UIPanelButtonTemplate")
     btnSave:SetSize(80, 22); btnSave:SetPoint("BOTTOMRIGHT", -15, 15); btnSave:SetText("Save Alert")
@@ -431,11 +434,10 @@ function MarketSync.CreateItemDetailPanel(parent)
         local soundText = "Default (Global)"
         if self.currentPerSound == 0 then soundText = "Mute Item" end
         if self.currentPerSound and self.currentPerSound > 0 then
-            for _, s in ipairs(MarketSync.StandardSounds or {}) do
-                if s.id == self.currentPerSound then soundText = s.name; break end
-            end
+            soundText = MarketSync.GetNotificationSoundName and MarketSync.GetNotificationSoundName(self.currentPerSound)
+                or tostring(self.currentPerSound)
         end
-        UIDropDownMenu_SetText(soundDropdown, soundText)
+        soundDropdown:SetLabel(soundText)
 
         -- Prices
         local curPrice = 0

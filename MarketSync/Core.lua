@@ -339,12 +339,18 @@ local function PopulateAddonSettings(panel)
     local chkStartup
 
     local chkLowRam = CreateOptCheckbox(cardMemory, 16, -58, "Enable Low RAM Mode (Default: ON)",
-        "Wipes search index caches and runs Lua garbage collection when browse windows are closed. Automatically loads caches on demand.",
+        "Builds search data only when a page needs it, and frees a source after 5 minutes unused and off screen. Saved scan data is not affected.",
         "LowRamMode", true, function(val)
             if not val and MarketSync.BuildSearchIndex then
                 MarketSync.BuildSearchIndex()
             end
             if UpdateMemoryCardLayout then UpdateMemoryCardLayout() end
+        end)
+
+    local chkKeepMain = CreateOptCheckbox(cardMemory, 16, -88, "Keep Main Tab Source Loaded",
+        "In Low RAM mode, keep the source shown on the Main tab (Latest, Personal or Guild) loaded so it opens instantly. For Latest, Personal and Guild are built once, merged, then freed; new scans and syncs are added to Latest as they arrive. Everything else still loads on demand.",
+        "LowRamKeepMain", false, function(val)
+            if val and MarketSync.PreloadKeptSource then MarketSync.PreloadKeptSource() end
         end)
 
     chkStartup = CreateOptCheckbox(cardMemory, 16, -88, "Pre-Build Search Index on Startup",
@@ -404,9 +410,15 @@ local function PopulateAddonSettings(panel)
 
     local function RefreshRAM()
         if MarketSync.GetEstimatedRAMUsage then
-            local estMB, totalItems, pCount, gCount, nCount = MarketSync.GetEstimatedRAMUsage()
-            ramText:SetText(string.format("|cff888888Index Footprint:|r |cffffffff~%.1f MB|r |cff888888(%d items: %d personal, %d guild, %d neutral)|r",
-                estMB, totalItems, pCount, gCount, nCount))
+            local estMB, totalItems, pCount, gCount, nCount, loadedRows = MarketSync.GetEstimatedRAMUsage()
+            local text = string.format("|cff888888Search indexes in memory:|r |cffffffff~%.1f MB|r |cff888888(%d of %d stored items: %d personal, %d guild, %d neutral)|r",
+                estMB, loadedRows or 0, totalItems, pCount, gCount, nCount)
+            local mem = MarketSync.GetMemoryBreakdown and MarketSync.GetMemoryBreakdown()
+            if mem and mem.total > 0 then
+                text = text .. string.format("\n|cff888888Measured:|r |cffffffff%.1f MB|r |cff888888(MarketSync %.1f, data loader %.1f, data packs %.1f, ledger %.1f)|r",
+                    mem.total / 1024, mem.marketSync / 1024, mem.dataLoader / 1024, mem.packTotal / 1024, mem.ledger / 1024)
+            end
+            ramText:SetText(text)
         end
     end
     table.insert(refreshControls, RefreshRAM)
@@ -415,10 +427,12 @@ local function PopulateAddonSettings(panel)
         local isLowRam = MarketSyncDB and (MarketSyncDB.LowRamMode ~= false)
         if isLowRam then
             if chkStartup then chkStartup:Hide() end
+            chkKeepMain:Show()
             speedHeader:ClearAllPoints()
-            speedHeader:SetPoint("TOPLEFT", 16, -92)
-            cardMemory:SetHeight(190)
+            speedHeader:SetPoint("TOPLEFT", 16, -122)
+            cardMemory:SetHeight(220)
         else
+            chkKeepMain:Hide()
             if chkStartup then chkStartup:Show() end
             speedHeader:ClearAllPoints()
             speedHeader:SetPoint("TOPLEFT", 16, -122)
@@ -1413,10 +1427,23 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_ENTERING_WORLD" then
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 
-        -- STAGE 1.5: Ensure MarketSyncData pack is ingested on both initial login and /reload
+        -- Older MarketSyncData loaders copy the pack into GuildData two seconds
+        -- after login. Turn that copy off before it runs.
+        if type(_G.MarketSyncData) == "table" then
+            _G.MarketSyncData.InjectIntoMarketSync = function() return true, 0, 0 end
+        end
+        -- STAGE 1.5: Data Pack rows stay in the MarketSyncData add-on and load on
+        -- demand (tooltips fall back to them when nothing was scanned). Remove
+        -- rows older loaders copied into GuildData, so sync never shares them.
         C_Timer.After(2, function()
-            if type(_G.MarketSyncData) == "table" and type(_G.MarketSyncData.InjectIntoMarketSync) == "function" then
-                pcall(_G.MarketSyncData.InjectIntoMarketSync)
+            if MarketSync.PurgeDataPackRowsFromGuildData then
+                local removed = MarketSync.PurgeDataPackRowsFromGuildData()
+                if removed > 0 and MarketSync.LogCacheEvent then
+                    MarketSync.LogCacheEvent(string.format("|cffffff00[Data Pack]|r Removed %d pack rows from synced guild data.", removed))
+                end
+            end
+            if MarketSync.EnsureCurrentDataPack then
+                MarketSync.EnsureCurrentDataPack()
             end
         end)
 
@@ -1442,7 +1469,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         -- STAGE 3: Search index cache (90s) - only if user opted in
         C_Timer.After(90, function()
-            if MarketSyncDB and MarketSyncDB.BuildCacheOnStartup then
+            -- Low RAM with "keep Main tab source loaded": build just that source.
+            if MarketSync.LowRamKeptSource and MarketSync.LowRamKeptSource() then
+                if MarketSync.PreloadKeptSource then MarketSync.PreloadKeptSource() end
+            elseif MarketSyncDB and MarketSyncDB.BuildCacheOnStartup then
                 if MarketSyncDB.DebugMode then
                     print("|cFF00FF00[MarketSync]|r Stage 3: Building search index (90s)")
                 end
@@ -1482,6 +1512,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         SafeRegisterEvent(self, "TRADE_SKILL_DATA_SOURCE_CHANGED")
         SafeRegisterEvent(self, "TRADE_SKILL_LIST_UPDATE")
         SafeRegisterEvent(self, "TRADE_SKILL_UPDATE")
+        -- Classic Era / TBC Enchanting uses the older Craft window.
+        if type(GetCraftInfo) == "function" then
+            SafeRegisterEvent(self, "CRAFT_SHOW")
+            SafeRegisterEvent(self, "CRAFT_UPDATE")
+        end
         if MarketSync.RefreshKnownProfessionCache then
             MarketSync.RefreshKnownProfessionCache()
         end
@@ -1632,6 +1667,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         or event == "TRADE_SKILL_DATA_SOURCE_CHANGED"
         or event == "TRADE_SKILL_LIST_UPDATE"
         or event == "TRADE_SKILL_UPDATE"
+        or event == "CRAFT_SHOW"
+        or event == "CRAFT_UPDATE"
         or event == "SKILL_LINES_CHANGED" then
         if MarketSync.RefreshKnownProfessionCache then
             MarketSync.RefreshKnownProfessionCache()
@@ -1640,7 +1677,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             return
         end
         if MarketSync.RefreshKnownCraftingRecipes then
-            MarketSync.RefreshKnownCraftingRecipes()
+            local source = (event == "CRAFT_SHOW" or event == "CRAFT_UPDATE") and "craft" or "trade"
+            MarketSync.RefreshKnownCraftingRecipes(source)
         end
 
     -- ================================================================
@@ -1748,8 +1786,10 @@ SlashCmdList["MarketSync"] = function(msg)
         end
     elseif (cmd == "ledger" or cmd == "items") and MarketSync.RunLedgerCommand then
         MarketSync.RunLedgerCommand()
-    elseif cmd == "sidecar" or cmd == "drawer" or cmd == "breakout" then
-        if MarketSync.ToggleAHSidecar then
+    elseif cmd == "sidecar" or cmd == "drawer" or cmd == "breakout" or cmd == "lists" then
+        if MarketSync.ToggleSidecarAnywhere then
+            MarketSync.ToggleSidecarAnywhere()
+        elseif MarketSync.ToggleAHSidecar then
             MarketSync.ToggleAHSidecar()
         elseif MarketSync.AHSidecar and MarketSync.AHSidecar.Toggle then
             MarketSync.AHSidecar.Toggle()
@@ -1828,6 +1868,11 @@ SlashCmdList["MarketSync"] = function(msg)
         elseif InterfaceOptionsFrame_OpenToCategory then
             InterfaceOptionsFrame_OpenToCategory(panel.name)
         end
+    elseif cmd == "tooltip" then
+        if MarketSync.PrintTooltipDiagnostics then MarketSync.PrintTooltipDiagnostics() end
+    elseif cmd == "debug" then
+        MarketSyncDB.DebugMode = not MarketSyncDB.DebugMode
+        print("|cFF00FF00[MarketSync]|r Debug diagnostics " .. (MarketSyncDB.DebugMode and "|cff40ff40on|r: debug messages print to chat." or "|cffff4040off|r."))
     elseif cmd == "block" then
         if #arg > 0 then MarketSync.ToggleBlock(arg, "block") else print("|cFF00FF00[MarketSync]|r Usage: /ms block [playername]") end
     elseif cmd == "unblock" then
@@ -1844,6 +1889,8 @@ SlashCmdList["MarketSync"] = function(msg)
         print("  /ms export [list] - Export a shopping list to a !MS1! string.")
         print("  /ms theme [legacy|forever|auto] - Switch UI theme.")
         print("  /ms config (or /ms stats) - Open settings panel.")
+        print("  /ms tooltip - Check the price tooltip (hover an item first).")
+        print("  /ms debug - Turn debug messages in chat on or off.")
         print("  /ms block [name] - Block a sender.")
         print("  /ms unblock [name] - Unblock a sender.")
         print("  /msdata - Review MarketSync data.")
@@ -1867,7 +1914,9 @@ end
 SLASH_MarketSyncSidecar1 = "/sidecar"
 SLASH_MarketSyncSidecar2 = "/mssidecar"
 SlashCmdList["MarketSyncSidecar"] = function()
-    if MarketSync.ToggleAHSidecar then
+    if MarketSync.ToggleSidecarAnywhere then
+        MarketSync.ToggleSidecarAnywhere()
+    elseif MarketSync.ToggleAHSidecar then
         MarketSync.ToggleAHSidecar()
     elseif MarketSync.AHSidecar and MarketSync.AHSidecar.Toggle then
         MarketSync.AHSidecar.Toggle()
