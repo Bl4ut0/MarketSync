@@ -690,6 +690,20 @@ local function BuildSearchIndex(callback)
         if callback then callback() end
         return
     end
+    -- Low RAM leaves sources deferred on purpose. When nothing is requested and
+    -- nothing else needs building, do not start a new build pass.
+    if not PersonalIndexBuilding then
+        local function Needed(ready, source, forced)
+            return (not ready) and (forced or not MarketSync.IsLowRamDeferred(source))
+        end
+        local needed = Needed(PersonalIndexReady, "personal", MarketSync.ForcePersonal)
+            or Needed(GuildIndexReady, "guild", MarketSync.ForceGuild)
+            or Needed(NeutralIndexReady, "neutral", MarketSync.ForceNeutral)
+        if not needed then
+            if callback then callback() end
+            return
+        end
+    end
     if callback then table.insert(IndexCallbacks, callback) end
     if PersonalIndexBuilding then return end
     PersonalIndexBuilding = true
@@ -850,26 +864,41 @@ local function BuildSearchIndex(callback)
             end
         end
         MarkLatestStale()
+        -- A source requested while this pass was already running was passed by
+        -- the pass. Run one more pass for it and keep the callbacks waiting, so
+        -- they only fire once the requested source is actually ready.
+        local pendingForce = (MarketSync.ForcePersonal and not PersonalIndexReady)
+            or (MarketSync.ForceGuild and not GuildIndexReady)
+            or (MarketSync.ForceNeutral and not NeutralIndexReady)
+        if pendingForce then
+            C_Timer.After(0, function() BuildSearchIndex() end)
+            return
+        end
         for _, cb in ipairs(IndexCallbacks) do cb() end
         wipe(IndexCallbacks)
     end)
 
     -- Build ticker runs fast (0.01s) so items resolve quickly during first pass.
     -- CPU load per tick is controlled by preset.yieldEvery, not ticker speed.
-    activeBuildTicker = C_Timer.NewTicker(0.01, function()
+    -- Cancel the previous pass's ticker first. Each ticker must cancel itself
+    -- (not whichever ticker is current), or a finished pass can stop the next one.
+    if activeBuildTicker then activeBuildTicker:Cancel() end
+    local ticker
+    ticker = C_Timer.NewTicker(0.01, function()
         if not MarketSync.CanBuildCache() then return end
-        if coroutine.status(co) == "dead" then 
-            if activeBuildTicker then activeBuildTicker:Cancel() end
-            activeBuildTicker = nil
-            return 
+        if coroutine.status(co) == "dead" then
+            ticker:Cancel()
+            if activeBuildTicker == ticker then activeBuildTicker = nil end
+            return
         end
         local ok, err = coroutine.resume(co)
-        if not ok then 
+        if not ok then
             print("|cffff0000[MarketSync] Index error:|r", err)
-            if activeBuildTicker then activeBuildTicker:Cancel() end
-            activeBuildTicker = nil 
+            ticker:Cancel()
+            if activeBuildTicker == ticker then activeBuildTicker = nil end
         end
     end)
+    activeBuildTicker = ticker
 
     -- ================================================================
     -- BACKGROUND RETRY: Resolve pending items from both caches
@@ -2554,7 +2583,12 @@ function MarketSync.CreateBrowsePanel(parent, dataSourceName)
                     notice.stats:SetText(string.format("|cffffd100%s|r items stored   |cff888888-|r   about |cffffd100%.1f MB|r saved",
                         Thousands(totalStored), estMB))
                 end
-                if PersonalIndexBuilding then
+                -- Show "loading" only when this tab's own source was requested and a build is running.
+                -- A build for another source must not make this tab look loaded or loading.
+                local requested = (self.dataSource == "neutral" and MarketSync.ForceNeutral)
+                    or (self.dataSource == "guild" and MarketSync.ForceGuild)
+                    or (self.dataSource == "personal" and MarketSync.ForcePersonal)
+                if PersonalIndexBuilding and requested then
                     if notice.title then notice.title:SetText("Loading scan data...") end
                     notice.text:SetText("Building this tab's search list. Results appear when it is ready.")
                     if notice.btnLoad then

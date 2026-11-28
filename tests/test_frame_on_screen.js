@@ -9,7 +9,8 @@ const candidateDeps = [
 const deps = candidateDeps.find(p => fs.existsSync(p)) || candidateDeps[0];
 const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require(path.join(deps, 'fengari'));
 
-const source = fs.readFileSync(path.join(__dirname, '../MarketSync/UI_Main.lua'), 'utf8');
+// Windows checkouts use CRLF; the section boundaries below match LF only.
+const source = fs.readFileSync(path.join(__dirname, '../MarketSync/UI_Main.lua'), 'utf8').replace(/\r\n/g, '\n');
 const fnStart = source.indexOf('function MarketSync.EnsureFrameOnScreen');
 if (fnStart < 0) throw new Error('EnsureFrameOnScreen not found in UI_Main.lua');
 const fnEnd = source.indexOf('\nend\n', fnStart) + '\nend\n'.length;

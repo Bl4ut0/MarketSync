@@ -9,7 +9,8 @@ const candidateDeps = [
 const deps = candidateDeps.find(p => fs.existsSync(p)) || candidateDeps[0];
 const { lua, lauxlib, lualib, to_luastring, to_jsstring } = require(path.join(deps, 'fengari'));
 
-const source = fs.readFileSync(path.join(__dirname, '../MarketSync/Processing.lua'), 'utf8');
+// Windows checkouts use CRLF; the section boundaries below match LF only.
+const source = fs.readFileSync(path.join(__dirname, '../MarketSync/Processing.lua'), 'utf8').replace(/\r\n/g, '\n');
 const start = source.indexOf('local ANALYTICS_DAYS_BEFORE_MONTH');
 const fnStart = source.indexOf('function MarketSync.FilterAnalyticsHistory');
 if (start < 0 || fnStart < 0) throw new Error('Analytics filter section not found in Processing.lua');

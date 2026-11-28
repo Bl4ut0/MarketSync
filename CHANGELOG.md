@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8-rc2] - 2026-11-27
+
+### Changed
+- Processing page: Workbench layout with Target Material, Process Scan and Craft Profit tabs, a settings and details rail, and saved views.
+- Alerts page: Watchlist and History tabs with a single price box (accepts `4g 50s`, `450s`, `4.5`), quick price buttons, sound per alert, and history details.
+- Profession scanner: reads the Classic Craft window (Enchanting), expands collapsed categories, keeps saved recipes across filtered scans, and adds a Professions window showing what is scanned per character.
+- One dropdown style across the addon, using the game's own button and menu.
+- Forever disenchant estimates are labelled approximate.
+- Data Pack prices are no longer copied into synced guild data. Tooltips read the pack only when nothing was scanned.
+- Low RAM: freed indexes release their memory, Processing reads the kept Latest index, and the Debugging page shows Latest and measured memory per add-on part.
+- Alert sounds use real sound kit IDs. Older choices move to the nearest working sound.
+
+### Fixed
+- The Neutral tab no longer shows "Loading scan data" while only another source is building.
+- A source requested during a running index build is built afterwards instead of being skipped.
+- Each index build cancels only its own timer, so a finished build no longer stops the next one.
+- Idle index passes are skipped in Low RAM when nothing is needed.
+
 ## [0.9.8-rc1] - 2026-11-25
 
 ### Fixed
